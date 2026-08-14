@@ -35,6 +35,7 @@ Settings* Settings::mp_instance = Q_NULLPTR;
 Settings::Settings()
  : m_localUser( ID_LOCAL_USER )
 {
+  m_firstTime = true;
   m_settingsVersion = BEEBEEP_SETTINGS_VERSION;
   m_currentFilePath = "";
 
@@ -90,8 +91,9 @@ Settings::Settings()
   m_ipMulticastTtl = DEFAULT_IPV4_MULTICAST_TTL_OPTION;
   m_useIPv6 = false;
   m_useHive = false;
-  m_checkNewVersionAtStartup = true;
-  m_postUsageStatistics = true;
+  m_checkNewVersionAtStartup = false;
+  m_lastVersionCheckAt = QDateTime();
+  m_postUsageStatistics = false;
   m_useHostnameForDefaultUsername = false;
   m_useEasyConnection = false;
   m_useClassroomConfiguration = false;
@@ -113,12 +115,12 @@ Settings::Settings()
   m_disableSendMessage = false;
 #endif
 #ifdef BEEBEEP_USE_SHAREDESKTOP
-  m_disableDesktopSharing = false;
+  m_disableDesktopSharing = true;
 #else
   m_disableDesktopSharing = true;
 #endif
 #ifdef BEEBEEP_USE_VOICE_CHAT
-  m_disableVoiceMessages = false;
+  m_disableVoiceMessages = true;
 #else
   m_disableVoiceMessages = true;
 #endif
@@ -208,7 +210,7 @@ Settings::Settings()
   m_previewFileDialogImageSize = 200;
   m_maxUsersToConnectInATick = 25;
   m_showTextInModeRTL = false;
-  m_showChatsInOneWindow = false;
+  m_showChatsInOneWindow = true;
   m_maxLogLines = 5000;
   m_enableDefaultChatNotifications = true;
   m_enableVisualNotificationsInChatWindow = true;
@@ -227,7 +229,7 @@ Settings::Settings()
 
   m_maxChatsToOpenAfterSendingMessage = 6;
   m_showUsersOnConnection = false;
-  m_showChatsOnConnection = false;
+  m_showChatsOnConnection = true;
   m_hideEmptyChatsInList = true;
 
   m_chatActiveWindowOpacityLevel = 100;
@@ -864,7 +866,7 @@ QHostAddress Settings::defaultMulticastGroupAddress() const
 
 QString Settings::programName() const
 {
-  return QString( BEEBEEP_NAME );
+  return QString::fromUtf8( "影聊" );
 }
 
 QString Settings::organizationName() const
@@ -879,17 +881,17 @@ QString Settings::organizationDomain() const
 
 QString Settings::officialWebSite() const
 {
-  return QString( BEEBEEP_WEBSITE );
+  return QStringLiteral( "https://shadowyli.github.io/" );
 }
 
 QString Settings::pluginWebSite() const
 {
-  return officialWebSite() + QString( BEEBEEP_DOWNLOAD_WEBSITE ) + "#plugin";
+  return downloadWebSite();
 }
 
 QString Settings::downloadWebSite() const
 {
-  return officialWebSite() + QString( BEEBEEP_DOWNLOAD_WEBSITE );
+  return officialWebSite() + QStringLiteral( "shadow-chat/" );
 }
 
 QString Settings::donationWebSite() const
@@ -899,12 +901,7 @@ QString Settings::donationWebSite() const
 
 QString Settings::helpWebSite() const
 {
-  QString web_url = officialWebSite() + QString( BEEBEEP_HELP_WEBSITE );
-  if( m_language == "it" )
-    web_url += QString( "?lang=it_IT" );
-  else
-    web_url += QString( "?lang=en_US" );
-  return web_url;
+  return downloadWebSite();
 }
 
 QString Settings::languageWebSite() const
@@ -914,7 +911,7 @@ QString Settings::languageWebSite() const
 
 QString Settings::lastVersionUrl() const
 {
-  return officialWebSite() + QString( BEEBEEP_LAST_VERSION_FILE );
+  return downloadWebSite() + QStringLiteral( "version.ini" );
 }
 
 QString Settings::newsWebSite() const
@@ -1018,13 +1015,12 @@ QString Settings::operatingSystemIconPath() const
 
 QString Settings::checkVersionWebSite() const
 {
-  QString os_type = operatingSystem( false ).toLower();
-  return officialWebSite() + QString( "%1?beebeep-version=%2&beebeep-os=%3" ).arg( QString( BEEBEEP_CHECK_VERSION_WEBSITE ) ).arg( QString( BEEBEEP_VERSION ) ).arg( os_type );
+  return downloadWebSite();
 }
 
 QString Settings::languageFilePath( const QString& language_folder, const QString& language_selected ) const
 {
-  return Bee::convertToNativeFolderSeparator( QString( "%1/%2_%3.qm" ).arg( language_folder, Settings::instance().programName().toLower(), language_selected ) );
+  return Bee::convertToNativeFolderSeparator( QString( "%1/beebeep_%2.qm" ).arg( language_folder, language_selected ) );
 }
 
 QString Settings::dnsRecord() const
@@ -1222,6 +1218,7 @@ void Settings::load()
 {
   qDebug() << "Loading settings";
   QSettings *sets = objectSettings();
+  m_firstTime = m_useSettingsFileIni ? !QFileInfo( sets->fileName() ).exists() : sets->allKeys().isEmpty();
 #ifdef Q_OS_WIN
   if( m_useSettingsFileIni )
     m_currentFilePath = Bee::convertToNativeFolderSeparator( sets->fileName() );
@@ -1243,6 +1240,13 @@ void Settings::load()
 
   bool qt_is_compatible = qt_version_in_settings == qtMajorMinorVersion();
   loadCommonSettings( sets );
+#ifdef SHADOWCHAT_SAFE_BUILD
+  // Never inherit telemetry or remote-control-adjacent features from an old
+  // BeeBEEP profile imported into the official ShadowChat build.
+  m_postUsageStatistics = false;
+  m_disableDesktopSharing = true;
+  m_disableVoiceMessages = true;
+#endif
 
   sets->beginGroup( "VCard" );
   VCard vc;
@@ -1448,7 +1452,7 @@ void Settings::loadCommonSettings( QSettings* user_ini )
   else
   {
     m_useDefaultPassword = user_ini->value( "UseDefaultPassword", true ).toBool();
-    m_askChangeUserAtStartup = user_ini->value( "AskChangeUserAtStartup", false ).toBool();
+    m_askChangeUserAtStartup = user_ini->value( "AskChangeUserAtStartup", m_firstTime ).toBool();
     m_askPasswordAtStartup = user_ini->value( "AskPasswordAtStartup", false ).toBool();
   }
 
@@ -1484,6 +1488,8 @@ void Settings::loadCommonSettings( QSettings* user_ini )
   m_language = commonValue( system_rc, user_ini, "Language", QLocale::system().name() ).toString();
   if( m_language.size() > 2 )
     m_language.resize( 2 );
+  if( m_language == QLatin1String( "zh" ) )
+    m_language = QLatin1String( "cn" );
   m_keyEscapeMinimizeInTray = commonValue( system_rc, user_ini, "KeyEscapeMinimizeInTray", true ).toBool();
 #ifdef Q_OS_MAC
   m_closeMinimizeInTray = false;
@@ -1580,6 +1586,7 @@ void Settings::loadCommonSettings( QSettings* user_ini )
   m_useSpellChecker = commonValue( system_rc, user_ini, "UseSpellChecker", true ).toBool();
   m_useWordCompleter = commonValue( system_rc, user_ini, "UseWordCompleter", false ).toBool();
   m_checkNewVersionAtStartup = commonValue( system_rc, user_ini, "SearchForNewVersionAtStartup", m_checkNewVersionAtStartup ).toBool();
+  m_lastVersionCheckAt = user_ini->value( "LastVersionCheckAt", QDateTime() ).toDateTime();
   m_postUsageStatistics = commonValue( system_rc, user_ini, "SendAnonymousUsageStatistics", m_postUsageStatistics ).toBool();
   m_dictionaryPath = checkFilePath( user_ini->value( "DictionaryPath", "" ).toString(), "" );
   m_applicationUuid = user_ini->value( "Uuid", "" ).toString();
@@ -1967,6 +1974,7 @@ void Settings::save()
   sets->setValue( "UseWordCompleter", m_useWordCompleter );
   sets->setValue( "DictionaryPath", m_dictionaryPath );
   sets->setValue( "SearchForNewVersionAtStartup", m_checkNewVersionAtStartup );
+  sets->setValue( "LastVersionCheckAt", m_lastVersionCheckAt );
   sets->setValue( "SendAnonymousUsageStatistics", m_postUsageStatistics );
   sets->setValue( "Uuid", m_applicationUuid );
   sets->setValue( "UuidCreationDate", m_applicationUuidCreationDate );

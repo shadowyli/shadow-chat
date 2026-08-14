@@ -185,6 +185,14 @@ void Core::parseFileMessage( const User& u, const Message& m )
     return;
   }
 
+  if( !Bee::isSafeRelativePath( fi.name(), false ) || !Bee::isSafeRelativePath( fi.shareFolder(), true ) )
+  {
+    qWarning() << "Rejected file transfer path from user" << qPrintable( u.path() )
+               << "with name" << qPrintable( fi.name() ) << "and share folder" << qPrintable( fi.shareFolder() );
+    refuseToDownloadFile( u.id(), fi );
+    return;
+  }
+
   if( fi.isInShareBox() )
   {
     if( !Settings::instance().useShareBox() || Settings::instance().disableFileSharing() )
@@ -221,6 +229,12 @@ void Core::parseFileMessage( const User& u, const Message& m )
                                                                        .arg( fi.name() ) );
 
     QFileInfo file_info( to_path );
+    if( !Bee::isPathInside( Settings::instance().shareBoxPath(), to_path ) )
+    {
+      qWarning() << "Rejected ShareBox download outside configured folder:" << qPrintable( to_path );
+      refuseToDownloadFile( u.id(), fi );
+      return;
+    }
     if( file_info.exists() && file_info.isDir() && Settings::instance().onExistingFileAction() == Settings::GenerateNewFileName )
       to_path = Bee::uniqueFilePath( to_path, false );
 
@@ -232,6 +246,12 @@ void Core::parseFileMessage( const User& u, const Message& m )
   else if( fi.isVoiceMessage() )
   {
     QString file_path = Bee::uniqueFilePath( QString( "%1/%2" ).arg( Settings::instance().cacheFolder(), fi.name() ), false );
+    if( !Bee::isPathInside( Settings::instance().cacheFolder(), file_path ) )
+    {
+      qWarning() << "Rejected voice message path outside cache folder:" << qPrintable( file_path );
+      refuseToDownloadFile( u.id(), fi );
+      return;
+    }
     fi.setPath( file_path );
     mp_fileTransfer->downloadFile( u.id(), fi );
   }
@@ -583,6 +603,14 @@ void Core::parseHiveMessage( const User& u, const Message& m )
 void Core::parseShareBoxMessage( const User& u, const Message& m )
 {
   QString folder_name = Protocol::instance().folderNameFromShareBoxMessage( m );
+
+  if( !Bee::isSafeRelativePath( folder_name, true ) )
+  {
+    qWarning() << "Rejected unsafe ShareBox folder from user" << qPrintable( u.path() ) << ":" << qPrintable( folder_name );
+    if( !m.hasFlag( Message::Refused ) )
+      sendMessageToLocalNetwork( u, Protocol::instance().refuseToShareBoxPath( folder_name, m.hasFlag( Message::Create ) ) );
+    return;
+  }
 
 #ifdef BEEBEEP_DEBUG
   if( !Settings::instance().enableFileTransfer() )

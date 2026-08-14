@@ -33,6 +33,8 @@ class ChatMessage;
 #include "GuiVoicePlayer.h"
 #endif
 class Emoticon;
+class QLabel;
+class QToolButton;
 
 
 class GuiChat : public QWidget, private Ui::GuiChatWidget
@@ -43,6 +45,7 @@ public:
   GuiChat( QWidget* parent = Q_NULLPTR );
 
   void setupToolBar( QToolBar* chat_bar );
+  void setModernMode( bool );
   void updateActions( const Chat&, bool is_connected, int connected_users, bool file_transfer_is_active );
 
   bool setChat( const Chat& );
@@ -52,6 +55,9 @@ public:
   void updateActionsOnFocusChanged();
   void setChatFont( const QFont& );
   bool appendChatMessage( const Chat&, const ChatMessage& );
+#ifdef BEEBEEP_UX_PREVIEW
+  void showUxPreviewConversation( const QStringList& );
+#endif
 
   inline QSplitter* chatSplitter() const;
   void editChatMembers();
@@ -107,6 +113,7 @@ protected:
   bool messageCanBeShowed( const ChatMessage& );
   bool historyCanBeShowed();
   void dragEnterEvent( QDragEnterEvent* );
+  void dragLeaveEvent( QDragLeaveEvent* );
   void dropEvent( QDropEvent* );
   void updateSpellCheckerToolTip();
   void updateCompleterToolTip();
@@ -157,6 +164,9 @@ protected:
   void findTextInChat( const QString&, bool search_forward = true );
   void updateChat();
   void setChatStylesheet( QTextDocument* );
+  QString modernChatMessageToText( const ChatMessage& );
+  QString modernImageAlbumHtml( const QStringList&, bool from_local_user ) const;
+  QString modernMessageId( const ChatMessage& ) const;
   void updateFilterMessagesButton();
 
 private:
@@ -187,6 +197,10 @@ private:
   QAction* mp_actFilterMessages;
 
   QSplitter* mp_splitter;
+  QToolButton* mp_modernAttachButton;
+  QLabel* mp_modernComposerHint;
+  bool m_modernMode;
+  QSet<QString> m_expandedMessageIds;
 
   QPalette m_defaultChatPalette;
 

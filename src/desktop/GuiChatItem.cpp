@@ -27,6 +27,7 @@
 #include "IconManager.h"
 #include "MessageManager.h"
 #include "Settings.h"
+#include "ShadowStyle.h"
 #include "UserManager.h"
 
 
@@ -75,7 +76,7 @@ bool GuiChatItem::operator<( const QTreeWidgetItem& item ) const
 
 QString GuiChatItem::defaultChatName()
 {
-  return QObject::tr( "All users" );
+  return QStringLiteral( "全员群" );
 }
 
 bool GuiChatItem::updateItem( const Chat& c )
@@ -91,7 +92,7 @@ bool GuiChatItem::updateItem( const Chat& c )
     chat_name = defaultChatName();
     tool_tip = QObject::tr( "Open chat with all users" );
     setData( 0, ChatName, " " );
-    m_defaultIcon = IconManager::instance().icon( "default-chat-online.png" );
+    m_defaultIcon = ShadowStyle::actionIcon( QStringLiteral( "users-three" ) );
   }
   else
   {
@@ -131,7 +132,7 @@ bool GuiChatItem::updateItem( const Chat& c )
     chat_name.prepend( QString( "(%1) " ).arg( c.unreadMessages() ) );
 
   chat_name += " ";
-  setText( 0, c.isDefault() ? chat_name.toUpper() : chat_name );
+  setText( 0, chat_name );
   setToolTip( 0, tool_tip );
   setData( 0, ChatUnreadMessages, c.unreadMessages() );
   setData( 0, ChatMessages, c.messages().size() + ChatManager::instance().savedChatSize( c.name() ) );
@@ -158,7 +159,7 @@ void GuiChatItem::onTickEvent( int ticks )
   if( unreadMessages() > 0 )
   {
     if( ticks % 2 == 0 )
-      setIcon( 0, IconManager::instance().icon( "beebeep-message.png" ) );
+      setIcon( 0, ShadowStyle::actionIcon( QStringLiteral( "chats-circle" ) ) );
     else
       setIcon( 0, m_defaultIcon );
   }

@@ -41,6 +41,7 @@
 #include "GuiFloatingChat.h"
 #include "GuiGroupList.h"
 #include "GuiHome.h"
+#include "GuiImageBatchPreview.h"
 #include "GuiLanguage.h"
 #include "GuiLog.h"
 #include "GuiNetworkTest.h"
@@ -76,7 +77,12 @@
 #include "Settings.h"
 #include "ShortcutManager.h"
 #include "SpellChecker.h"
+#include "ShadowStyle.h"
+#include "ShadowWorkspaceArchive.h"
 #include "UserManager.h"
+#ifdef Q_OS_WIN
+  #include <qt_windows.h>
+#endif
 #ifdef BEEBEEP_USE_VOICE_CHAT
   #include "VoicePlayer.h"
   #include "GuiRecordVoiceMessageSettings.h"
@@ -90,7 +96,7 @@ GuiMain::GuiMain( QWidget *parent )
  : QMainWindow( parent ), m_floatingChats()
 {
   setObjectName( "GuiMainWindow" );
-  setWindowIcon( IconManager::instance().icon( "beebeep.png" ) );
+  setWindowIcon( QIcon( QStringLiteral( ":/images/shadowchat/shadowchat-mark-source.png" ) ) );
 
   // Create a status bar before the actions and the menu
   (void) statusBar();
@@ -104,6 +110,45 @@ GuiMain::GuiMain( QWidget *parent )
   mp_screenShot = Q_NULLPTR;
   mp_log = Q_NULLPTR;
   mp_networkTest = Q_NULLPTR;
+  mp_modernRoot = Q_NULLPTR;
+  mp_modernTitleBar = Q_NULLPTR;
+  mp_modernNavigationRail = Q_NULLPTR;
+  mp_modernListPanel = Q_NULLPTR;
+  mp_modernConversationPanel = Q_NULLPTR;
+  mp_modernDirectoryTabs = Q_NULLPTR;
+  mp_modernChatPlaceholder = Q_NULLPTR;
+  mp_modernChatPage = Q_NULLPTR;
+  mp_modernChatBody = Q_NULLPTR;
+  mp_modernListStack = Q_NULLPTR;
+  mp_modernConversationStack = Q_NULLPTR;
+  mp_modernContentSplitter = Q_NULLPTR;
+  mp_modernSearch = Q_NULLPTR;
+  mp_modernSearchResults = Q_NULLPTR;
+  mp_modernNetworkStrip = Q_NULLPTR;
+  mp_modernNetworkDot = Q_NULLPTR;
+  mp_modernNetworkText = Q_NULLPTR;
+  mp_modernNetworkAction = Q_NULLPTR;
+  mp_modernEmptyState = Q_NULLPTR;
+  mp_modernEmptyTitle = Q_NULLPTR;
+  mp_modernEmptyHint = Q_NULLPTR;
+  mp_modernEmptyAction = Q_NULLPTR;
+  mp_modernSectionTitle = Q_NULLPTR;
+  mp_modernSectionHint = Q_NULLPTR;
+  mp_modernChatTitle = Q_NULLPTR;
+  mp_modernChatSubtitle = Q_NULLPTR;
+  mp_modernMessagesButton = Q_NULLPTR;
+  mp_modernContactsButton = Q_NULLPTR;
+  mp_modernPeopleButton = Q_NULLPTR;
+  mp_modernGroupsButton = Q_NULLPTR;
+  mp_modernProfileButton = Q_NULLPTR;
+  mp_modernMoreButton = Q_NULLPTR;
+  mp_modernBackButton = Q_NULLPTR;
+  mp_modernMinimizeButton = Q_NULLPTR;
+  mp_modernMaximizeButton = Q_NULLPTR;
+  mp_modernCloseButton = Q_NULLPTR;
+  mp_modernChatBodyLayout = Q_NULLPTR;
+  mp_embeddedChat = Q_NULLPTR;
+  m_modernPrimaryPage = 0;
   m_unreadActivities = 0;
 
   mp_barMain = addToolBar( tr( "Show the main tool bar" ) );
@@ -126,6 +171,7 @@ GuiMain::GuiMain( QWidget *parent )
   createMainWidgets();
   createMenus();
   createToolAndMenuBars();
+  createModernShell();
   updadePluginMenu();
 
   connect( mp_tabMain, SIGNAL( currentChanged( int ) ), this, SLOT( onMainTabChanged( int ) ) );
@@ -251,8 +297,8 @@ void GuiMain::checkWindowFlagsAndShow()
 #endif
   }
 
-  if( mp_tabMain->currentWidget() != mp_home )
-    mp_tabMain->setCurrentWidget( mp_home );
+  if( mp_tabMain->currentWidget() != mp_chatList )
+    mp_tabMain->setCurrentWidget( mp_chatList );
 
   if( !Settings::instance().enableMaximizeButton() )
     setWindowFlags( windowFlags() & ~Qt::WindowMaximizeButtonHint );
@@ -337,8 +383,45 @@ void GuiMain::updateTabTitles()
 
 void GuiMain::keyPressEvent( QKeyEvent* e )
 {
+  if( e->modifiers().testFlag( Qt::ControlModifier ) && e->key() == Qt::Key_K )
+  {
+    if( mp_modernSearch )
+    {
+      mp_modernSearch->setFocus();
+      mp_modernSearch->selectAll();
+    }
+    e->accept();
+    return;
+  }
+
+  if( e->modifiers().testFlag( Qt::ControlModifier ) && e->key() == Qt::Key_1 )
+  {
+    showModernMessages();
+    e->accept();
+    return;
+  }
+
+  if( e->modifiers().testFlag( Qt::ControlModifier ) && e->key() == Qt::Key_2 )
+  {
+    showModernContacts();
+    e->accept();
+    return;
+  }
+
   if( e->key() == Qt::Key_Escape )
   {
+    if( mp_modernSearch && !mp_modernSearch->text().isEmpty() )
+    {
+      mp_modernSearch->clear();
+      e->accept();
+      return;
+    }
+    if( width() < 900 && mp_modernConversationPanel && mp_modernConversationPanel->isVisible() )
+    {
+      showModernListPanel();
+      e->accept();
+      return;
+    }
     if( Settings::instance().keyEscapeMinimizeInTray() )
       QTimer::singleShot( 0, this, SLOT( hideToTrayIcon() ) );
     else
@@ -350,9 +433,62 @@ void GuiMain::keyPressEvent( QKeyEvent* e )
   QMainWindow::keyPressEvent( e );
 }
 
+void GuiMain::resizeEvent( QResizeEvent* e )
+{
+  QMainWindow::resizeEvent( e );
+  updateModernResponsiveLayout();
+}
+
 void GuiMain::changeEvent( QEvent* e )
 {
   QMainWindow::changeEvent( e );
+  if( e->type() == QEvent::WindowStateChange && mp_modernMaximizeButton )
+  {
+    mp_modernMaximizeButton->setIcon( style()->standardIcon( isMaximized()
+      ? QStyle::SP_TitleBarNormalButton : QStyle::SP_TitleBarMaxButton ) );
+    mp_modernMaximizeButton->setToolTip( isMaximized() ? QStringLiteral( "还原" ) : QStringLiteral( "最大化" ) );
+  }
+}
+
+bool GuiMain::nativeEvent( const QByteArray& event_type, void* message, long* result )
+{
+  Q_UNUSED( event_type );
+#ifdef Q_OS_WIN
+  MSG* native_message = static_cast<MSG*>( message );
+  if( native_message && native_message->message == WM_NCHITTEST && mp_modernTitleBar )
+  {
+    const QPoint local_position = mapFromGlobal( QCursor::pos() );
+    const int resize_border = 7;
+    if( !isMaximized() )
+    {
+      const bool on_left = local_position.x() < resize_border;
+      const bool on_right = local_position.x() >= width() - resize_border;
+      const bool on_top = local_position.y() < resize_border;
+      const bool on_bottom = local_position.y() >= height() - resize_border;
+      if( on_top && on_left ) { *result = HTTOPLEFT; return true; }
+      if( on_top && on_right ) { *result = HTTOPRIGHT; return true; }
+      if( on_bottom && on_left ) { *result = HTBOTTOMLEFT; return true; }
+      if( on_bottom && on_right ) { *result = HTBOTTOMRIGHT; return true; }
+      if( on_left ) { *result = HTLEFT; return true; }
+      if( on_right ) { *result = HTRIGHT; return true; }
+      if( on_top ) { *result = HTTOP; return true; }
+      if( on_bottom ) { *result = HTBOTTOM; return true; }
+    }
+
+    const QPoint title_position = mp_modernTitleBar->mapFrom( this, local_position );
+    if( mp_modernTitleBar->rect().contains( title_position ) )
+    {
+      QWidget* title_child = mp_modernTitleBar->childAt( title_position );
+      if( title_child != mp_modernMinimizeButton && title_child != mp_modernMaximizeButton &&
+          title_child != mp_modernCloseButton )
+      {
+        *result = HTCAPTION;
+        return true;
+      }
+    }
+  }
+#endif
+  return QMainWindow::nativeEvent( event_type, message, result );
 }
 
 void GuiMain::closeEvent( QCloseEvent* e )
@@ -536,6 +672,8 @@ void GuiMain::onCoreConnected()
 {
   m_coreIsConnecting = false;
   initGuiItems();
+  updateModernNetworkState();
+  updateModernListState();
 #ifdef BEEBEEP_USE_WEBENGINE
   QTimer::singleShot( 0, mp_webView, SLOT( loadNews() ) );
 #endif
@@ -546,6 +684,8 @@ void GuiMain::onCoreDisconnected()
   if( m_coreIsConnecting )
     m_coreIsConnecting = false;
   initGuiItems();
+  updateModernNetworkState();
+  updateModernListState();
 }
 
 void GuiMain::startCore()
@@ -556,6 +696,8 @@ void GuiMain::startCore()
   mp_home->resetNews();
   m_coreIsConnecting = true;
   m_userSelectOffline = false;
+  updateModernNetworkState();
+  updateModernListState();
 
   if( Settings::instance().askChangeUserAtStartup() )
   {
@@ -599,6 +741,8 @@ void GuiMain::startCore()
   else
   {
     m_coreIsConnecting = false;
+    updateModernNetworkState();
+    updateModernListState();
     QMetaObject::invokeMethod( beeCore, "checkNetworkInterface", Qt::QueuedConnection );
   }
 }
@@ -704,6 +848,71 @@ void GuiMain::initGuiItems()
   updateStatusIcon();
   updateNewMessageAction();
   checkViewActions();
+
+#ifdef BEEBEEP_UX_PREVIEW
+  QTimer::singleShot( 900, this, [this]() {
+    QDir().mkpath( QStringLiteral( "E:/ShadowChat/beebeep-code-r1557/.ux-review" ) );
+    grab().save( QStringLiteral( "E:/ShadowChat/beebeep-code-r1557/.ux-review/01-modern-shell.png" ) );
+  } );
+  QTimer::singleShot( 1200, this, [this]() {
+    showChat( ID_DEFAULT_CHAT );
+  } );
+  QTimer::singleShot( 1900, this, [this]() {
+#ifdef BEEBEEP_UX_PREVIEW
+    if( mp_embeddedChat && mp_embeddedChat->guiChat() )
+    {
+      QStringList preview_images;
+      preview_images << QStringLiteral( "E:/ShadowChat/beebeep-code-r1557/src/images/shadowchat/shadowchat-mark-source.png" )
+                     << QStringLiteral( "E:/ShadowChat/beebeep-code-r1557/src/images/shadowchat/shadowchat-mark-source.png" );
+      mp_embeddedChat->guiChat()->showUxPreviewConversation( preview_images );
+    }
+#endif
+    grab().save( QStringLiteral( "E:/ShadowChat/beebeep-code-r1557/.ux-review/04-chat-shell.png" ) );
+  } );
+  QTimer::singleShot( 2200, this, [this]() {
+    showNormal();
+    resize( 760, 620 );
+  } );
+  QTimer::singleShot( 2800, this, [this]() {
+    grab().save( QStringLiteral( "E:/ShadowChat/beebeep-code-r1557/.ux-review/05-compact-chat.png" ) );
+  } );
+  QTimer::singleShot( 3200, this, [this]() {
+    QStringList preview_images;
+    preview_images << QStringLiteral( "E:/ShadowChat/beebeep-code-r1557/src/images/shadowchat/shadowchat-mark-source.png" )
+                   << QStringLiteral( "E:/ShadowChat/beebeep-code-r1557/src/images/shadowchat/shadowchat-mark-source.png" )
+                   << QStringLiteral( "E:/ShadowChat/beebeep-code-r1557/src/images/shadowchat/shadowchat-mark-source.png" )
+                   << QStringLiteral( "E:/ShadowChat/beebeep-code-r1557/src/images/shadowchat/shadowchat-mark-source.png" );
+    GuiImageBatchPreview* preview = new GuiImageBatchPreview( preview_images, this );
+    preview->setAttribute( Qt::WA_DeleteOnClose );
+    preview->show();
+    QTimer::singleShot( 650, preview, [preview]() {
+      preview->grab().save( QStringLiteral( "E:/ShadowChat/beebeep-code-r1557/.ux-review/06-image-batch-preview.png" ) );
+      preview->close();
+    } );
+  } );
+  QTimer::singleShot( 4300, this, [this]() {
+    GuiWizard* wizard = new GuiWizard( this );
+    wizard->setAttribute( Qt::WA_DeleteOnClose );
+    wizard->loadSettings();
+    wizard->show();
+    wizard->raise();
+    QTimer::singleShot( 650, wizard, [wizard]() {
+      wizard->grab().save( QStringLiteral( "E:/ShadowChat/beebeep-code-r1557/.ux-review/07-onboarding.png" ) );
+      wizard->close();
+    } );
+  } );
+  QTimer::singleShot( 5500, this, [this]() {
+    QTimer::singleShot( 650, this, []() {
+      QDialog* settings_dialog = qobject_cast<QDialog*>( QApplication::activeModalWidget() );
+      if( settings_dialog )
+      {
+        settings_dialog->grab().save( QStringLiteral( "E:/ShadowChat/beebeep-code-r1557/.ux-review/08-settings.png" ) );
+        settings_dialog->reject();
+      }
+    } );
+    showShadowSettings();
+  } );
+#endif
 }
 
 void GuiMain::checkViewActions()
@@ -1571,6 +1780,907 @@ void GuiMain::createToolAndMenuBars()
   mp_barMain->addAction( mp_actViewFileSharing );
 }
 
+void GuiMain::createModernShell()
+{
+  QWidget* legacy_central_widget = takeCentralWidget();
+
+  setWindowFlag( Qt::FramelessWindowHint, true );
+
+  mp_modernRoot = new QWidget( this );
+  mp_modernRoot->setObjectName( "ShadowRoot" );
+  QVBoxLayout* root_layout = new QVBoxLayout( mp_modernRoot );
+  root_layout->setContentsMargins( 0, 0, 0, 0 );
+  root_layout->setSpacing( 0 );
+
+  mp_modernTitleBar = new QWidget( mp_modernRoot );
+  mp_modernTitleBar->setObjectName( "ShadowTitleBar" );
+  mp_modernTitleBar->setFixedHeight( 38 );
+  QHBoxLayout* title_layout = new QHBoxLayout( mp_modernTitleBar );
+  title_layout->setContentsMargins( 12, 0, 0, 0 );
+  title_layout->setSpacing( 8 );
+  QLabel* title_icon = new QLabel( mp_modernTitleBar );
+  title_icon->setPixmap( QPixmap( QStringLiteral( ":/images/shadowchat/shadowchat-mark-source.png" ) )
+                         .scaled( 22, 22, Qt::KeepAspectRatio, Qt::SmoothTransformation ) );
+  QLabel* title_text = new QLabel( QStringLiteral( "影聊" ), mp_modernTitleBar );
+  title_text->setObjectName( "ShadowWindowTitle" );
+  title_layout->addWidget( title_icon );
+  title_layout->addWidget( title_text );
+  title_layout->addStretch( 1 );
+
+  mp_modernMinimizeButton = new QToolButton( mp_modernTitleBar );
+  mp_modernMinimizeButton->setObjectName( "ShadowWindowButton" );
+  mp_modernMinimizeButton->setIcon( style()->standardIcon( QStyle::SP_TitleBarMinButton ) );
+  mp_modernMinimizeButton->setToolTip( QStringLiteral( "最小化" ) );
+  mp_modernMinimizeButton->setAccessibleName( QStringLiteral( "最小化窗口" ) );
+  mp_modernMinimizeButton->setFocusPolicy( Qt::NoFocus );
+  connect( mp_modernMinimizeButton, SIGNAL( clicked() ), this, SLOT( showMinimized() ) );
+  title_layout->addWidget( mp_modernMinimizeButton );
+
+  mp_modernMaximizeButton = new QToolButton( mp_modernTitleBar );
+  mp_modernMaximizeButton->setObjectName( "ShadowWindowButton" );
+  mp_modernMaximizeButton->setIcon( style()->standardIcon( QStyle::SP_TitleBarMaxButton ) );
+  mp_modernMaximizeButton->setToolTip( QStringLiteral( "最大化" ) );
+  mp_modernMaximizeButton->setAccessibleName( QStringLiteral( "最大化或还原窗口" ) );
+  mp_modernMaximizeButton->setFocusPolicy( Qt::NoFocus );
+  connect( mp_modernMaximizeButton, &QToolButton::clicked, this, [this]() {
+    isMaximized() ? showNormal() : showMaximized();
+  } );
+  title_layout->addWidget( mp_modernMaximizeButton );
+
+  mp_modernCloseButton = new QToolButton( mp_modernTitleBar );
+  mp_modernCloseButton->setObjectName( "ShadowCloseButton" );
+  mp_modernCloseButton->setIcon( style()->standardIcon( QStyle::SP_TitleBarCloseButton ) );
+  mp_modernCloseButton->setToolTip( QStringLiteral( "关闭" ) );
+  mp_modernCloseButton->setAccessibleName( QStringLiteral( "关闭窗口" ) );
+  mp_modernCloseButton->setFocusPolicy( Qt::NoFocus );
+  connect( mp_modernCloseButton, SIGNAL( clicked() ), this, SLOT( close() ) );
+  title_layout->addWidget( mp_modernCloseButton );
+  root_layout->addWidget( mp_modernTitleBar );
+
+  QWidget* shell_content = new QWidget( mp_modernRoot );
+  shell_content->setObjectName( "ShadowShellContent" );
+  QHBoxLayout* content_layout = new QHBoxLayout( shell_content );
+  content_layout->setContentsMargins( 0, 0, 0, 0 );
+  content_layout->setSpacing( 0 );
+
+  mp_modernNavigationRail = new QWidget( mp_modernRoot );
+  mp_modernNavigationRail->setObjectName( "ShadowNavRail" );
+  mp_modernNavigationRail->setFixedWidth( 80 );
+  QVBoxLayout* navigation_layout = new QVBoxLayout( mp_modernNavigationRail );
+  navigation_layout->setContentsMargins( 9, 16, 9, 12 );
+  navigation_layout->setSpacing( 8 );
+
+  QLabel* brand_mark = new QLabel( mp_modernNavigationRail );
+  brand_mark->setObjectName( "ShadowBrandMark" );
+  brand_mark->setAlignment( Qt::AlignCenter );
+  brand_mark->setPixmap( QPixmap( QStringLiteral( ":/images/shadowchat/shadowchat-mark-source.png" ) )
+                         .scaled( 42, 42, Qt::KeepAspectRatio, Qt::SmoothTransformation ) );
+  QLabel* brand_name = new QLabel( QStringLiteral( "影聊" ), mp_modernNavigationRail );
+  brand_name->setObjectName( "ShadowBrandName" );
+  brand_name->setAlignment( Qt::AlignCenter );
+  navigation_layout->addWidget( brand_mark );
+  navigation_layout->addWidget( brand_name );
+  navigation_layout->addSpacing( 12 );
+
+  mp_modernMessagesButton = new QToolButton( mp_modernNavigationRail );
+  mp_modernMessagesButton->setObjectName( "ShadowNavButton" );
+  mp_modernMessagesButton->setText( QStringLiteral( "消息" ) );
+  mp_modernMessagesButton->setIcon( ShadowStyle::navigationIcon( QStringLiteral( "chats-circle" ) ) );
+  mp_modernMessagesButton->setIconSize( QSize( 24, 24 ) );
+  mp_modernMessagesButton->setToolButtonStyle( Qt::ToolButtonTextUnderIcon );
+  mp_modernMessagesButton->setCheckable( true );
+  mp_modernMessagesButton->setAccessibleName( QStringLiteral( "消息" ) );
+  mp_modernMessagesButton->setToolTip( QStringLiteral( "消息 (Ctrl+1)" ) );
+  connect( mp_modernMessagesButton, SIGNAL( clicked() ), this, SLOT( showModernMessages() ) );
+  navigation_layout->addWidget( mp_modernMessagesButton );
+
+  mp_modernContactsButton = new QToolButton( mp_modernNavigationRail );
+  mp_modernContactsButton->setObjectName( "ShadowNavButton" );
+  mp_modernContactsButton->setText( QStringLiteral( "通讯录" ) );
+  mp_modernContactsButton->setIcon( ShadowStyle::navigationIcon( QStringLiteral( "users-three" ) ) );
+  mp_modernContactsButton->setIconSize( QSize( 24, 24 ) );
+  mp_modernContactsButton->setToolButtonStyle( Qt::ToolButtonTextUnderIcon );
+  mp_modernContactsButton->setCheckable( true );
+  mp_modernContactsButton->setAccessibleName( QStringLiteral( "通讯录" ) );
+  mp_modernContactsButton->setToolTip( QStringLiteral( "通讯录 (Ctrl+2)" ) );
+  connect( mp_modernContactsButton, SIGNAL( clicked() ), this, SLOT( showModernContacts() ) );
+  navigation_layout->addWidget( mp_modernContactsButton );
+  navigation_layout->addStretch( 1 );
+
+  mp_modernMoreButton = new QToolButton( mp_modernNavigationRail );
+  mp_modernMoreButton->setObjectName( "ShadowNavButton" );
+  mp_modernMoreButton->setText( QStringLiteral( "更多" ) );
+  mp_modernMoreButton->setIcon( ShadowStyle::navigationIcon( QStringLiteral( "dots-three-circle" ) ) );
+  mp_modernMoreButton->setIconSize( QSize( 22, 22 ) );
+  mp_modernMoreButton->setToolButtonStyle( Qt::ToolButtonTextUnderIcon );
+  mp_modernMoreButton->setPopupMode( QToolButton::InstantPopup );
+  mp_modernMoreButton->setAccessibleName( QStringLiteral( "更多工具" ) );
+  QMenu* more_menu = new QMenu( mp_modernMoreButton );
+  more_menu->setTitle( QStringLiteral( "更多工具" ) );
+  more_menu->addAction( ShadowStyle::actionIcon( QStringLiteral( "gear-six" ) ), QStringLiteral( "设置" ), this, SLOT( showShadowSettings() ) );
+  more_menu->addAction( ShadowStyle::actionIcon( QStringLiteral( "folder-open" ) ), QStringLiteral( "打开接收文件夹" ), this, SLOT( openDownloadFolder() ) );
+  more_menu->addSeparator();
+  more_menu->addAction( ShadowStyle::actionIcon( QStringLiteral( "shield-check" ) ), QStringLiteral( "连接与安全状态" ), this, SLOT( showModernActivities() ) );
+  more_menu->addAction( ShadowStyle::actionIcon( QStringLiteral( "archive" ) ), QStringLiteral( "聊天存档" ), this, SLOT( showModernSavedChats() ) );
+  more_menu->addAction( mp_actViewFileTransfer );
+  more_menu->addSeparator();
+  QMenu* workspace_menu = more_menu->addMenu( ShadowStyle::actionIcon( QStringLiteral( "folder-open" ) ), QStringLiteral( "工作区与换机" ) );
+  workspace_menu->addAction( QStringLiteral( "导出工作区…" ), this, SLOT( exportShadowWorkspace() ) );
+  workspace_menu->addAction( QStringLiteral( "导入工作区…" ), this, SLOT( importShadowWorkspace() ) );
+  more_menu->addSeparator();
+  mp_menuSettings->setTitle( QStringLiteral( "高级设置" ) );
+  mp_menuMain->setTitle( QStringLiteral( "系统工具" ) );
+  more_menu->addMenu( mp_menuSettings );
+  more_menu->addMenu( mp_menuMain );
+  mp_modernMoreButton->setMenu( more_menu );
+  navigation_layout->addWidget( mp_modernMoreButton );
+
+  mp_modernProfileButton = new QToolButton( mp_modernNavigationRail );
+  mp_modernProfileButton->setObjectName( "ShadowProfileButton" );
+  mp_modernProfileButton->setText( QStringLiteral( "我的" ) );
+  mp_modernProfileButton->setIcon( ShadowStyle::navigationIcon( QStringLiteral( "user-circle" ) ) );
+  mp_modernProfileButton->setIconSize( QSize( 26, 26 ) );
+  mp_modernProfileButton->setToolButtonStyle( Qt::ToolButtonTextUnderIcon );
+  mp_modernProfileButton->setToolTip( QStringLiteral( "修改名字、头像与状态" ) );
+  mp_modernProfileButton->setAccessibleName( QStringLiteral( "我的资料" ) );
+  connect( mp_modernProfileButton, SIGNAL( clicked() ), this, SLOT( changeVCard() ) );
+  navigation_layout->addWidget( mp_modernProfileButton );
+
+  mp_modernListPanel = new QWidget( mp_modernRoot );
+  mp_modernListPanel->setObjectName( "ShadowListPanel" );
+  mp_modernListPanel->setMinimumWidth( 272 );
+  mp_modernListPanel->setMaximumWidth( 380 );
+  QVBoxLayout* list_layout = new QVBoxLayout( mp_modernListPanel );
+  list_layout->setContentsMargins( 20, 20, 18, 16 );
+  list_layout->setSpacing( 9 );
+
+  QLabel* section_eyebrow = new QLabel( QStringLiteral( "办公通讯" ), mp_modernListPanel );
+  section_eyebrow->setObjectName( "ShadowEyebrow" );
+  list_layout->addWidget( section_eyebrow );
+
+  mp_modernSectionTitle = new QLabel( QStringLiteral( "最近消息" ), mp_modernListPanel );
+  mp_modernSectionTitle->setObjectName( "ShadowSectionTitle" );
+  mp_modernSectionHint = new QLabel( QStringLiteral( "你最近联系的同事和群聊" ), mp_modernListPanel );
+  mp_modernSectionHint->setObjectName( "ShadowSectionHint" );
+  list_layout->addWidget( mp_modernSectionTitle );
+  list_layout->addWidget( mp_modernSectionHint );
+
+  mp_modernSearch = new QLineEdit( mp_modernListPanel );
+  mp_modernSearch->setObjectName( "ShadowGlobalSearch" );
+  mp_modernSearch->setPlaceholderText( QStringLiteral( "搜索同事、群聊或会话" ) );
+  mp_modernSearch->setClearButtonEnabled( true );
+  mp_modernSearch->addAction( ShadowStyle::actionIcon( QStringLiteral( "magnifying-glass" ) ), QLineEdit::LeadingPosition );
+  mp_modernSearch->setAccessibleName( QStringLiteral( "全局搜索" ) );
+  mp_modernSearch->setToolTip( QStringLiteral( "搜索同事、群聊或会话 (Ctrl+K)" ) );
+  connect( mp_modernSearch, SIGNAL( textChanged( const QString& ) ), this, SLOT( onModernSearchChanged( const QString& ) ) );
+  list_layout->addWidget( mp_modernSearch );
+
+  mp_modernDirectoryTabs = new QWidget( mp_modernListPanel );
+  mp_modernDirectoryTabs->setObjectName( "ShadowDirectoryTabs" );
+  QHBoxLayout* directory_tabs_layout = new QHBoxLayout( mp_modernDirectoryTabs );
+  directory_tabs_layout->setContentsMargins( 0, 0, 0, 0 );
+  directory_tabs_layout->setSpacing( 6 );
+  mp_modernPeopleButton = new QToolButton( mp_modernDirectoryTabs );
+  mp_modernPeopleButton->setObjectName( "ShadowSegmentButton" );
+  mp_modernPeopleButton->setText( QStringLiteral( "同事" ) );
+  mp_modernPeopleButton->setCheckable( true );
+  connect( mp_modernPeopleButton, SIGNAL( clicked() ), this, SLOT( showModernContacts() ) );
+  directory_tabs_layout->addWidget( mp_modernPeopleButton );
+  mp_modernGroupsButton = new QToolButton( mp_modernDirectoryTabs );
+  mp_modernGroupsButton->setObjectName( "ShadowSegmentButton" );
+  mp_modernGroupsButton->setText( QStringLiteral( "群聊" ) );
+  mp_modernGroupsButton->setCheckable( true );
+  connect( mp_modernGroupsButton, SIGNAL( clicked() ), this, SLOT( showModernGroups() ) );
+  directory_tabs_layout->addWidget( mp_modernGroupsButton );
+  list_layout->addWidget( mp_modernDirectoryTabs );
+
+  mp_tabMain->setParent( mp_modernListPanel );
+  mp_tabMain->tabBar()->hide();
+  mp_tabMain->setDocumentMode( true );
+  mp_tabMain->setContentsMargins( 0, 0, 0, 0 );
+  foreach( QWidget* legacy_filter, QList<QWidget*>()
+           << mp_chatList->findChild<QWidget*>( "mp_leFilter" )
+           << mp_chatList->findChild<QWidget*>( "mp_pbClearFilter" )
+           << mp_chatList->findChild<QWidget*>( "mp_pbSettings" )
+           << mp_userList->findChild<QWidget*>( "mp_leFilter" )
+           << mp_userList->findChild<QWidget*>( "mp_pbClearFilter" )
+           << mp_userList->findChild<QWidget*>( "mp_pbSettings" )
+           << mp_groupList->findChild<QWidget*>( "mp_leFilter" )
+           << mp_groupList->findChild<QWidget*>( "mp_pbClearFilter" ) )
+  {
+    if( legacy_filter )
+      legacy_filter->hide();
+  }
+
+  mp_modernSearchResults = new QTreeWidget( mp_modernListPanel );
+  mp_modernSearchResults->setObjectName( "ShadowSearchResults" );
+  mp_modernSearchResults->setHeaderHidden( true );
+  mp_modernSearchResults->setRootIsDecorated( true );
+  mp_modernSearchResults->setIndentation( 14 );
+  mp_modernSearchResults->setFrameShape( QFrame::NoFrame );
+  mp_modernSearchResults->setUniformRowHeights( true );
+  mp_modernSearchResults->setAccessibleName( QStringLiteral( "搜索结果" ) );
+  connect( mp_modernSearchResults, SIGNAL( itemActivated( QTreeWidgetItem*, int ) ), this, SLOT( onModernSearchItemActivated( QTreeWidgetItem*, int ) ) );
+  connect( mp_modernSearchResults, SIGNAL( itemDoubleClicked( QTreeWidgetItem*, int ) ), this, SLOT( onModernSearchItemActivated( QTreeWidgetItem*, int ) ) );
+
+  mp_modernListStack = new QStackedWidget( mp_modernListPanel );
+  mp_modernListStack->setObjectName( "ShadowListStack" );
+  mp_modernListStack->addWidget( mp_tabMain );
+  mp_modernListStack->addWidget( mp_modernSearchResults );
+  list_layout->addWidget( mp_modernListStack, 1 );
+
+  mp_modernEmptyState = new QWidget( mp_modernListPanel );
+  mp_modernEmptyState->setObjectName( "ShadowEmptyState" );
+  QVBoxLayout* empty_layout = new QVBoxLayout( mp_modernEmptyState );
+  empty_layout->setContentsMargins( 24, 36, 24, 36 );
+  empty_layout->setSpacing( 8 );
+  empty_layout->setAlignment( Qt::AlignCenter );
+  QLabel* empty_icon = new QLabel( mp_modernEmptyState );
+  empty_icon->setObjectName( "ShadowEmptyIcon" );
+  empty_icon->setAlignment( Qt::AlignCenter );
+  empty_icon->setPixmap( ShadowStyle::tintedPixmap( QStringLiteral( ":/images/shadowchat/icons/users-three.svg" ),
+                                                    QSize( 42, 42 ), QColor( "#8A94A3" ) ) );
+  mp_modernEmptyTitle = new QLabel( mp_modernEmptyState );
+  mp_modernEmptyTitle->setObjectName( "ShadowEmptyTitle" );
+  mp_modernEmptyTitle->setAlignment( Qt::AlignCenter );
+  mp_modernEmptyHint = new QLabel( mp_modernEmptyState );
+  mp_modernEmptyHint->setObjectName( "ShadowEmptyHint" );
+  mp_modernEmptyHint->setAlignment( Qt::AlignCenter );
+  mp_modernEmptyHint->setWordWrap( true );
+  mp_modernEmptyAction = new QPushButton( mp_modernEmptyState );
+  mp_modernEmptyAction->setObjectName( "ShadowPrimaryButton" );
+  connect( mp_modernEmptyAction, &QPushButton::clicked, this, [this]() {
+    if( m_modernPrimaryPage == 0 )
+      showModernContacts();
+    else if( m_modernPrimaryPage == 2 )
+      createGroupChat();
+    else
+      restartCore();
+  } );
+  empty_layout->addWidget( empty_icon, 0, Qt::AlignHCenter );
+  empty_layout->addWidget( mp_modernEmptyTitle );
+  empty_layout->addWidget( mp_modernEmptyHint );
+  empty_layout->addSpacing( 6 );
+  empty_layout->addWidget( mp_modernEmptyAction, 0, Qt::AlignHCenter );
+  mp_modernListStack->addWidget( mp_modernEmptyState );
+
+  mp_modernNetworkStrip = new QFrame( mp_modernListPanel );
+  mp_modernNetworkStrip->setObjectName( "ShadowNetworkStrip" );
+  QHBoxLayout* network_layout = new QHBoxLayout( mp_modernNetworkStrip );
+  network_layout->setContentsMargins( 10, 7, 10, 7 );
+  network_layout->setSpacing( 8 );
+  mp_modernNetworkDot = new QLabel( mp_modernNetworkStrip );
+  mp_modernNetworkDot->setObjectName( "ShadowNetworkDot" );
+  mp_modernNetworkText = new QLabel( mp_modernNetworkStrip );
+  mp_modernNetworkText->setObjectName( "ShadowNetworkText" );
+  mp_modernNetworkText->setWordWrap( true );
+  mp_modernNetworkAction = new QPushButton( QStringLiteral( "重试" ), mp_modernNetworkStrip );
+  mp_modernNetworkAction->setObjectName( "ShadowInlineAction" );
+  mp_modernNetworkAction->setAccessibleName( QStringLiteral( "重新连接局域网" ) );
+  connect( mp_modernNetworkAction, SIGNAL( clicked() ), this, SLOT( restartCore() ) );
+  network_layout->addWidget( mp_modernNetworkDot, 0, Qt::AlignTop );
+  network_layout->addWidget( mp_modernNetworkText, 1 );
+  network_layout->addWidget( mp_modernNetworkAction, 0, Qt::AlignVCenter );
+  list_layout->addWidget( mp_modernNetworkStrip );
+
+  mp_modernConversationPanel = new QWidget( mp_modernRoot );
+  mp_modernConversationPanel->setObjectName( "ShadowConversationPanel" );
+  QVBoxLayout* conversation_layout = new QVBoxLayout( mp_modernConversationPanel );
+  conversation_layout->setContentsMargins( 0, 0, 0, 0 );
+  conversation_layout->setSpacing( 0 );
+
+  mp_modernConversationStack = new QStackedWidget( mp_modernConversationPanel );
+  mp_modernConversationStack->setObjectName( "ShadowConversationStack" );
+
+  mp_modernChatPlaceholder = new QWidget( mp_modernConversationStack );
+  mp_modernChatPlaceholder->setObjectName( "ShadowChatPlaceholder" );
+  QVBoxLayout* placeholder_layout = new QVBoxLayout( mp_modernChatPlaceholder );
+  placeholder_layout->setContentsMargins( 28, 28, 28, 28 );
+  placeholder_layout->setAlignment( Qt::AlignCenter );
+
+  QFrame* welcome_card = new QFrame( mp_modernChatPlaceholder );
+  welcome_card->setObjectName( "ShadowWelcomeCard" );
+  welcome_card->setMaximumWidth( 480 );
+  QVBoxLayout* welcome_layout = new QVBoxLayout( welcome_card );
+  welcome_layout->setContentsMargins( 40, 34, 40, 34 );
+  welcome_layout->setSpacing( 8 );
+
+  QLabel* placeholder_icon = new QLabel( welcome_card );
+  placeholder_icon->setAlignment( Qt::AlignCenter );
+  placeholder_icon->setPixmap( QPixmap( QStringLiteral( ":/images/shadowchat/shadowchat-mark-source.png" ) )
+                               .scaled( 94, 94, Qt::KeepAspectRatio, Qt::SmoothTransformation ) );
+  QLabel* placeholder_title = new QLabel( QStringLiteral( "局域网里的沟通，从这里开始" ), welcome_card );
+  placeholder_title->setObjectName( "ShadowPlaceholderTitle" );
+  placeholder_title->setAlignment( Qt::AlignCenter );
+  QLabel* placeholder_hint = new QLabel( QStringLiteral( "从通讯录找到同事，或搜索一个已有会话" ), welcome_card );
+  placeholder_hint->setObjectName( "ShadowPlaceholderHint" );
+  placeholder_hint->setAlignment( Qt::AlignCenter );
+  QLabel* privacy_pill = new QLabel( QStringLiteral( "聊天和文件在局域网内直连" ), welcome_card );
+  privacy_pill->setObjectName( "ShadowPrivacyPill" );
+  privacy_pill->setAlignment( Qt::AlignCenter );
+  QPushButton* open_directory = new QPushButton( QStringLiteral( "打开通讯录" ), welcome_card );
+  open_directory->setObjectName( "ShadowPrimaryButton" );
+  open_directory->setAccessibleName( QStringLiteral( "打开通讯录" ) );
+  connect( open_directory, SIGNAL( clicked() ), this, SLOT( showModernContacts() ) );
+
+  welcome_layout->addWidget( placeholder_icon );
+  welcome_layout->addSpacing( 8 );
+  welcome_layout->addWidget( placeholder_title );
+  welcome_layout->addWidget( placeholder_hint );
+  welcome_layout->addSpacing( 12 );
+  welcome_layout->addWidget( privacy_pill, 0, Qt::AlignHCenter );
+  welcome_layout->addSpacing( 6 );
+  welcome_layout->addWidget( open_directory, 0, Qt::AlignHCenter );
+  placeholder_layout->addWidget( welcome_card );
+
+  mp_modernChatPage = new QWidget( mp_modernConversationStack );
+  mp_modernChatPage->setObjectName( "ShadowChatPage" );
+  QVBoxLayout* chat_page_layout = new QVBoxLayout( mp_modernChatPage );
+  chat_page_layout->setContentsMargins( 0, 0, 0, 0 );
+  chat_page_layout->setSpacing( 0 );
+  QWidget* chat_header = new QWidget( mp_modernChatPage );
+  chat_header->setObjectName( "ShadowChatHeader" );
+  chat_header->setFixedHeight( 72 );
+  QHBoxLayout* chat_header_layout = new QHBoxLayout( chat_header );
+  chat_header_layout->setContentsMargins( 16, 10, 24, 10 );
+  chat_header_layout->setSpacing( 10 );
+  mp_modernBackButton = new QToolButton( chat_header );
+  mp_modernBackButton->setObjectName( "ShadowBackButton" );
+  mp_modernBackButton->setIcon( ShadowStyle::actionIcon( QStringLiteral( "arrow-left" ) ) );
+  mp_modernBackButton->setIconSize( QSize( 20, 20 ) );
+  mp_modernBackButton->setToolTip( QStringLiteral( "返回消息列表" ) );
+  mp_modernBackButton->setAccessibleName( QStringLiteral( "返回消息列表" ) );
+  mp_modernBackButton->hide();
+  connect( mp_modernBackButton, SIGNAL( clicked() ), this, SLOT( showModernListPanel() ) );
+  chat_header_layout->addWidget( mp_modernBackButton );
+  QVBoxLayout* chat_title_layout = new QVBoxLayout;
+  chat_title_layout->setContentsMargins( 0, 0, 0, 0 );
+  chat_title_layout->setSpacing( 2 );
+  mp_modernChatTitle = new QLabel( chat_header );
+  mp_modernChatTitle->setObjectName( "ShadowChatTitle" );
+  mp_modernChatSubtitle = new QLabel( chat_header );
+  mp_modernChatSubtitle->setObjectName( "ShadowChatSubtitle" );
+  chat_title_layout->addWidget( mp_modernChatTitle );
+  chat_title_layout->addWidget( mp_modernChatSubtitle );
+  chat_header_layout->addLayout( chat_title_layout, 1 );
+  chat_page_layout->addWidget( chat_header );
+
+  mp_modernChatBody = new QWidget( mp_modernChatPage );
+  mp_modernChatBody->setObjectName( "ShadowChatBody" );
+  mp_modernChatBodyLayout = new QVBoxLayout( mp_modernChatBody );
+  mp_modernChatBodyLayout->setContentsMargins( 0, 0, 0, 0 );
+  mp_modernChatBodyLayout->setSpacing( 0 );
+  chat_page_layout->addWidget( mp_modernChatBody, 1 );
+
+  mp_modernConversationStack->addWidget( mp_modernChatPlaceholder );
+  mp_modernConversationStack->addWidget( mp_modernChatPage );
+  conversation_layout->addWidget( mp_modernConversationStack );
+
+  mp_modernContentSplitter = new QSplitter( Qt::Horizontal, mp_modernRoot );
+  mp_modernContentSplitter->setObjectName( "ShadowContentSplitter" );
+  mp_modernContentSplitter->setChildrenCollapsible( false );
+  mp_modernContentSplitter->setHandleWidth( 1 );
+  mp_modernContentSplitter->addWidget( mp_modernListPanel );
+  mp_modernContentSplitter->addWidget( mp_modernConversationPanel );
+  mp_modernContentSplitter->setStretchFactor( 0, 0 );
+  mp_modernContentSplitter->setStretchFactor( 1, 1 );
+  mp_modernContentSplitter->setSizes( QList<int>() << 320 << 820 );
+
+  content_layout->addWidget( mp_modernNavigationRail );
+  content_layout->addWidget( mp_modernContentSplitter, 1 );
+  root_layout->addWidget( shell_content, 1 );
+  setCentralWidget( mp_modernRoot );
+
+  if( legacy_central_widget && legacy_central_widget != mp_tabMain )
+    legacy_central_widget->deleteLater();
+
+  menuBar()->hide();
+  mp_barMain->hide();
+  statusBar()->hide();
+  mp_dockFileTransfers->hide();
+  mp_modernConversationStack->setCurrentWidget( mp_modernChatPlaceholder );
+  setTabOrder( mp_modernMessagesButton, mp_modernContactsButton );
+  setTabOrder( mp_modernContactsButton, mp_modernMoreButton );
+  setTabOrder( mp_modernMoreButton, mp_modernProfileButton );
+  setTabOrder( mp_modernProfileButton, mp_modernSearch );
+  setTabOrder( mp_modernSearch, mp_modernPeopleButton );
+  setTabOrder( mp_modernPeopleButton, mp_modernGroupsButton );
+  setTabOrder( mp_modernGroupsButton, mp_tabMain );
+  showModernMessages();
+  applyModernStyle();
+  updateModernNetworkState();
+  updateModernListState();
+  updateModernResponsiveLayout();
+}
+
+void GuiMain::applyModernStyle()
+{
+  const QFont modern_font = ShadowStyle::applicationFont();
+  QApplication::setFont( modern_font );
+  setFont( modern_font );
+
+  foreach( QTreeWidget* tree, findChildren<QTreeWidget*>( QStringLiteral( "GuiCustomList" ) ) )
+  {
+    tree->setStyleSheet( QString() );
+    tree->setFrameShape( QFrame::NoFrame );
+    tree->setUniformRowHeights( true );
+  }
+
+  setStyleSheet( ShadowStyle::applicationStyleSheet() );
+}
+
+void GuiMain::updateModernResponsiveLayout()
+{
+  if( !mp_modernContentSplitter || !mp_modernListPanel || !mp_modernConversationPanel )
+    return;
+
+  const bool compact = width() < 900;
+  if( mp_modernNavigationRail )
+    mp_modernNavigationRail->setFixedWidth( compact ? 68 : 80 );
+
+  if( !compact )
+  {
+    mp_modernListPanel->show();
+    mp_modernConversationPanel->show();
+    mp_modernContentSplitter->setHandleWidth( 1 );
+    if( mp_modernBackButton )
+      mp_modernBackButton->hide();
+    return;
+  }
+
+  mp_modernContentSplitter->setHandleWidth( 0 );
+  const bool chat_is_open = mp_modernConversationStack &&
+                            mp_modernConversationStack->currentWidget() == mp_modernChatPage &&
+                            mp_modernConversationPanel->isVisible();
+  mp_modernListPanel->setVisible( !chat_is_open );
+  mp_modernConversationPanel->setVisible( chat_is_open );
+  if( mp_modernBackButton )
+    mp_modernBackButton->setVisible( chat_is_open );
+}
+
+void GuiMain::showModernListPanel()
+{
+  if( width() >= 900 || !mp_modernListPanel || !mp_modernConversationPanel )
+    return;
+
+  mp_modernConversationPanel->hide();
+  mp_modernListPanel->show();
+  if( mp_modernBackButton )
+    mp_modernBackButton->hide();
+  if( mp_modernSearch )
+    mp_modernSearch->setFocus();
+}
+
+void GuiMain::showShadowSettings()
+{
+  QDialog dialog( this );
+  dialog.setWindowTitle( QStringLiteral( "影聊设置" ) );
+  dialog.setModal( true );
+  dialog.setMinimumWidth( 620 );
+  dialog.setStyleSheet( ShadowStyle::applicationStyleSheet() );
+  Bee::removeContextHelpButton( &dialog );
+
+  QVBoxLayout* root_layout = new QVBoxLayout( &dialog );
+  root_layout->setContentsMargins( 28, 24, 28, 22 );
+  root_layout->setSpacing( 14 );
+  QLabel* title = new QLabel( QStringLiteral( "设置" ), &dialog );
+  title->setObjectName( "ShadowOnboardingTitle" );
+  QLabel* subtitle = new QLabel( QStringLiteral( "日常会用到的选项都在这里；网络端口等低频项目收在“高级设置”中。" ), &dialog );
+  subtitle->setObjectName( "ShadowOnboardingSubtitle" );
+  subtitle->setWordWrap( true );
+  root_layout->addWidget( title );
+  root_layout->addWidget( subtitle );
+
+  QFrame* message_card = new QFrame( &dialog );
+  message_card->setObjectName( "ShadowOnboardingCard" );
+  QVBoxLayout* message_layout = new QVBoxLayout( message_card );
+  message_layout->setContentsMargins( 18, 14, 18, 14 );
+  message_layout->setSpacing( 8 );
+  QLabel* message_title = new QLabel( QStringLiteral( "消息与提醒" ), message_card );
+  message_title->setObjectName( "ShadowOnboardingStep" );
+  QCheckBox* sound_check = new QCheckBox( QStringLiteral( "收到新消息时播放提示音" ), message_card );
+  sound_check->setChecked( Settings::instance().beepOnNewMessageArrived() );
+  QCheckBox* preview_check = new QCheckBox( QStringLiteral( "系统通知中显示消息内容" ), message_card );
+  preview_check->setChecked( Settings::instance().showChatMessageOnTray() );
+  preview_check->setToolTip( QStringLiteral( "关闭后，锁屏或共享屏幕时不会在系统通知里显示正文。" ) );
+  QCheckBox* enter_check = new QCheckBox( QStringLiteral( "按 Enter 发送消息（关闭时使用 Ctrl+Enter 发送）" ), message_card );
+  enter_check->setChecked( Settings::instance().useReturnToSendMessage() );
+  message_layout->addWidget( message_title );
+  message_layout->addWidget( sound_check );
+  message_layout->addWidget( preview_check );
+  message_layout->addWidget( enter_check );
+  root_layout->addWidget( message_card );
+
+  QFrame* file_card = new QFrame( &dialog );
+  file_card->setObjectName( "ShadowOnboardingCard" );
+  QGridLayout* file_layout = new QGridLayout( file_card );
+  file_layout->setContentsMargins( 18, 14, 18, 14 );
+  file_layout->setHorizontalSpacing( 8 );
+  file_layout->setVerticalSpacing( 8 );
+  QLabel* file_title = new QLabel( QStringLiteral( "接收文件" ), file_card );
+  file_title->setObjectName( "ShadowOnboardingStep" );
+  file_layout->addWidget( file_title, 0, 0, 1, 2 );
+  QCheckBox* confirm_download_check = new QCheckBox( QStringLiteral( "接收前先询问保存位置" ), file_card );
+  confirm_download_check->setChecked( Settings::instance().confirmOnDownloadFile() );
+  file_layout->addWidget( confirm_download_check, 1, 0, 1, 2 );
+  QLineEdit* download_folder = new QLineEdit( Settings::instance().downloadDirectory(), file_card );
+  download_folder->setReadOnly( true );
+  download_folder->setAccessibleName( QStringLiteral( "默认接收文件夹" ) );
+  QPushButton* choose_folder = new QPushButton( QStringLiteral( "更改…" ), file_card );
+  connect( choose_folder, &QPushButton::clicked, &dialog, [&dialog, download_folder]() {
+    const QString selected = QFileDialog::getExistingDirectory( &dialog, QStringLiteral( "选择默认接收文件夹" ), download_folder->text() );
+    if( !selected.isEmpty() )
+      download_folder->setText( QDir::toNativeSeparators( selected ) );
+  } );
+  file_layout->addWidget( download_folder, 2, 0 );
+  file_layout->addWidget( choose_folder, 2, 1 );
+  root_layout->addWidget( file_card );
+
+  QFrame* security_card = new QFrame( &dialog );
+  security_card->setObjectName( "ShadowOnboardingTrust" );
+  QVBoxLayout* security_layout = new QVBoxLayout( security_card );
+  security_layout->setContentsMargins( 18, 14, 18, 14 );
+  security_layout->setSpacing( 7 );
+  QLabel* security_title = new QLabel( QStringLiteral( "安全与更新" ), security_card );
+  security_title->setObjectName( "ShadowOnboardingStep" );
+  QCheckBox* update_check = new QCheckBox( QStringLiteral( "每 7 天检查一次新版本" ), security_card );
+  update_check->setChecked( Settings::instance().checkNewVersionAtStartup() );
+  update_check->setToolTip( QStringLiteral( "只访问影聊的静态版本清单，不上传姓名、联系人、文件或使用数据。" ) );
+  QLabel* security_text = new QLabel( QStringLiteral( "聊天、文件和通讯录留在局域网；第三方插件、云端转发和从聊天中运行程序已关闭。" ), security_card );
+  security_text->setWordWrap( true );
+  security_text->setObjectName( "ShadowOnboardingBody" );
+  QPushButton* version_page = new QPushButton( QStringLiteral( "查看最新版本" ), security_card );
+  version_page->setMaximumWidth( 120 );
+  connect( version_page, SIGNAL( clicked() ), this, SLOT( checkNewVersion() ) );
+  security_layout->addWidget( security_title );
+  security_layout->addWidget( update_check );
+  security_layout->addWidget( security_text );
+  security_layout->addWidget( version_page, 0, Qt::AlignLeft );
+  root_layout->addWidget( security_card );
+
+  QDialogButtonBox* buttons = new QDialogButtonBox( QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog );
+  buttons->button( QDialogButtonBox::Save )->setText( QStringLiteral( "保存" ) );
+  buttons->button( QDialogButtonBox::Save )->setObjectName( "ShadowPrimaryButton" );
+  buttons->button( QDialogButtonBox::Cancel )->setText( QStringLiteral( "取消" ) );
+  connect( buttons, SIGNAL( accepted() ), &dialog, SLOT( accept() ) );
+  connect( buttons, SIGNAL( rejected() ), &dialog, SLOT( reject() ) );
+  root_layout->addWidget( buttons );
+
+  if( dialog.exec() != QDialog::Accepted )
+    return;
+
+  Settings::instance().setBeepOnNewMessageArrived( sound_check->isChecked() );
+  Settings::instance().setShowChatMessageOnTray( preview_check->isChecked() );
+  Settings::instance().setUseReturnToSendMessage( enter_check->isChecked() );
+  Settings::instance().setConfirmOnDownloadFile( confirm_download_check->isChecked() );
+  Settings::instance().setDownloadDirectory( QDir::toNativeSeparators( download_folder->text() ) );
+  Settings::instance().setCheckNewVersionAtStartup( update_check->isChecked() );
+  Settings::instance().save();
+  if( mp_actBeepOnNewMessage )
+    mp_actBeepOnNewMessage->setChecked( sound_check->isChecked() );
+  foreach( GuiFloatingChat* floating_chat, m_floatingChats )
+    floating_chat->guiChat()->updateActionsOnFocusChanged();
+}
+
+void GuiMain::exportShadowWorkspace()
+{
+  QMetaObject::invokeMethod( beeCore, "saveUsersAndGroups", Qt::DirectConnection );
+  MessageManager::instance().saveMessages( true );
+  Settings::instance().save();
+
+  const QString default_name = QStringLiteral( "影聊工作区-%1.%2" )
+                               .arg( QDate::currentDate().toString( QStringLiteral( "yyyyMMdd" ) ), ShadowWorkspaceArchive::fileExtension() );
+  const QString default_path = QDir( QStandardPaths::writableLocation( QStandardPaths::DocumentsLocation ) ).filePath( default_name );
+  const QString file_path = QFileDialog::getSaveFileName( this, QStringLiteral( "导出影聊工作区" ), default_path,
+                                                          QStringLiteral( "影聊工作区 (*.%1)" ).arg( ShadowWorkspaceArchive::fileExtension() ) );
+  if( file_path.isEmpty() )
+    return;
+
+  QString target_path = file_path;
+  if( !target_path.endsWith( QLatin1Char( '.' ) + ShadowWorkspaceArchive::fileExtension(), Qt::CaseInsensitive ) )
+    target_path += QLatin1Char( '.' ) + ShadowWorkspaceArchive::fileExtension();
+  QString error_message;
+  if( !ShadowWorkspaceArchive::exportWorkspace( Settings::instance().dataFolder(), target_path, &error_message ) )
+  {
+    QMessageBox::critical( this, QStringLiteral( "导出失败" ), error_message );
+    return;
+  }
+
+  QMessageBox::information( this, QStringLiteral( "工作区已导出" ),
+                            QStringLiteral( "个人资料、联系人、群聊、设置和聊天记录已保存。\n\n下载的附件、缓存、日志和插件没有包含在工作区中。" ) );
+}
+
+void GuiMain::importShadowWorkspace()
+{
+  const QString file_path = QFileDialog::getOpenFileName( this, QStringLiteral( "导入影聊工作区" ),
+                                                          QStandardPaths::writableLocation( QStandardPaths::DocumentsLocation ),
+                                                          QStringLiteral( "影聊工作区 (*.%1)" ).arg( ShadowWorkspaceArchive::fileExtension() ) );
+  if( file_path.isEmpty() )
+    return;
+
+  if( QMessageBox::question( this, QStringLiteral( "导入工作区" ),
+                             QStringLiteral( "下次启动时将用这个工作区替换当前的个人资料、联系人、群聊、设置和聊天记录。\n\n影聊会先创建恢复点，附件不会被修改。继续吗？" ),
+                             QStringLiteral( "继续导入" ), QStringLiteral( "取消" ), QString(), 1, 1 ) != 0 )
+    return;
+
+  QString error_message;
+  if( !ShadowWorkspaceArchive::stageImport( Settings::instance().dataFolder(), file_path, &error_message ) )
+  {
+    QMessageBox::critical( this, QStringLiteral( "导入失败" ), error_message );
+    return;
+  }
+
+  QMessageBox::information( this, QStringLiteral( "工作区已准备好" ),
+                            QStringLiteral( "文件已通过完整性校验。关闭并重新打开影聊后生效；导入前会自动创建当前工作区恢复点。" ) );
+}
+
+void GuiMain::updateModernNavigation()
+{
+  if( !mp_modernMessagesButton )
+    return;
+  mp_modernMessagesButton->setChecked( m_modernPrimaryPage == 0 );
+  mp_modernContactsButton->setChecked( m_modernPrimaryPage == 1 || m_modernPrimaryPage == 2 );
+  mp_modernPeopleButton->setChecked( m_modernPrimaryPage == 1 );
+  mp_modernGroupsButton->setChecked( m_modernPrimaryPage == 2 );
+  mp_modernDirectoryTabs->setVisible( m_modernPrimaryPage == 1 || m_modernPrimaryPage == 2 );
+  updateModernListState();
+}
+
+void GuiMain::updateModernNetworkState()
+{
+  if( !mp_modernNetworkStrip || !mp_modernNetworkText || !mp_modernNetworkAction )
+    return;
+
+  QString state;
+  if( !NetworkManager::instance().isMainInterfaceUp() )
+  {
+    state = QStringLiteral( "offline" );
+    mp_modernNetworkText->setText( QStringLiteral( "未检测到可用网络，请检查网线或 Wi-Fi" ) );
+    mp_modernNetworkAction->show();
+  }
+  else if( beeCore->isConnected() )
+  {
+    state = QStringLiteral( "connected" );
+    const int peers = beeCore->connectedUsers();
+    mp_modernNetworkText->setText( peers > 0
+      ? QStringLiteral( "已连接局域网 · %1 位同事在线" ).arg( peers )
+      : QStringLiteral( "已连接局域网，正在发现同事" ) );
+    mp_modernNetworkAction->hide();
+  }
+  else if( m_coreIsConnecting )
+  {
+    state = QStringLiteral( "connecting" );
+    mp_modernNetworkText->setText( QStringLiteral( "正在连接局域网…" ) );
+    mp_modernNetworkAction->hide();
+  }
+  else
+  {
+    state = QStringLiteral( "offline" );
+    mp_modernNetworkText->setText( QStringLiteral( "局域网连接已断开" ) );
+    mp_modernNetworkAction->show();
+  }
+
+  mp_modernNetworkStrip->setProperty( "state", state );
+  mp_modernNetworkDot->setProperty( "state", state );
+  mp_modernNetworkStrip->style()->unpolish( mp_modernNetworkStrip );
+  mp_modernNetworkStrip->style()->polish( mp_modernNetworkStrip );
+  mp_modernNetworkDot->style()->unpolish( mp_modernNetworkDot );
+  mp_modernNetworkDot->style()->polish( mp_modernNetworkDot );
+}
+
+void GuiMain::updateModernListState()
+{
+  if( !mp_modernListStack || !mp_modernEmptyState || !mp_modernSearch )
+    return;
+
+  if( !mp_modernSearch->text().trimmed().isEmpty() )
+  {
+    mp_modernListStack->setCurrentWidget( mp_modernSearchResults );
+    return;
+  }
+
+  bool show_empty_state = false;
+  if( m_modernPrimaryPage == 0 && ChatManager::instance().countNotEmptyChats( false ) == 0 )
+  {
+    show_empty_state = true;
+    mp_modernEmptyTitle->setText( QStringLiteral( "还没有最近消息" ) );
+    mp_modernEmptyHint->setText( QStringLiteral( "从通讯录找到同事，发出第一条消息。" ) );
+    mp_modernEmptyAction->setText( QStringLiteral( "打开通讯录" ) );
+  }
+  else if( m_modernPrimaryPage == 1 && beeCore->connectedUsers() == 0 )
+  {
+    show_empty_state = true;
+    if( m_coreIsConnecting )
+    {
+      mp_modernEmptyTitle->setText( QStringLiteral( "正在发现同事" ) );
+      mp_modernEmptyHint->setText( QStringLiteral( "影聊正在扫描当前局域网，请稍候。" ) );
+      mp_modernEmptyAction->hide();
+    }
+    else if( beeCore->isConnected() )
+    {
+      mp_modernEmptyTitle->setText( QStringLiteral( "还没有发现同事" ) );
+      mp_modernEmptyHint->setText( QStringLiteral( "请确认双方在同一局域网，并允许影聊通过防火墙。" ) );
+      mp_modernEmptyAction->setText( QStringLiteral( "重新扫描" ) );
+      mp_modernEmptyAction->show();
+    }
+    else
+    {
+      mp_modernEmptyTitle->setText( QStringLiteral( "暂时无法查看通讯录" ) );
+      mp_modernEmptyHint->setText( QStringLiteral( "恢复局域网连接后即可发现同事。" ) );
+      mp_modernEmptyAction->setText( QStringLiteral( "重新连接" ) );
+      mp_modernEmptyAction->show();
+    }
+  }
+  else if( m_modernPrimaryPage == 2 && ChatManager::instance().countGroupChats() == 0 )
+  {
+    show_empty_state = true;
+    mp_modernEmptyTitle->setText( QStringLiteral( "还没有群聊" ) );
+    mp_modernEmptyHint->setText( QStringLiteral( "创建一个群聊，和多位同事一起沟通。" ) );
+    mp_modernEmptyAction->setText( QStringLiteral( "创建群聊" ) );
+    mp_modernEmptyAction->show();
+  }
+
+  if( m_modernPrimaryPage != 1 || !m_coreIsConnecting )
+    mp_modernEmptyAction->show();
+  mp_modernListStack->setCurrentWidget( show_empty_state ? mp_modernEmptyState : mp_tabMain );
+}
+
+void GuiMain::showModernMessages()
+{
+  m_modernPrimaryPage = 0;
+  mp_tabMain->setCurrentWidget( mp_chatList );
+  mp_modernSectionTitle->setText( QStringLiteral( "最近消息" ) );
+  mp_modernSectionHint->setText( QStringLiteral( "你最近联系的同事和群聊" ) );
+  updateModernNavigation();
+  showModernListPanel();
+}
+
+void GuiMain::showModernContacts()
+{
+  m_modernPrimaryPage = 1;
+  mp_tabMain->setCurrentWidget( mp_userList );
+  mp_modernSectionTitle->setText( QStringLiteral( "通讯录" ) );
+  mp_modernSectionHint->setText( QStringLiteral( "查找当前局域网中的同事" ) );
+  updateModernNavigation();
+  showModernListPanel();
+}
+
+void GuiMain::showModernGroups()
+{
+  m_modernPrimaryPage = 2;
+  mp_tabMain->setCurrentWidget( mp_groupList );
+  mp_modernSectionTitle->setText( QStringLiteral( "群聊" ) );
+  mp_modernSectionHint->setText( QStringLiteral( "查看和创建局域网群聊" ) );
+  updateModernNavigation();
+  showModernListPanel();
+}
+
+void GuiMain::showModernActivities()
+{
+  m_modernPrimaryPage = 3;
+  mp_tabMain->setCurrentWidget( mp_home );
+  mp_modernSectionTitle->setText( QStringLiteral( "系统活动" ) );
+  mp_modernSectionHint->setText( QStringLiteral( "连接状态与诊断信息" ) );
+  updateModernNavigation();
+}
+
+void GuiMain::showModernSavedChats()
+{
+  m_modernPrimaryPage = 4;
+  mp_tabMain->setCurrentWidget( mp_savedChatList );
+  mp_modernSectionTitle->setText( QStringLiteral( "聊天存档" ) );
+  mp_modernSectionHint->setText( QStringLiteral( "保存在本机的历史记录" ) );
+  updateModernNavigation();
+}
+
+void GuiMain::onModernSearchChanged( const QString& text )
+{
+  if( text.trimmed().isEmpty() )
+  {
+    updateModernListState();
+    return;
+  }
+  updateModernSearchResults();
+  mp_modernListStack->setCurrentWidget( mp_modernSearchResults );
+}
+
+void GuiMain::updateModernSearchResults()
+{
+  if( !mp_modernSearchResults || !mp_modernSearch )
+    return;
+
+  const QString query = mp_modernSearch->text().trimmed();
+  mp_modernSearchResults->clear();
+  if( query.isEmpty() )
+    return;
+
+  QTreeWidgetItem* chats_section = new QTreeWidgetItem( mp_modernSearchResults, QStringList( QStringLiteral( "会话" ) ) );
+  chats_section->setFlags( Qt::ItemIsEnabled );
+  chats_section->setIcon( 0, ShadowStyle::actionIcon( QStringLiteral( "chats-circle" ) ) );
+  int chats_found = 0;
+  foreach( Chat c, ChatManager::instance().constChatList() )
+  {
+    if( !c.isValid() || !c.name().contains( query, Qt::CaseInsensitive ) )
+      continue;
+    QTreeWidgetItem* item = new QTreeWidgetItem( chats_section, QStringList( c.isDefault() ? QStringLiteral( "全员群" ) : c.name() ) );
+    item->setIcon( 0, ShadowStyle::actionIcon( c.isGroup() || c.isDefault()
+                                               ? QStringLiteral( "users-three" )
+                                               : QStringLiteral( "chats-circle" ) ) );
+    item->setData( 0, Qt::UserRole, 1 );
+    item->setData( 0, Qt::UserRole + 1, QVariant::fromValue<qulonglong>( c.id() ) );
+    ++chats_found;
+  }
+  chats_section->setText( 0, QStringLiteral( "会话 · %1" ).arg( chats_found ) );
+  chats_section->setExpanded( true );
+
+  QTreeWidgetItem* users_section = new QTreeWidgetItem( mp_modernSearchResults, QStringList( QStringLiteral( "同事" ) ) );
+  users_section->setFlags( Qt::ItemIsEnabled );
+  users_section->setIcon( 0, ShadowStyle::actionIcon( QStringLiteral( "users-three" ) ) );
+  int users_found = 0;
+  foreach( User u, UserManager::instance().userList().toList() )
+  {
+    if( !u.isValid() || u.isLocal() )
+      continue;
+    const bool matches = u.name().contains( query, Qt::CaseInsensitive ) ||
+                         u.vCard().fullName( Settings::instance().useUserFirstNameFirstInFullName() ).contains( query, Qt::CaseInsensitive ) ||
+                         u.accountName().contains( query, Qt::CaseInsensitive );
+    if( !matches )
+      continue;
+    QString label = u.name();
+    if( !u.isStatusConnected() )
+      label.append( QStringLiteral( " · 离线" ) );
+    QTreeWidgetItem* item = new QTreeWidgetItem( users_section, QStringList( label ) );
+    item->setIcon( 0, IconManager::instance().icon( u.isStatusConnected() ? "user-online.png" : "user-offline.png" ) );
+    item->setData( 0, Qt::UserRole, 2 );
+    item->setData( 0, Qt::UserRole + 1, QVariant::fromValue<qulonglong>( u.id() ) );
+    ++users_found;
+  }
+  users_section->setText( 0, QStringLiteral( "同事 · %1" ).arg( users_found ) );
+  users_section->setExpanded( true );
+
+  if( chats_found == 0 && users_found == 0 )
+  {
+    QTreeWidgetItem* no_results = new QTreeWidgetItem( mp_modernSearchResults,
+                                                        QStringList( QStringLiteral( "没有找到“%1”，试试姓名或群聊名称" ).arg( query ) ) );
+    no_results->setFlags( Qt::ItemIsEnabled );
+  }
+}
+
+void GuiMain::onModernSearchItemActivated( QTreeWidgetItem* item, int )
+{
+  if( !item )
+    return;
+  const int item_type = item->data( 0, Qt::UserRole ).toInt();
+  const VNumber item_id = static_cast<VNumber>( item->data( 0, Qt::UserRole + 1 ).toULongLong() );
+  if( item_type == 1 )
+    showChat( item_id );
+  else if( item_type == 2 )
+    checkUserSelected( item_id );
+  else
+    return;
+  mp_modernSearch->clear();
+  showModernMessages();
+}
+
+void GuiMain::updateModernChatHeader( const Chat& c )
+{
+  if( !mp_modernChatTitle || !c.isValid() )
+    return;
+
+  mp_modernChatTitle->setText( c.isDefault() ? QStringLiteral( "全员群" ) : c.name() );
+  if( c.isPrivate() )
+  {
+    User u = UserManager::instance().findUser( c.privateUserId() );
+    mp_modernChatSubtitle->setText( u.isValid() && u.isStatusConnected()
+                                    ? QStringLiteral( "在线 · 局域网直连" )
+                                    : QStringLiteral( "离线 · 仅保存在本机与局域网" ) );
+  }
+  else
+  {
+    mp_modernChatSubtitle->setText( QStringLiteral( "%1 位成员 · 局域网群聊" ).arg( c.usersId().size() ) );
+  }
+}
+
 void GuiMain::createMainWidgets()
 {
   int tab_index;
@@ -1623,6 +2733,11 @@ void GuiMain::createMainWidgets()
 
 void GuiMain::startExternalApplicationFromActionData()
 {
+#ifdef SHADOWCHAT_SAFE_BUILD
+  QMessageBox::information( qApp->activeWindow(), QStringLiteral( "安全模式" ),
+                            QStringLiteral( "影聊官方构建不允许从应用内启动外部程序。" ) );
+  return;
+#else
   QAction* act = qobject_cast<QAction*>( sender() );
   if( !act )
     return;
@@ -1631,6 +2746,7 @@ void GuiMain::startExternalApplicationFromActionData()
   qDebug() << "Starting external application:" << qPrintable( application_path );
   if( !QDesktopServices::openUrl( QUrl::fromLocalFile( application_path ) ) )
     QMessageBox::information( qApp->activeWindow(), Settings::instance().programName(), tr( "Unable to open %1" ).arg( application_path ), tr( "Ok" ) );
+#endif
 }
 
 void GuiMain::settingsChanged()
@@ -2677,6 +3793,12 @@ void GuiMain::sendFileFromChat( VNumber chat_id, const QString& file_path )
   if( files_path_selected.isEmpty() )
     return;
 
+  QString caption;
+  if( !GuiImageBatchPreview::confirm( files_path_selected, activeWindow(), &caption ) )
+    return;
+  if( !caption.isEmpty() )
+    sendMessage( chat_id, caption, false );
+
   beeCore->sendFilesFromChat( c.id(), files_path_selected );
 }
 
@@ -2691,6 +3813,12 @@ void GuiMain::sendFilesFromChat( VNumber chat_id, const QStringList& file_path_l
 
   if( file_path_list.isEmpty() )
     return;
+
+  QString caption;
+  if( !GuiImageBatchPreview::confirm( file_path_list, activeWindow(), &caption ) )
+    return;
+  if( !caption.isEmpty() )
+    sendMessage( chat_id, caption, false );
 
   beeCore->sendFilesFromChat( c.id(), file_path_list );
 }
@@ -3014,8 +4142,19 @@ void GuiMain::showChat( VNumber chat_id )
   if( !fl_chat )
     return;
 
+  updateModernChatHeader( c );
+  if( mp_modernConversationStack && mp_modernChatPage )
+    mp_modernConversationStack->setCurrentWidget( mp_modernChatPage );
+  if( width() < 900 && mp_modernListPanel && mp_modernConversationPanel )
+  {
+    mp_modernListPanel->hide();
+    mp_modernConversationPanel->show();
+    if( mp_modernBackButton )
+      mp_modernBackButton->show();
+  }
   fl_chat->show();
-  fl_chat->showUp();
+  if( fl_chat != mp_embeddedChat )
+    fl_chat->showUp();
   fl_chat->setFocusInChat();
 }
 
@@ -3075,6 +4214,11 @@ void GuiMain::showVCard( VNumber user_id )
 void GuiMain::updadePluginMenu()
 {
   mp_menuPlugins->clear();
+#ifdef SHADOWCHAT_SAFE_BUILD
+  QAction* safe_mode_action = mp_menuPlugins->addAction( QStringLiteral( "第三方插件已在安全模式下关闭" ) );
+  safe_mode_action->setEnabled( false );
+  return;
+#else
   QAction* act;
   mp_menuPlugins->addAction( IconManager::instance().icon( "plugin.png" ), tr( "Plugin Manager..." ), this, SLOT( showPluginManager() ) );
 
@@ -3118,6 +4262,7 @@ void GuiMain::updadePluginMenu()
       act->setEnabled( text_marker->isEnabled() );
     }
   }
+#endif
 }
 
 void GuiMain::showPluginHelp()
@@ -3131,6 +4276,9 @@ void GuiMain::showPluginHelp()
 
 void GuiMain::showPluginManager()
 {
+#ifdef SHADOWCHAT_SAFE_BUILD
+  QMessageBox::information( this, QStringLiteral( "安全模式" ), QStringLiteral( "影聊官方构建不加载第三方插件。" ) );
+#else
   GuiPluginManager gpm;
   gpm.setModal( true );
   gpm.setSizeGripEnabled( true );
@@ -3139,6 +4287,7 @@ void GuiMain::showPluginManager()
   gpm.exec();
   if( gpm.isChanged() )
     updadePluginMenu();
+#endif
 }
 
 bool GuiMain::showWizard()
@@ -3158,6 +4307,13 @@ bool GuiMain::showWizard()
         return false;
       }
     }
+    VCard profile = Settings::instance().localUser().vCard();
+    profile.setNickName( gw.userName() );
+    if( !gw.avatar().isNull() )
+      profile.setPhoto( gw.avatar() );
+    beeCore->setLocalUserVCard( Settings::instance().localUser().color(), profile );
+    Settings::instance().setCheckNewVersionAtStartup( gw.checkForUpdates() );
+    Settings::instance().save();
     return true;
   }
   else
@@ -3328,10 +4484,19 @@ void GuiMain::openUrlFromChat( const QUrl& file_url, VNumber chat_id )
 #else
     bool is_exe_file = fi.isExecutable() && !fi.isDir();
 #endif
+#ifdef SHADOWCHAT_SAFE_BUILD
+    if( is_exe_file )
+    {
+      QMessageBox::information( qApp->activeWindow(), QStringLiteral( "已阻止运行程序" ),
+                                QStringLiteral( "影聊可以接收这个文件，但不会从聊天中启动可执行程序。请由公司 IT 确认后再处理。" ) );
+      return;
+    }
+#else
     if( is_exe_file && QMessageBox::question( qApp->activeWindow(), Settings::instance().programName(),
                              tr( "Do you want to open the file %1?" ).arg( file_path ),
                              tr( "Yes" ), tr( "No" ), QString(), 1, 1 ) != 0 )
       return;
+#endif
 
     qDebug() << "Open file:" << file_path;
     if( !QDesktopServices::openUrl( QUrl::fromLocalFile( file_path ) ) )
@@ -3341,6 +4506,18 @@ void GuiMain::openUrlFromChat( const QUrl& file_url, VNumber chat_id )
   else
   {
     QString url_txt = file_url.toString();
+#ifdef SHADOWCHAT_SAFE_BUILD
+    if( file_url.scheme() != QLatin1String( "https" ) && file_url.scheme() != QLatin1String( "http" ) )
+    {
+      QMessageBox::information( qApp->activeWindow(), QStringLiteral( "已阻止未知链接" ),
+                                QStringLiteral( "影聊只允许手动打开 HTTP 或 HTTPS 网页链接。" ) );
+      return;
+    }
+    if( QMessageBox::question( qApp->activeWindow(), QStringLiteral( "打开外部网页" ),
+                               QStringLiteral( "这个操作会离开影聊并使用系统浏览器访问：\n%1\n\n是否继续？" ).arg( url_txt ),
+                               QStringLiteral( "继续打开" ), QStringLiteral( "取消" ), QString(), 1, 1 ) != 0 )
+      return;
+#endif
     qDebug() << "Open url:" << url_txt;
     if( !QDesktopServices::openUrl( file_url ) )
       qWarning() << "Unable to open link url:" << url_txt;
@@ -3690,6 +4867,12 @@ void GuiMain::onUserChanged( const User& u )
   mp_chatList->updateUser( u );
   foreach( GuiFloatingChat* fl_chat, m_floatingChats )
     fl_chat->updateUser( u );
+  if( mp_embeddedChat && mp_embeddedChat->guiChat()->chatId() != ID_INVALID )
+    updateModernChatHeader( ChatManager::instance().chat( mp_embeddedChat->guiChat()->chatId() ) );
+  if( mp_modernSearch && !mp_modernSearch->text().trimmed().isEmpty() )
+    updateModernSearchResults();
+  updateModernNetworkState();
+  updateModernListState();
   checkViewActions();
   if( u.isLocal() )
   {
@@ -3715,6 +4898,8 @@ void GuiMain::onUserRemoved( const User& u )
   showMessage( tr( "%1 removed" ).arg( u.name() ), 2000 );
   mp_userList->updateUsers();
   updateTabTitles();
+  updateModernNetworkState();
+  updateModernListState();
 }
 
 void GuiMain::onChatChanged( const Chat& c )
@@ -3727,10 +4912,17 @@ void GuiMain::onChatChanged( const Chat& c )
   mp_groupList->updateChat( c );
   GuiFloatingChat* fl_chat = floatingChat( c.id() );
   if( fl_chat )
+  {
     fl_chat->updateChat( c );
+    if( fl_chat == mp_embeddedChat )
+      updateModernChatHeader( c );
+  }
   mp_savedChatList->updateSavedChats();
   updateTabTitles();
   updateNewMessageAction();
+  if( mp_modernSearch && !mp_modernSearch->text().trimmed().isEmpty() )
+    updateModernSearchResults();
+  updateModernListState();
 }
 
 void GuiMain::onChatRemoved( const Chat& c )
@@ -3746,6 +4938,7 @@ void GuiMain::onChatRemoved( const Chat& c )
     mp_trayIcon->setUnreadMessages( c.id(), 0 );
   updateTabTitles();
   updateNewMessageAction();
+  updateModernListState();
 }
 
 bool GuiMain::checkAllChatMembersAreConnected( const QList<VNumber>& users_id )
@@ -4214,6 +5407,12 @@ void GuiMain::removeFloatingChatFromList( VNumber chat_id )
     mp_menuChat->close();
 
   m_floatingChats.removeOne( fl_chat );
+  if( fl_chat == mp_embeddedChat )
+  {
+    mp_embeddedChat = Q_NULLPTR;
+    if( mp_modernConversationStack && mp_modernChatPlaceholder )
+      mp_modernConversationStack->setCurrentWidget( mp_modernChatPlaceholder );
+  }
   fl_chat->deleteLater();
 #ifdef BEEBEEP_DEBUG
   qDebug() << "Floating chat" << chat_id << "closed and deleted";
@@ -4230,12 +5429,26 @@ GuiFloatingChat* GuiMain::createFloatingChat( const Chat& c )
   if( fl_chat )
     return fl_chat;
 
-  if( Settings::instance().showChatsInOneWindow() && !m_floatingChats.isEmpty() )
+  if( mp_embeddedChat )
+    fl_chat = mp_embeddedChat;
+
+  if( !fl_chat && Settings::instance().showChatsInOneWindow() && !m_floatingChats.isEmpty() )
     fl_chat = m_floatingChats.first();
 
   if( !fl_chat )
   {
-    fl_chat = new GuiFloatingChat;
+    if( mp_modernChatBody && mp_modernChatBodyLayout )
+    {
+      fl_chat = new GuiFloatingChat( mp_modernChatBody );
+      fl_chat->setWindowFlags( Qt::Widget );
+      fl_chat->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Expanding );
+      fl_chat->setEmbeddedMode( true );
+      fl_chat->statusBar()->hide();
+      mp_modernChatBodyLayout->addWidget( fl_chat );
+      mp_embeddedChat = fl_chat;
+    }
+    else
+      fl_chat = new GuiFloatingChat;
     setupChatConnections( fl_chat->guiChat() );
     connect( fl_chat, SIGNAL( chatIsAboutToClose( VNumber ) ), this, SLOT( removeFloatingChatFromList( VNumber ) ) );
     connect( fl_chat, SIGNAL( readAllMessages( VNumber ) ), this, SLOT( readAllMessagesInChat( VNumber ) ) );
@@ -4247,8 +5460,13 @@ GuiFloatingChat* GuiMain::createFloatingChat( const Chat& c )
 #endif
 
     m_floatingChats.append( fl_chat );
-    fl_chat->setWindowFlagsAndGeometry();
-    fl_chat->setSaveGeometryDisabled( Settings::instance().resetGeometryAtStartup() );
+    if( fl_chat != mp_embeddedChat )
+    {
+      fl_chat->setWindowFlagsAndGeometry();
+      fl_chat->setSaveGeometryDisabled( Settings::instance().resetGeometryAtStartup() );
+    }
+    else
+      fl_chat->setSaveGeometryDisabled( true );
   }
 
   if( !fl_chat->setChat( c ) )
@@ -4527,6 +5745,8 @@ void GuiMain::selectDictionatyPath()
 
 void GuiMain::onNetworkInterfaceDown()
 {
+  updateModernNetworkState();
+  updateModernListState();
   if( beeCore->isConnected() )
     QMetaObject::invokeMethod( this, "stopCore", Qt::QueuedConnection );
 }
@@ -4537,6 +5757,8 @@ void GuiMain::onNetworkInterfaceUp()
     qDebug() << "User selected offline mode and the connection to network is refused";
   else
     QMetaObject::invokeMethod( this, "startCore", Qt::QueuedConnection );
+  updateModernNetworkState();
+  updateModernListState();
 }
 
 void GuiMain::onTickEvent( int ticks )
@@ -4695,11 +5917,14 @@ void GuiMain::resetGeometryAndState()
 {
   if( mp_dockFileTransfers->isVisible() )
     mp_dockFileTransfers->hide();
-  resize( qMax( width(), 280 ), qMin( 520, qMax( QApplication::desktop()->availableGeometry().height() - 120, 460 ) ) );
+  const QRect available_geometry = QApplication::desktop()->availableGeometry();
+  const int target_width = qMin( 1280, qMax( 980, available_geometry.width() - 140 ) );
+  const int target_height = qMin( 820, qMax( 640, available_geometry.height() - 140 ) );
+  resize( target_width, target_height );
 
 #ifdef Q_OS_WIN
-  move( QApplication::desktop()->availableGeometry().width() - frameGeometry().width(),
-        QApplication::desktop()->availableGeometry().height() - frameGeometry().height() );
+  move( available_geometry.x() + (available_geometry.width() - frameGeometry().width()) / 2,
+        available_geometry.y() + (available_geometry.height() - frameGeometry().height()) / 2 );
 #elif defined BEEBEEP_FOR_RASPBERRY_PI
   move( QApplication::desktop()->availableGeometry().width() - frameGeometry().width(), 70 );
 #elif defined Q_OS_MAC
@@ -5407,6 +6632,8 @@ void GuiMain::loadStyle()
   mp_savedChatList->updateBackground();
   updateChatColors();
   updateEmoticons();
+  applyModernStyle();
+  setMinimumSize( 720, 520 );
 }
 
 #ifdef BEEBEEP_USE_VOICE_CHAT

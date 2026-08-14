@@ -51,6 +51,7 @@ public:
   void updateEmoticons();
   inline void setChatToolbarVisible( bool );
   void loadSavedMessages();
+  void setEmbeddedMode( bool );
 
   void onTickEvent( int );
 
@@ -99,6 +100,7 @@ private:
 
   bool m_chatIsVisible;
   bool m_prevActivatedState;
+  bool m_embeddedMode;
 
   QIcon m_mainWindowIcon;
   QAction* mp_actGroupMenu;
@@ -109,7 +111,7 @@ private:
 // Inline Functions
 inline GuiChat* GuiFloatingChat::guiChat() const { return mp_chat; }
 inline bool GuiFloatingChat::chatIsVisible() const { return m_chatIsVisible; }
-inline void GuiFloatingChat::setChatToolbarVisible( bool new_value ) { mp_barChat->setVisible( new_value ); }
+inline void GuiFloatingChat::setChatToolbarVisible( bool new_value ) { if( !m_embeddedMode ) mp_barChat->setVisible( new_value ); }
 inline void GuiFloatingChat::setSaveGeometryDisabled( bool new_value ) { mp_actSaveWindowGeometry->setDisabled( new_value ); }
 
 #endif // BEEBEEP_GUIFLOATINGCHAT_H

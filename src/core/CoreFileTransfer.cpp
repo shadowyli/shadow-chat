@@ -861,10 +861,29 @@ void Core::sendShareBoxRequest( VNumber user_id, const QString& folder_name, boo
 
 void Core::buildShareBoxFileList( const User& u, const QString& folder_name, bool create_folder )
 {
+  if( !Bee::isSafeRelativePath( folder_name, true ) )
+  {
+    qWarning() << "Refusing to build ShareBox list for unsafe folder" << qPrintable( folder_name );
+    if( u.isLocal() )
+      emit shareBoxUnavailable( u, folder_name );
+    else
+      sendMessageToLocalNetwork( u, Protocol::instance().refuseToShareBoxPath( folder_name, create_folder ) );
+    return;
+  }
+
 #ifdef BEEBEEP_DEBUG
   qDebug() << "BeeBOX builds file list in folder" << qPrintable( folder_name ) << "for user" << qPrintable( u.path() );
 #endif
   QString folder_path = QString( "%1%2%3" ).arg( Settings::instance().shareBoxPath() ).arg( QDir::separator() ).arg( folder_name );
+  if( !Bee::isPathInside( Settings::instance().shareBoxPath(), folder_path ) )
+  {
+    qWarning() << "Refusing to build ShareBox list outside configured folder" << qPrintable( folder_path );
+    if( u.isLocal() )
+      emit shareBoxUnavailable( u, folder_name );
+    else
+      sendMessageToLocalNetwork( u, Protocol::instance().refuseToShareBoxPath( folder_name, create_folder ) );
+    return;
+  }
   if( create_folder )
   {
     QDir share_box_folder( Settings::instance().shareBoxPath() );

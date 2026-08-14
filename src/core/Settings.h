@@ -68,6 +68,8 @@ public:
   inline bool allowMultipleInstances() const;
   inline void setCheckNewVersionAtStartup( bool );
   inline bool checkNewVersionAtStartup() const;
+  inline void setLastVersionCheckAt( const QDateTime& );
+  inline const QDateTime& lastVersionCheckAt() const;
   inline void setPostUsageStatistics( bool );
   inline bool postUsageStatistics() const;
   inline bool canPostUsageStatistics() const;
@@ -962,6 +964,7 @@ private:
   QString m_dictionaryPath;
 
   bool m_checkNewVersionAtStartup;
+  QDateTime m_lastVersionCheckAt;
   bool m_useNativeDialogs;
   bool m_postUsageStatistics;
 
@@ -1281,6 +1284,8 @@ inline void Settings::setTickIntervalBroadcasting( int new_value ) { m_tickInter
 inline int Settings::tickIntervalBroadcasting() const { return m_tickIntervalBroadcasting; }
 inline void Settings::setCheckNewVersionAtStartup( bool new_value ) { m_checkNewVersionAtStartup = new_value; }
 inline bool Settings::checkNewVersionAtStartup() const { return m_checkNewVersionAtStartup; }
+inline void Settings::setLastVersionCheckAt( const QDateTime& new_value ) { m_lastVersionCheckAt = new_value; }
+inline const QDateTime& Settings::lastVersionCheckAt() const { return m_lastVersionCheckAt; }
 inline void Settings::setPostUsageStatistics( bool new_value ) { m_postUsageStatistics = new_value; }
 inline bool Settings::postUsageStatistics() const { return m_postUsageStatistics; }
 inline void Settings::setChatUseYourNameInsteadOfYou( bool new_value ) { m_chatUseYourNameInsteadOfYou = new_value; }

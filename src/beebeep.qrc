@@ -1,6 +1,21 @@
 <RCC>
     <qresource prefix="/">
         <file>images/beebeep.png</file>
+        <file>images/shadowchat/shadowchat-mark-source.png</file>
+        <file>images/shadowchat/icons/archive.svg</file>
+        <file>images/shadowchat/icons/arrow-left.svg</file>
+        <file>images/shadowchat/icons/chats-circle.svg</file>
+        <file>images/shadowchat/icons/dots-three-circle.svg</file>
+        <file>images/shadowchat/icons/folder-open.svg</file>
+        <file>images/shadowchat/icons/magnifying-glass.svg</file>
+        <file>images/shadowchat/icons/images-square.svg</file>
+        <file>images/shadowchat/icons/paper-plane-tilt.svg</file>
+        <file>images/shadowchat/icons/paperclip.svg</file>
+        <file>images/shadowchat/icons/plus.svg</file>
+        <file>images/shadowchat/icons/shield-check.svg</file>
+        <file>images/shadowchat/icons/smiley.svg</file>
+        <file>images/shadowchat/icons/user-circle.svg</file>
+        <file>images/shadowchat/icons/users-three.svg</file>
         <file>emoticons/smile.png</file>
         <file>emoticons/cool.png</file>
         <file>emoticons/tongue.png</file>

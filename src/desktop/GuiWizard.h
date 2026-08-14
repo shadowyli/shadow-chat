@@ -37,16 +37,24 @@ public:
   void loadSettings();
 
   inline const QString& userName() const;
+  inline const QPixmap& avatar() const;
+  inline bool checkForUpdates() const;
 
 protected slots:
   void saveSettings();
+  void chooseAvatar();
 
 private:
   QString m_userName;
+  QPixmap m_avatar;
+  QCheckBox* mp_cbCheckForUpdates;
+  QPushButton* mp_pbChooseAvatar;
 
 };
 
 // Inline Functions
 inline const QString& GuiWizard::userName() const { return m_userName; }
+inline const QPixmap& GuiWizard::avatar() const { return m_avatar; }
+inline bool GuiWizard::checkForUpdates() const { return mp_cbCheckForUpdates && mp_cbCheckForUpdates->isChecked(); }
 
 #endif // BEEBEEP_GUIWIZARD_H

@@ -74,6 +74,8 @@ namespace Bee
   QPixmap convertToGrayScale( const QIcon&, const QSize& pixmap_size );
   QChar nativeFolderSeparator();
   QString convertToNativeFolderSeparator( const QString& );
+  bool isSafeRelativePath( const QString&, bool allow_subfolders );
+  bool isPathInside( const QString& root_path, const QString& candidate_path );
   QString folderCdUp( const QString& );
   bool setLastModifiedToFile( const QString&, const QDateTime& );
   bool showFileInGraphicalShell( const QString& );

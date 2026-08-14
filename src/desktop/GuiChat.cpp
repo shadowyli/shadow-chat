@@ -36,6 +36,7 @@
 #include "IconManager.h"
 #include "Protocol.h"
 #include "Settings.h"
+#include "ShadowStyle.h"
 #include "ShortcutManager.h"
 #ifdef BEEBEEP_USE_HUNSPELL
   #include "SpellChecker.h"
@@ -76,6 +77,9 @@ GuiChat::GuiChat( QWidget *parent )
   widget_sizes.append( 200 );
   widget_sizes.append( 80 );
   mp_splitter->setSizes( widget_sizes );
+  mp_modernAttachButton = Q_NULLPTR;
+  mp_modernComposerHint = Q_NULLPTR;
+  m_modernMode = false;
 
   mp_teMessage->setFocusPolicy( Qt::StrongFocus );
   mp_teMessage->setAcceptRichText( false );
@@ -192,6 +196,75 @@ GuiChat::GuiChat( QWidget *parent )
   connect( mp_pbSend, SIGNAL( clicked() ), this, SLOT( sendMessage() ) );
 }
 
+void GuiChat::setModernMode( bool enabled )
+{
+  if( !enabled || m_modernMode )
+    return;
+
+  m_modernMode = true;
+  mp_frameChat->setObjectName( "ShadowTranscriptFrame" );
+  mp_frameMessage->setObjectName( "ShadowComposer" );
+  mp_splitter->setHandleWidth( 1 );
+  mp_splitter->setContentsMargins( 0, 0, 0, 0 );
+
+  QGridLayout* composer_layout = qobject_cast<QGridLayout*>( mp_frameMessage->layout() );
+  if( composer_layout )
+  {
+    composer_layout->removeWidget( mp_teMessage );
+    composer_layout->removeWidget( mp_pbSend );
+    composer_layout->removeWidget( mp_pbRecordVoiceMessage );
+    composer_layout->removeWidget( mp_cbSendAndClose );
+    composer_layout->setContentsMargins( 16, 10, 16, 12 );
+    composer_layout->setHorizontalSpacing( 8 );
+    composer_layout->setVerticalSpacing( 8 );
+
+    mp_teMessage->setMinimumHeight( 74 );
+    mp_teMessage->setMaximumHeight( 160 );
+    mp_teMessage->setAccessibleName( QStringLiteral( "消息输入框" ) );
+    composer_layout->addWidget( mp_teMessage, 0, 0, 1, 4 );
+
+    mp_modernAttachButton = new QToolButton( mp_frameMessage );
+    mp_modernAttachButton->setObjectName( "ShadowComposerAction" );
+    mp_modernAttachButton->setText( QStringLiteral( "图片 / 文件" ) );
+    mp_modernAttachButton->setIcon( ShadowStyle::actionIcon( QStringLiteral( "paperclip" ) ) );
+    mp_modernAttachButton->setIconSize( QSize( 18, 18 ) );
+    mp_modernAttachButton->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
+    mp_modernAttachButton->setToolTip( QStringLiteral( "选择一个或多个文件；也可把图片拖到聊天窗口" ) );
+    mp_modernAttachButton->setAccessibleName( QStringLiteral( "发送图片或文件" ) );
+    connect( mp_modernAttachButton, SIGNAL( clicked() ), this, SLOT( sendFile() ) );
+    composer_layout->addWidget( mp_modernAttachButton, 1, 0 );
+
+    mp_modernComposerHint = new QLabel( mp_frameMessage );
+    mp_modernComposerHint->setObjectName( "ShadowComposerHint" );
+    composer_layout->addWidget( mp_modernComposerHint, 1, 1 );
+    composer_layout->setColumnStretch( 2, 1 );
+
+    mp_pbSend->setObjectName( "ShadowSendButton" );
+    mp_pbSend->setText( QStringLiteral( "发送" ) );
+    mp_pbSend->setIcon( QIcon() );
+    mp_pbSend->setFlat( false );
+    mp_pbSend->setMinimumSize( 72, 34 );
+    mp_pbSend->setMaximumSize( 96, 36 );
+    mp_pbSend->setAccessibleName( QStringLiteral( "发送消息" ) );
+    mp_pbSend->setStyleSheet( QStringLiteral(
+      "QPushButton { color: #FFFFFF; background: #2563EB; border: 1px solid #2563EB; border-radius: 8px; padding: 6px 16px; font-weight: 600; }"
+      "QPushButton:hover { background: #1D4ED8; border-color: #1D4ED8; }"
+      "QPushButton:disabled { color: #8A94A3; background: #E7EBF0; border-color: #E7EBF0; }"
+      "QPushButton:focus { border: 2px solid #8CB4FF; padding: 5px 15px; }" ) );
+    composer_layout->addWidget( mp_pbSend, 1, 3 );
+  }
+
+  mp_pbRecordVoiceMessage->hide();
+  mp_cbSendAndClose->hide();
+  mp_frameVoicePlayer->hide();
+  updateUseReturnKeyToSendMessageToolTip();
+  setChatFont( ShadowStyle::applicationFont() );
+  updateChatColors();
+  QList<int> modern_sizes;
+  modern_sizes << 520 << 126;
+  mp_splitter->setSizes( modern_sizes );
+}
+
 void GuiChat::setupToolBar( QToolBar* chat_bar )
 {
   // Chat toolbar
@@ -283,6 +356,8 @@ void GuiChat::updateActions( const Chat& c, bool is_connected, int connected_use
   mp_actClearSystemMessages->setEnabled( c.hasSystemMessages() );
   mp_actSendFile->setEnabled( file_transfer_is_active && local_user_is_member && is_connected && can_send_files );
   mp_actSendFolder->setEnabled( file_transfer_is_active && local_user_is_member && is_connected && can_send_files );
+  if( mp_modernAttachButton )
+    mp_modernAttachButton->setEnabled( mp_actSendFile->isEnabled() );
 
   if( !is_connected )
   {
@@ -521,6 +596,17 @@ void GuiChat::checkWriting()
 
 void GuiChat::checkAnchorClicked( const QUrl& url )
 {
+  if( url.scheme() == QLatin1String( "shadowexpand" ) )
+  {
+    const QString message_id = url.path();
+    if( !message_id.isEmpty() )
+    {
+      m_expandedMessageIds.insert( message_id );
+      updateChat();
+    }
+    return;
+  }
+
   if( url.scheme() == FileInfo::urlSchemeVoiceMessage() )
     emit showStatusMessageRequest( tr( "Opening voice message" ) + QString( "..." ), 3000 );
 
@@ -533,6 +619,9 @@ QString GuiChat::chatMessageToText( const ChatMessage& cm )
 
   if( !messageCanBeShowed( cm ) )
     return s;
+
+  if( m_modernMode && !cm.isFromSystem() && !cm.isFileTransfer() && !cm.isImagePreview() )
+    return modernChatMessageToText( cm );
 
   if( !cm.isFromSystem() )
   {
@@ -597,8 +686,125 @@ void GuiChat::setChatStylesheet( QTextDocument* text_document )
   // Valid only for NEW INSERTED HTML
   QString default_chat_css = text_document->defaultStyleSheet();
   default_chat_css.append( QString( " .bee-quote { background-color: %1; color: %2; }" ).arg( Settings::instance().chatQuoteBackgroundColor(), Settings::instance().chatQuoteTextColor() ) );
+  if( m_modernMode )
+    default_chat_css.append( QStringLiteral(
+      " .shadow-image-album { color: #243044; }"
+      " a { color: #2457B8; text-decoration: none; }" ) );
   text_document->setDefaultStyleSheet( default_chat_css );
 }
+
+QString GuiChat::modernMessageId( const ChatMessage& cm ) const
+{
+  const QString key = QStringLiteral( "%1|%2|%3" )
+                      .arg( cm.userId() )
+                      .arg( cm.timestamp().toMSecsSinceEpoch() )
+                      .arg( cm.message() );
+  return QString::number( qHash( key ) );
+}
+
+QString GuiChat::modernChatMessageToText( const ChatMessage& cm )
+{
+  User user = UserManager::instance().findUser( cm.userId() );
+  const bool from_local_user = cm.isFromLocalUser() || (user.isValid() && user.isLocal());
+  const QString user_name = from_local_user ? QStringLiteral( "我" )
+                                             : (user.isValid() ? Bee::userNameToShow( user, true ) : QStringLiteral( "未知用户" ));
+  QString message_body = cm.message();
+
+  if( cm.isSourceCode() )
+    message_body = QStringLiteral( "<code>%1</code>" ).arg( message_body.toHtmlEscaped().replace( QLatin1Char( '\n' ), QLatin1String( "<br>" ) ) );
+
+  QTextDocument plain_document;
+  plain_document.setHtml( message_body );
+  const QString plain_text = plain_document.toPlainText();
+  const QString message_id = modernMessageId( cm );
+  if( plain_text.size() > 700 && !m_expandedMessageIds.contains( message_id ) )
+  {
+    QString teaser = plain_text.left( 520 ).trimmed().toHtmlEscaped();
+    teaser.replace( QLatin1Char( '\n' ), QLatin1String( "<br>" ) );
+    message_body = QStringLiteral( "%1…<br><br><a href=\"shadowexpand:%2\"><b>展开全文</b></a>" )
+                   .arg( teaser, message_id );
+  }
+
+  const QString alignment = from_local_user ? QStringLiteral( "right" ) : QStringLiteral( "left" );
+  const QString bubble_color = from_local_user ? QStringLiteral( "#DDEBFF" ) : QStringLiteral( "#FFFFFF" );
+  const QString timestamp = cm.timestamp().isValid() ? cm.timestamp().toString( QStringLiteral( "HH:mm" ) ) : QString();
+  return QStringLiteral(
+    "<br><table align=\"%1\" width=\"72%\" cellspacing=\"0\" cellpadding=\"0\">"
+    "<tr><td align=\"%1\"><font color=\"#6B7686\">%2&nbsp;&nbsp;%3</font></td></tr>"
+    "<tr><td><table width=\"100%\" cellspacing=\"0\" cellpadding=\"11\" bgcolor=\"%4\"><tr><td>%5</td></tr></table></td></tr>"
+    "</table><br><br>" )
+    .arg( alignment, user_name.toHtmlEscaped(), timestamp, bubble_color, message_body );
+}
+
+QString GuiChat::modernImageAlbumHtml( const QStringList& preview_messages, bool from_local_user ) const
+{
+  QString combined = preview_messages.join( QStringLiteral( " " ) );
+  QStringList image_links;
+  QRegExp image_link_expression( QStringLiteral( "(<a[^>]*>\\s*<img[^>]*>\\s*</a>)" ) );
+  image_link_expression.setMinimal( true );
+  int offset = 0;
+  while( (offset = image_link_expression.indexIn( combined, offset )) >= 0 )
+  {
+    image_links.append( image_link_expression.cap( 1 ) );
+    offset += qMax( 1, image_link_expression.matchedLength() );
+  }
+
+  if( image_links.isEmpty() )
+  {
+    combined.replace( QStringLiteral( "<br><div align=center>" ), QString() );
+    combined.replace( QStringLiteral( "</div>" ), QString() );
+    image_links.append( combined );
+  }
+
+  QString visible_html;
+  foreach( QString image_link, image_links )
+  {
+    image_link.replace( QRegExp( QStringLiteral( "\\s+(width|height)=\"[^\"]*\"" ) ), QString() );
+    image_link.replace( QStringLiteral( "<img" ), QStringLiteral( "<img width=\"440\"" ) );
+    visible_html += QStringLiteral( "<div align=\"left\">%1</div><br>" ).arg( image_link );
+  }
+
+  const QString alignment = from_local_user ? QStringLiteral( "right" ) : QStringLiteral( "left" );
+  const QString background = from_local_user ? QStringLiteral( "#DDEBFF" ) : QStringLiteral( "#FFFFFF" );
+  return QStringLiteral(
+    "<br><table align=\"%1\" width=\"74%\" cellspacing=\"0\" cellpadding=\"14\" bgcolor=\"%2\">"
+    "<tr><td><font color=\"#5F6B7A\"><b>%3 张图片</b> · 点击图片查看原图</font>"
+    "<br><br><div class=\"shadow-image-album\" align=\"left\">%4</div></td></tr></table><br>" )
+    .arg( alignment )
+    .arg( background )
+    .arg( image_links.size() )
+    .arg( visible_html );
+}
+
+#ifdef BEEBEEP_UX_PREVIEW
+void GuiChat::showUxPreviewConversation( const QStringList& image_paths )
+{
+  QStringList preview_messages;
+  foreach( const QString& image_path, image_paths )
+  {
+    const QString image_url = QUrl::fromLocalFile( image_path ).toString();
+    preview_messages.append( QStringLiteral( "<a href=\"%1\"><img src=\"%1\" height=\"160\"></a>" ).arg( image_url ) );
+  }
+
+  QString html = QStringLiteral(
+    "<p align=\"center\"><font color=\"#8A94A3\">今天 12:52</font></p>"
+    "<br><table align=\"right\" width=\"72%\" cellspacing=\"0\" cellpadding=\"0\">"
+    "<tr><td align=\"right\"><font color=\"#6B7686\">我&nbsp;&nbsp;12:52</font></td></tr>"
+    "<tr><td><table width=\"100%\" cellspacing=\"0\" cellpadding=\"11\" bgcolor=\"#DDEBFF\"><tr><td>活动物料已整理好，请帮忙确认图片。</td></tr></table></td></tr>"
+    "</table><br><br>" );
+  html += modernImageAlbumHtml( preview_messages, true );
+  html += QStringLiteral(
+    "<br><table align=\"left\" width=\"72%\" cellspacing=\"0\" cellpadding=\"0\">"
+    "<tr><td><font color=\"#6B7686\">林晓&nbsp;&nbsp;12:54</font></td></tr>"
+    "<tr><td><table width=\"100%\" cellspacing=\"0\" cellpadding=\"11\" bgcolor=\"#FFFFFF\"><tr><td>收到，这样一次查看和保存方便多了。</td></tr></table></td></tr>"
+    "</table><br>" );
+
+  QTextDocument* text_document = mp_teChat->document();
+  setChatStylesheet( text_document );
+  mp_teChat->setHtml( html );
+  mp_teChat->verticalScrollBar()->setValue( 0 );
+}
+#endif
 
 bool GuiChat::setChat( const Chat& c )
 {
@@ -645,6 +851,8 @@ bool GuiChat::setChat( const Chat& c )
       html_text += limit_reached_text;
   }
 
+  QStringList pending_image_previews;
+  VNumber pending_image_user_id = ID_INVALID;
   foreach( ChatMessage cm, c.messages() )
   {
     if( num_messages > msg_lines )
@@ -652,9 +860,34 @@ bool GuiChat::setChat( const Chat& c )
       num_messages--;
       continue;
     }
-    else
-      html_text += chatMessageToText( cm );
+
+    if( m_modernMode && cm.isImagePreview() )
+    {
+      if( !pending_image_previews.isEmpty() && pending_image_user_id != cm.userId() )
+      {
+        html_text += modernImageAlbumHtml( pending_image_previews, pending_image_user_id == ID_LOCAL_USER );
+        pending_image_previews.clear();
+      }
+      pending_image_user_id = cm.userId();
+      pending_image_previews.append( cm.message() );
+      m_lastMessageUserId = ID_SYSTEM_MESSAGE;
+      continue;
+    }
+
+    if( m_modernMode && !pending_image_previews.isEmpty() && cm.isFileTransfer() )
+      continue;
+
+    if( !pending_image_previews.isEmpty() )
+    {
+      html_text += modernImageAlbumHtml( pending_image_previews, pending_image_user_id == ID_LOCAL_USER );
+      pending_image_previews.clear();
+      pending_image_user_id = ID_INVALID;
+    }
+
+    html_text += chatMessageToText( cm );
   }
+  if( !pending_image_previews.isEmpty() )
+    html_text += modernImageAlbumHtml( pending_image_previews, pending_image_user_id == ID_LOCAL_USER );
 
   QTextDocument *text_document = mp_teMessage->document();
   QTextOption text_option = text_document->defaultTextOption();
@@ -724,6 +957,9 @@ bool GuiChat::appendChatMessage( const Chat& c, const ChatMessage& cm )
     return false;
   }
 
+  if( m_modernMode && (cm.isImagePreview() || cm.isFileTransfer()) )
+    return setChat( c );
+
   bool show_timestamp_last_message = !cm.isFromLocalUser() && !cm.isFromSystem();
   mp_actClear->setDisabled( c.isEmpty() && !ChatManager::instance().chatHasSavedText( c.name() ) );
   mp_actClearSystemMessages->setEnabled( c.hasSystemMessages() );
@@ -777,6 +1013,17 @@ void GuiChat::selectFont()
 
 void GuiChat::updateChatColors()
 {
+  if( m_modernMode )
+  {
+    mp_teMessage->setTextColor( QColor( "#172033" ) );
+    mp_teMessage->setStyleSheet( QStringLiteral(
+      "#GuiMessageEdit { background: #FFFFFF; color: #172033; border: 1px solid #DCE3EC; border-radius: 10px; padding: 9px 10px; selection-background-color: #CFE0FF; }"
+      "#GuiMessageEdit:focus { border: 2px solid #2563EB; padding: 8px 9px; }" ) );
+    mp_teChat->setStyleSheet( QStringLiteral(
+      "#GuiChatViewer { background: #F5F7FB; color: #243044; border: 0; padding: 18px 22px; selection-background-color: #CFE0FF; }" ) );
+    return;
+  }
+
   QString background_color = m_chatId == ID_DEFAULT_CHAT ? Settings::instance().defaultChatBackgroundColor() : Settings::instance().chatBackgroundColor();
   QString text_color = Settings::instance().chatFontColor() != Settings::instance().chatDefaultTextColor() ? Settings::instance().chatFontColor(): Settings::instance().chatDefaultTextColor();
   mp_teMessage->setTextColor( text_color );
@@ -905,7 +1152,26 @@ void GuiChat::sendFolder()
 void GuiChat::dragEnterEvent( QDragEnterEvent *event )
 {
   if( event->mimeData()->hasUrls() )
+  {
     event->acceptProposedAction();
+    if( m_modernMode )
+    {
+      mp_frameMessage->setProperty( "dropActive", true );
+      mp_frameMessage->style()->unpolish( mp_frameMessage );
+      mp_frameMessage->style()->polish( mp_frameMessage );
+    }
+  }
+}
+
+void GuiChat::dragLeaveEvent( QDragLeaveEvent *event )
+{
+  Q_UNUSED( event );
+  if( m_modernMode )
+  {
+    mp_frameMessage->setProperty( "dropActive", false );
+    mp_frameMessage->style()->unpolish( mp_frameMessage );
+    mp_frameMessage->style()->polish( mp_frameMessage );
+  }
 }
 
 void GuiChat::checkAndSendImage( const QMimeData* source )
@@ -977,7 +1243,21 @@ void GuiChat::checkAndSendUrls( const QMimeData* source )
 
   num_files = qMin( num_files, Settings::instance().maxQueuedDownloads() );
 
-  if( QMessageBox::question( this, Settings::instance().programName(),
+  bool is_image_batch = num_files > 1;
+  if( is_image_batch )
+  {
+    foreach( const QString& path, file_path_list )
+    {
+      if( !Bee::isFileTypeImage( QFileInfo( path ).suffix() ) )
+      {
+        is_image_batch = false;
+        break;
+      }
+    }
+  }
+
+  if( (!m_modernMode || !is_image_batch) &&
+      QMessageBox::question( this, Settings::instance().programName(),
                              tr( "Do you want to send %1 %2 to the members of this chat?" ).arg( num_files )
                              .arg( num_files == 1 ? tr( "file" ) : tr( "files" ) ),
                              tr( "Yes" ), tr( "No" ), QString(), 0, 1 ) == 1 )
@@ -990,6 +1270,12 @@ void GuiChat::checkAndSendUrls( const QMimeData* source )
 
 void GuiChat::dropEvent( QDropEvent *event )
 {
+  if( m_modernMode )
+  {
+    mp_frameMessage->setProperty( "dropActive", false );
+    mp_frameMessage->style()->unpolish( mp_frameMessage );
+    mp_frameMessage->style()->polish( mp_frameMessage );
+  }
   if( event->mimeData()->hasUrls() )
     checkAndSendUrls( event->mimeData() );
 }
@@ -1134,9 +1420,17 @@ void GuiChat::updateShortcuts()
 void GuiChat::updateUseReturnKeyToSendMessageToolTip()
 {
   if( Settings::instance().useReturnToSendMessage() )
+  {
     mp_actUseReturnToSendMessage->setToolTip( tr( "Use key Return to send message" ) );
+    if( mp_modernComposerHint )
+      mp_modernComposerHint->setText( QStringLiteral( "Enter 发送 · Shift+Enter 换行" ) );
+  }
   else
+  {
     mp_actUseReturnToSendMessage->setToolTip( tr( "Use key Return to make a carriage return" ) );
+    if( mp_modernComposerHint )
+      mp_modernComposerHint->setText( QStringLiteral( "Ctrl+Enter 发送 · Enter 换行" ) );
+  }
 }
 
 void GuiChat::onUseReturnToSendMessageClicked()

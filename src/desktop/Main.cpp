@@ -46,6 +46,7 @@
 #include "Protocol.h"
 #include "Random.h"
 #include "Settings.h"
+#include "ShadowWorkspaceArchive.h"
 #include "ShortcutManager.h"
 #ifdef BEEBEEP_USE_HUNSPELL
   #include "SpellChecker.h"
@@ -149,8 +150,20 @@ int main( int argc, char *argv[] )
   Settings::instance().loadRcFile();
   Settings::instance().createLocalUser( "" );
   Settings::instance().setDataFolder();
+  {
+    QString workspace_restore_folder;
+    QString workspace_error;
+    if( !ShadowWorkspaceArchive::applyPendingImport( Settings::instance().dataFolder(), &workspace_restore_folder, &workspace_error ) )
+      qCritical() << "Unable to apply pending ShadowChat workspace:" << qPrintable( workspace_error );
+    else if( !workspace_restore_folder.isEmpty() )
+      qDebug() << "ShadowChat workspace imported. Restore point:" << qPrintable( workspace_restore_folder );
+  }
   qDebug() << "Settings path:" << qPrintable( Settings::instance().currentSettingsFilePath() );
   Settings::instance().load();
+#ifdef BEEBEEP_UX_PREVIEW
+  Settings::instance().setFirstTime( false );
+  Settings::instance().setAskChangeUserAtStartup( false );
+#endif
   Settings::instance().createApplicationUuid();
   Log::instance().setMaxLogLines( Settings::instance().maxLogLines() );
   qDebug() << "Log has set max lines to:" << Settings::instance().maxLogLines();
@@ -245,7 +258,11 @@ int main( int argc, char *argv[] )
 #endif
 
   /* Init Plugins */
+#ifndef SHADOWCHAT_SAFE_BUILD
   PluginManager::instance().loadPlugins( Settings::instance().pluginPath() );
+#else
+  qDebug() << "ShadowChat safe build: third-party plugins are disabled";
+#endif
 
   /* Init BeeApp */
   bee_app.init();
