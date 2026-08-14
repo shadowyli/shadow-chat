@@ -23,6 +23,7 @@ HEADERS += desktop/BeeApplication.h \
   desktop/GuiGroupItem.h \
   desktop/GuiGroupList.h \
   desktop/GuiHome.h \
+  desktop/GuiImageBatchPreview.h \
   desktop/GuiIconProvider.h \
   desktop/GuiLanguage.h \
   desktop/GuiLog.h \
@@ -37,6 +38,8 @@ HEADERS += desktop/BeeApplication.h \
   desktop/GuiSavedChatItem.h \
   desktop/GuiSavedChatList.h \
   desktop/GuiScreenShot.h \
+  desktop/ShadowWorkspaceArchive.h \
+  desktop/ShadowStyle.h \
   desktop/GuiShareBox.h \
   desktop/GuiShareBoxFileInfoItem.h \
   desktop/GuiShareBoxFileInfoList.h \
@@ -72,6 +75,7 @@ SOURCES +=  desktop/BeeApplication.cpp \
   desktop/GuiGroupItem.cpp \
   desktop/GuiGroupList.cpp \
   desktop/GuiHome.cpp \
+  desktop/GuiImageBatchPreview.cpp \
   desktop/GuiIconProvider.cpp \
   desktop/GuiLanguage.cpp \
   desktop/GuiLog.cpp \
@@ -86,6 +90,8 @@ SOURCES +=  desktop/BeeApplication.cpp \
   desktop/GuiSavedChatItem.cpp \
   desktop/GuiSavedChatList.cpp \
   desktop/GuiScreenShot.cpp \
+  desktop/ShadowWorkspaceArchive.cpp \
+  desktop/ShadowStyle.cpp \
   desktop/GuiShareBox.cpp \
   desktop/GuiShareBoxFileInfoItem.cpp \
   desktop/GuiShareBoxFileInfoList.cpp \

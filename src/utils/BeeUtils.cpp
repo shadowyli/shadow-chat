@@ -472,6 +472,36 @@ QString Bee::convertToNativeFolderSeparator( const QString& raw_path )
   return path_converted;
 }
 
+bool Bee::isSafeRelativePath( const QString& relative_path, bool allow_subfolders )
+{
+  if( relative_path.isEmpty() )
+    return true;
+
+  const QString normalized = QDir::cleanPath( QDir::fromNativeSeparators( relative_path ) );
+  if( normalized.isEmpty() || normalized == QLatin1String( "." ) )
+    return allow_subfolders;
+  if( QDir::isAbsolutePath( normalized ) || normalized == QLatin1String( ".." ) || normalized.startsWith( QLatin1String( "../" ) ) || normalized.contains( QLatin1Char( '\0' ) ) )
+    return false;
+  if( !allow_subfolders && QFileInfo( normalized ).fileName() != normalized )
+    return false;
+  return true;
+}
+
+bool Bee::isPathInside( const QString& root_path, const QString& candidate_path )
+{
+  const QString root = QDir::cleanPath( QFileInfo( root_path ).absoluteFilePath() );
+  const QString candidate = QDir::cleanPath( QFileInfo( candidate_path ).absoluteFilePath() );
+  if( root.isEmpty() || candidate.isEmpty() )
+    return false;
+
+  const QString root_prefix = root.endsWith( QDir::separator() ) ? root : root + QDir::separator();
+  Qt::CaseSensitivity path_case = Qt::CaseSensitive;
+#ifdef Q_OS_WIN
+  path_case = Qt::CaseInsensitive;
+#endif
+  return candidate == root || candidate.startsWith( root_prefix, path_case );
+}
+
 QString Bee::folderCdUp( const QString& folder_path )
 {
   QStringList sl = Bee::convertToNativeFolderSeparator( folder_path ).split( nativeFolderSeparator() );

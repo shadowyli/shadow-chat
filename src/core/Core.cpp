@@ -324,12 +324,14 @@ bool Core::start()
   if( Settings::instance().checkNewVersionAtStartup() )
     QTimer::singleShot( 3000, this, SLOT( checkNewVersion() ) );
 
+#ifndef SHADOWCHAT_SAFE_BUILD
  #ifdef BEEBEEP_DEBUG
   QTimer::singleShot( 6000, this, SLOT( postUsageStatistics() ) );
  #else
   if( Settings::instance().canPostUsageStatistics() )
     QTimer::singleShot( 7000, this, SLOT( postUsageStatistics() ) );
  #endif
+#endif
 
 #ifdef BEEBEEP_USE_MULTICAST_DNS
   QTimer::singleShot( 12000, this, SLOT( startDnsMulticasting() ) );
@@ -577,6 +579,16 @@ void Core::checkNewVersion()
   if( !NetworkManager::instance().isMainInterfaceUp() )
     return;
 
+  const QDateTime now = QDateTime::currentDateTimeUtc();
+  if( Settings::instance().lastVersionCheckAt().isValid() &&
+      Settings::instance().lastVersionCheckAt().secsTo( now ) < 7 * 24 * 60 * 60 )
+  {
+    qDebug() << "Version check skipped: the last check was less than seven days ago";
+    return;
+  }
+  Settings::instance().setLastVersionCheckAt( now );
+  Settings::instance().save();
+
   qDebug() << "Checking for new version...";
   Updater* updater = new Updater;
   connect( updater, SIGNAL( jobCompleted() ), this, SLOT( onUpdaterJobCompleted() ) );
@@ -610,8 +622,18 @@ void Core::onUpdaterJobCompleted()
     return;
 
   QString my_version = Settings::instance().version( false, false, false );
+  int latest_suffix = 0;
+  int current_suffix = 0;
+  const QVersionNumber latest_number = QVersionNumber::fromString( latest_version, &latest_suffix );
+  const QVersionNumber current_number = QVersionNumber::fromString( my_version, &current_suffix );
 
-  if( my_version >= latest_version )
+  if( latest_number.isNull() || current_number.isNull() || latest_suffix != latest_version.size() || current_suffix != my_version.size() )
+  {
+    qWarning() << "Invalid version string in ShadowChat update manifest:" << qPrintable( latest_version );
+    return;
+  }
+
+  if( QVersionNumber::compare( current_number, latest_number ) >= 0 )
   {
     qDebug() << "Latest version on the website is" << qPrintable( latest_version ) << "(update is not needed)";
     return;
@@ -620,7 +642,7 @@ void Core::onUpdaterJobCompleted()
   qDebug() << "Latest version on website is" << qPrintable( latest_version ) << "(update is recommended)";
 
   QString html_msg = QString( "%1 <b>%2</b>. <a href=""%3"">%4</a>." ).arg( IconManager::instance().toHtml( "update.png", "*!*" ),
-                                                           tr( "New version is available" ), download_url,
+                                                           tr( "New version is available" ), download_url.toHtmlEscaped(),
                                                            tr( "Click here to download" ) );
 
   dispatchSystemMessage( ID_DEFAULT_CHAT, ID_LOCAL_USER, html_msg, DispatchToChat, ChatMessage::System, false );

@@ -1,0 +1,31 @@
+# qmake / nmake output
+Makefile*
+.qmake.stash
+build/
+test/
+/dist/
+/.tools/
+aqtinstall.log
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.exp
+*.lib
+*.user
+
+# Local UX review artifacts
+.ux-review/
+
+# qmake-generated files in the legacy in-source build
+/src/moc_*.cpp
+/src/moc_predefs.h
+/src/qrc_*.cpp
+/src/ui_*.h
+/src/beebeep.res
+/src/release/
+/tests/release/
+/tests/debug/
+/plugins/*/moc_*.cpp
+/plugins/*/moc_predefs.h
+/plugins/*/qrc_*.cpp

@@ -38,6 +38,15 @@ void Updater::checkForNewVersion()
   m_downloadUrl = "";
   m_news = "";
   QUrl url( Settings::instance().lastVersionUrl() );
+#ifdef SHADOWCHAT_SAFE_BUILD
+  if( url.scheme() != QLatin1String( "https" ) || url.host() != QLatin1String( "shadowyli.github.io" ) ||
+      !url.path().startsWith( QLatin1String( "/shadow-chat/" ) ) )
+  {
+    qWarning() << "ShadowChat blocked an invalid update manifest URL";
+    emit jobCompleted();
+    return;
+  }
+#endif
 
   HttpDownloader* http_downloader = new HttpDownloader( this );
   connect( http_downloader, SIGNAL( downloadCompleted( const QString& ) ),this, SLOT( onDownloadCompleted( const QString& ) ), Qt::QueuedConnection );
@@ -80,8 +89,28 @@ void Updater::onDownloadCompleted( const QString& file_path )
   if( !m_downloadUrl.isEmpty() )
   {
     QUrl url = QUrl::fromUserInput( m_downloadUrl );
-    m_downloadUrl = url.toString();
+#ifdef SHADOWCHAT_SAFE_BUILD
+    const bool product_page = url.scheme() == QLatin1String( "https" ) &&
+                              url.host() == QLatin1String( "shadowyli.github.io" ) &&
+                              url.path().startsWith( QLatin1String( "/shadow-chat/" ) );
+    const bool github_release = url.scheme() == QLatin1String( "https" ) &&
+                                url.host() == QLatin1String( "github.com" ) &&
+                                url.path().startsWith( QLatin1String( "/shadowyli/shadow-chat/releases/" ) );
+    if( !product_page && !github_release )
+    {
+      qWarning() << "ShadowChat blocked an untrusted update download URL";
+      m_downloadUrl.clear();
+    }
+    else
+#endif
+      m_downloadUrl = url.toString();
   }
+
+#ifdef SHADOWCHAT_SAFE_BUILD
+  // The static manifest is intentionally data-only. Do not render remotely
+  // supplied HTML/news in chats in the hardened build.
+  m_news.clear();
+#endif
 
   QFile file_downloaded( file_path );
   if( !file_downloaded.remove() )

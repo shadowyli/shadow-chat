@@ -23,6 +23,7 @@
 
 #include "FileShare.h"
 #include "FileTransfer.h"
+#include "BeeUtils.h"
 #include "Random.h"
 #include "Settings.h"
 #include "Protocol.h"
@@ -245,6 +246,14 @@ void FileTransfer::checkUploadRequest( const FileInfo& file_info_to_check )
     return;
   }
 
+  if( !Bee::isSafeRelativePath( file_info_to_check.name(), false ) ||
+      !Bee::isSafeRelativePath( file_info_to_check.shareFolder(), true ) )
+  {
+    qWarning() << "File Transfer rejected unsafe remote path" << qPrintable( file_info_to_check.name() );
+    upload_peer->cancelTransfer();
+    return;
+  }
+
   FileInfo file_info;
 
   if( file_info_to_check.isInShareBox() )
@@ -276,19 +285,36 @@ void FileTransfer::checkUploadRequest( const FileInfo& file_info_to_check )
                                          .arg( file_info_to_check.name() );
 
       QFileInfo share_box_file_info( file_path );
+      if( !Bee::isPathInside( Settings::instance().shareBoxPath(), file_path ) )
+      {
+        qWarning() << "BeeBOX file upload request refused (outside sharebox):" << file_path;
+        upload_peer->cancelTransfer();
+        return;
+      }
+
       if( !share_box_file_info.exists() )
       {
         qWarning() << "BeeBOX file upload request refused (not exists):" << file_path;
         upload_peer->cancelTransfer();
+        return;
       }
 
       if( !share_box_file_info.isReadable() )
       {
         qWarning() << "BeeBOX file upload request refused (not readable):" << file_path;
         upload_peer->cancelTransfer();
+        return;
       }
 
       file_info = Protocol::instance().fileInfo( share_box_file_info, "", true, "", FileInfo::File );
+    }
+
+    if( !file_info.isValid() || !Bee::isPathInside( Settings::instance().shareBoxPath(), file_info.path() ) ||
+        file_info.password() != file_info_to_check.password() )
+    {
+      qWarning() << "BeeBOX file upload request refused (invalid file or password):" << file_info_to_check.name();
+      upload_peer->cancelTransfer();
+      return;
     }
   }
   else

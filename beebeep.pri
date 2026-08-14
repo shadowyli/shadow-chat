@@ -1,5 +1,11 @@
 
+DEFINES += SHADOWCHAT_SAFE_BUILD
+
 win32-msvc: {
+  # Emojis.cpp contains UTF-8 string literals. Modern MSVC otherwise reads
+  # the file using the active Windows code page and fails to compile it.
+  QMAKE_CFLAGS += /utf-8
+  QMAKE_CXXFLAGS += /utf-8
   QMAKE_LFLAGS += /INCREMENTAL:NO
   lessThan( QT_MAJOR_VERSION, 5) | lessThan(QT_MINOR_VERSION, 10) {
     QMAKE_LFLAGS_WINDOWS = /SUBSYSTEM:WINDOWS,5.01

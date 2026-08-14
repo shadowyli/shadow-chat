@@ -102,6 +102,7 @@ GuiFloatingChat::GuiFloatingChat( QWidget *parent )
   statusBar();
   m_chatIsVisible = false;
   m_prevActivatedState = false;
+  m_embeddedMode = false;
 
   connect( mp_chat, SIGNAL( toggleVisibilityEmoticonsPanelRequest() ), this, SLOT( toggleVisibilityEmoticonPanel() ) );
   connect( mp_chat, SIGNAL( toggleVisibilityPresetMessagesPanelRequest() ), this, SLOT( toggleVisibilityPresetMessagesPanel() ) );
@@ -114,6 +115,20 @@ GuiFloatingChat::GuiFloatingChat( QWidget *parent )
   connect( mp_chat, SIGNAL( showVoiceMessageDialogRequest() ), this, SLOT( showRecordMessageDialog() ) );
 #endif
   connect( qApp, SIGNAL( focusChanged( QWidget*, QWidget* ) ), this, SLOT( onApplicationFocusChanged( QWidget*, QWidget* ) ) );
+}
+
+void GuiFloatingChat::setEmbeddedMode( bool enabled )
+{
+  m_embeddedMode = enabled;
+  if( !enabled )
+    return;
+
+  mp_barChat->hide();
+  mp_barMembers->hide();
+  mp_dockEmoticons->hide();
+  mp_dockPresetMessageList->hide();
+  mp_chat->setModernMode( true );
+  setWindowIcon( QIcon( QStringLiteral( ":/images/shadowchat/shadowchat-mark-source.png" ) ) );
 }
 
 void GuiFloatingChat::updateChatTitle( const Chat& c )
@@ -211,6 +226,12 @@ void GuiFloatingChat::updateChatMember( const Chat& c, const User& u )
 
 void GuiFloatingChat::updateChatMembers( const Chat& c )
 {
+  if( m_embeddedMode )
+  {
+    mp_barMembers->hide();
+    return;
+  }
+
   mp_barMembers->setVisible( !c.isDefault() );
   mp_barMembers->setEnabled( !c.isDefault() );
 

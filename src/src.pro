@@ -29,7 +29,7 @@ TEMPLATE = app
 #DEFINES += BEEBEEP_DISABLE_VIDEO_CALL
 #DEFINES += BEEBEEP_USE_WEBENGINE
 
-TARGET = beebeep
+TARGET = ShadowChat
 
 QT += network xml
 greaterThan(QT_MAJOR_VERSION, 4): {

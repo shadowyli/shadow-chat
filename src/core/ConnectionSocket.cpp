@@ -184,6 +184,13 @@ qint64 ConnectionSocket::readBlock()
       }
       DATA_BLOCK_SIZE_32 block_size_32;
       data_stream >> block_size_32;
+      if( block_size_32 < sizeof(DATA_BLOCK_SIZE_32) ||
+          (block_size_32 - sizeof(DATA_BLOCK_SIZE_32)) > SHADOWCHAT_MAX_NETWORK_BLOCK_SIZE )
+      {
+        qWarning() << "ConnectionSocket rejected an invalid or oversized 32-bit block size" << block_size_32;
+        abortConnection();
+        return -1;
+      }
       m_blockSize = block_size_32 - sizeof(DATA_BLOCK_SIZE_32); // bytearray serialize format must be 32 bytes
     }
     else
@@ -197,6 +204,13 @@ qint64 ConnectionSocket::readBlock()
       }
       DATA_BLOCK_SIZE_16 block_size_16;
       data_stream >> block_size_16;
+      if( block_size_16 < sizeof(DATA_BLOCK_SIZE_32) ||
+          (block_size_16 - sizeof(DATA_BLOCK_SIZE_32)) > DATA_BLOCK_SIZE_16_LIMIT )
+      {
+        qWarning() << "ConnectionSocket rejected an invalid 16-bit block size" << block_size_16;
+        abortConnection();
+        return -1;
+      }
       m_blockSize = block_size_16 - sizeof(DATA_BLOCK_SIZE_32); // bytearray serialize format must be 32 bytes (not 16!!!)
     }
   }
@@ -257,6 +271,12 @@ qint64 ConnectionSocket::readBlock()
   if( isCompressed() )
   {
     QByteArray uncompressed_byte_array = qUncompress( decrypted_byte_array );
+    if( static_cast<quint64>( uncompressed_byte_array.size() ) > SHADOWCHAT_MAX_NETWORK_BLOCK_SIZE )
+    {
+      qWarning() << "ConnectionSocket rejected an oversized decompressed network block" << uncompressed_byte_array.size();
+      abortConnection();
+      return -1;
+    }
     if( !uncompressed_byte_array.isEmpty() )
       decrypted_byte_array = uncompressed_byte_array;
   }
