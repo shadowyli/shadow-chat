@@ -163,7 +163,7 @@ Settings::Settings()
   m_confirmOnDownloadFile = false;
   m_resetMinimumWidthForStyle = true;
   m_onExistingFileAction = GenerateNewFileName;
-  m_resumeFileTransfer = true;
+  m_resumeFileTransfer = false;
   m_promptOnCloseEvent = true;
   m_saveUserList = true;
   m_saveGroupList = true;
@@ -911,7 +911,7 @@ QString Settings::languageWebSite() const
 
 QString Settings::lastVersionUrl() const
 {
-  return downloadWebSite() + QStringLiteral( "version.ini" );
+  return QStringLiteral( "https://flowx.gz/updates/shadowchat.json" );
 }
 
 QString Settings::newsWebSite() const
@@ -1515,6 +1515,10 @@ void Settings::loadCommonSettings( QSettings* user_ini )
   m_tickIntervalChatAutoSave = commonValue( system_rc, user_ini, "TickIntervalChatAutoSave", m_tickIntervalChatAutoSave ).toInt();
   m_chatSaveUnsentMessages = commonValue( system_rc, user_ini, "ChatSaveUnsentMessages", true ).toBool();
   m_chatMaxLineSaved = commonValue( system_rc, user_ini, "ChatMaxLineSaved", 9000 ).toInt();
+#ifdef SHADOWCHAT_SAFE_BUILD
+  // Team history is retained until the user explicitly clears it.
+  m_chatMaxLineSaved = -1;
+#endif
   m_chatSaveFileTransfers = commonValue( system_rc, user_ini, "ChatSaveFileTransfers", m_chatAutoSave ).toBool();
   m_chatSaveSystemMessages = commonValue( system_rc, user_ini, "ChatSaveSystemMessages", false ).toBool();
   m_showChatToolbar = commonValue( system_rc, user_ini, "ShowChatToolbar", true ).toBool();
@@ -1692,11 +1696,12 @@ void Settings::loadCommonSettings( QSettings* user_ini )
   bool overwrite_existing_files = commonValue( system_rc, user_ini, "OverwriteExistingFiles", false ).toBool();
   if( overwrite_existing_files )
     m_onExistingFileAction = OverwriteExistingFile;
-  m_onExistingFileAction = commonValue( system_rc, user_ini, "OnExistingFileAction", (int)m_onExistingFileAction ).toInt();
+  // ShadowChat always preserves received versions, including migrated settings.
+  m_onExistingFileAction = GenerateNewFileName;
   if( m_onExistingFileAction < 0 || m_onExistingFileAction >= NumOnExistingFileActionTypes )
     m_onExistingFileAction = OverwriteOlderExistingFile;
-  m_resumeFileTransfer = commonValue( system_rc, user_ini, "ResumeFileTransfer", m_resumeFileTransfer ).toBool();
-  m_confirmOnDownloadFile = commonValue( system_rc, user_ini, "ConfirmOnDownloadFile", m_useClassroomConfiguration || m_confirmOnDownloadFile ).toBool();
+  m_resumeFileTransfer = false;
+  m_confirmOnDownloadFile = false;
   m_downloadInUserFolder = commonValue( system_rc, user_ini, "DownloadInUserFolder", m_useClassroomConfiguration ).toBool();
   m_keepModificationDateOnFileTransferred = commonValue( system_rc, user_ini, "KeepModificationDateOnFileTransferred", m_keepModificationDateOnFileTransferred ).toBool();
   QStringList local_share = user_ini->value( "ShareList", QStringList() ).toStringList();
@@ -2218,7 +2223,7 @@ bool Settings::addStartOnSystemBoot()
   QSettings sets( "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", QSettings::NativeFormat );
   if( sets.isWritable() )
   {
-    sets.setValue( programName(), program_path );
+    sets.setValue( programName(), QStringLiteral( "\"%1\"" ).arg( program_path ) );
     sets.sync();
     return true;
   }
@@ -2247,7 +2252,8 @@ bool Settings::hasStartOnSystemBoot() const
 #ifdef Q_OS_WIN
   QString program_path = qApp->applicationFilePath().replace( "/", "\\" );
   QSettings sets( "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", QSettings::NativeFormat );
-  return sets.value( programName(), "" ).toString() == program_path;
+  const QString configured = sets.value( programName(), "" ).toString();
+  return configured == program_path || configured == QStringLiteral( "\"%1\"" ).arg( program_path );
 #else
   return false;
 #endif
@@ -2395,6 +2401,15 @@ bool Settings::setDataFolder()
   else
     qDebug() << "Configuration and data files will not be searched";
   return true;
+}
+
+void Settings::setAccountDataFolder( const QString& folder )
+{
+  m_useSettingsFileIni = true;
+  m_dataFolder = QDir::toNativeSeparators( folder );
+  m_cacheFolder = defaultCacheFolderPath();
+  QDir().mkpath( m_dataFolder );
+  QDir().mkpath( m_cacheFolder );
 }
 
 QString Settings::defaultDownloadFolderPath() const

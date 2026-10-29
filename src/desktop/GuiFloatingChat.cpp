@@ -296,6 +296,8 @@ void GuiFloatingChat::updateUser( const User& u )
   if( !c.hasUser( u.id() ) )
     return;
 
+  mp_chat->updateUserAvatar( u );
+
   if( c.isPrivateForUser( u.id() ) )
     updateChatTitle( c );
 

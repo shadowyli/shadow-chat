@@ -59,6 +59,7 @@ public:
   bool start();
   void stop();
   void restart();
+  void blockForUpdate();
 
 #ifdef BEEBEEP_USE_MULTICAST_DNS
   bool dnsMulticastingIsActive() const;
@@ -97,6 +98,13 @@ public:
   bool sendHelpMessageToUser( VNumber );
   Chat createGroupChat( const User&, const Group&, bool broadcast_message );
   bool changeGroupChat( const User&, const Group& );
+  bool isLocalGroupOwner( VNumber chat_id ) const;
+  bool transferGroupOwnership( VNumber chat_id, VNumber new_owner_id );
+  bool dissolveGroup( VNumber chat_id );
+  bool isGroupDissolved( const QString& private_id ) const;
+  void markGroupDissolved( const QString& private_id );
+  void checkMessageDeliveryAck( const User&, VNumber message_id );
+  void cancelMessageDelivery( VNumber user_id, VNumber chat_id );
   bool clearMessagesInChat( VNumber, bool clear_history );
   bool clearSystemMessagesInChat( VNumber );
   bool removeChat( VNumber, bool save_chat_messages );
@@ -108,6 +116,8 @@ public:
   void removeUnsentMessagesInChat( VNumber );
 
   /* CoreFileTransfer */
+  void processPendingFileTransfers();
+  void cancelPendingFileTransfers( VNumber user_id, VNumber chat_id );
   bool sendFile( VNumber user_id, const QString& file_path, const QString& share_folder, bool to_share_box, VNumber chat_id );
   int sendFilesFromChat( VNumber chat_id, const QStringList& file_path_list );
   bool downloadFile( VNumber, const FileInfo&, bool show_message );
@@ -288,7 +298,7 @@ protected:
   /* CoreChat */
   void createDefaultChat();
   bool sendMessageToLocalNetwork( const User& to_user, const Message& );
-  void sendGroupChatRequestMessage( const Chat&, const UserList&, const User& );
+  void sendGroupChatRequestMessage( const Chat&, const UserList&, const User&, const QList<VNumber>& invited = QList<VNumber>() );
   void sendRefuseMessageToGroupChat( const Chat& );
   int checkGroupChatAfterUserReconnect( const User& );
   void sendLocalUserHasReadChatMessage( const Chat& );
@@ -334,6 +344,7 @@ private:
 #ifdef BEEBEEP_USE_VOICE_CHAT
   VoicePlayer* mp_voicePlayer;
 #endif
+  bool m_updateBlocked = false;
 
 };
 

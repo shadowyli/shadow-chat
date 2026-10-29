@@ -1,0 +1,14 @@
+QT += core gui widgets network xml multimedia printsupport
+CONFIG += console c++11 release
+CONFIG -= app_bundle debug_and_release
+TEMPLATE = app
+TARGET = history_ui_test
+INCLUDEPATH += ../src/core ../src/utils ../src/desktop ../src/ecdh ../src/sharedesktop ../src/voicechat ../src/gui ../src
+INCLUDEPATH += ../src/override
+INCLUDEPATH += ../src/qxt
+SOURCES += history_ui_test.cpp
+DEFINES += SHADOWCHAT_SAFE_BUILD MAKE_BEEBEEP_PORTABLE BEEBEEP_USE_VOICE_CHAT BEEBEEP_USE_HUNSPELL HUNSPELL_STATIC BEEBEEP_USE_QXT BEEBEEP_USE_SHAREDESKTOP
+win32-msvc*: QMAKE_CXXFLAGS += /utf-8
+objects = $$files(../src/release/*.obj)
+objects -= ../src/release/Main.obj
+LIBS += $$objects user32.lib wtsapi32.lib shell32.lib

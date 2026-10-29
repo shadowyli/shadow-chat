@@ -76,6 +76,7 @@ public:
 
   inline const QDate& settingsCreationDate() const;
   inline const QString& dataFolder() const;
+  void setAccountDataFolder( const QString& folder );
   inline const QString& resourceFolder() const;
   inline const QString& cacheFolder() const;
   QString backupFolder() const;
@@ -1178,7 +1179,7 @@ inline void Settings::setEnableFileSharing( bool new_value ) { m_enableFileShari
 inline int Settings::maxFileShared() const { return m_maxFileShared; }
 inline bool Settings::chatAutoSave() const { return m_chatAutoSave; }
 inline void Settings::setChatAutoSave( bool new_value ) { m_chatAutoSave = new_value; }
-inline int Settings::chatMaxLineSaved() const { return m_chatMaxLineSaved > 100 ? m_chatMaxLineSaved: 100; }
+inline int Settings::chatMaxLineSaved() const { return m_chatMaxLineSaved < 0 ? -1 : qMax( m_chatMaxLineSaved, 100 ); }
 inline void Settings::setChatMaxLineSaved( int new_value ) { m_chatMaxLineSaved = new_value; }
 inline bool Settings::chatSaveUnsentMessages() const { return m_chatSaveUnsentMessages; }
 inline void Settings::setChatSaveUnsentMessages( bool new_value ) { m_chatSaveUnsentMessages = new_value; }

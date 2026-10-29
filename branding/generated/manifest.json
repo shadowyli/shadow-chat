@@ -1,0 +1,62 @@
+{
+  "source_provenance": "Owner supplied E:/ShadowChat/logo.png, 2026-10-28",
+  "source_dimensions": [
+    1080,
+    1080
+  ],
+  "operations": "RGBA conversion, preserve composition, LANCZOS resize, PNG/WebP/ICO encoding only",
+  "pillow_version": "12.3.0",
+  "ico_sizes": [
+    16,
+    20,
+    24,
+    32,
+    40,
+    48,
+    64,
+    128,
+    256
+  ],
+  "files": {
+    "branding/source/logo.png": {
+      "bytes": 146130,
+      "sha256": "f74d79234082cfc91ce1711a6f6fbaffc19d4287f3c61a30c5e78003a7fb2425"
+    },
+    "branding/generated/app.ico": {
+      "bytes": 57958,
+      "sha256": "416b5c634305f485606d9541ae0f8a44cffa5b2b1b6c833898b513e35e7ebc6f"
+    },
+    "branding/generated/shadowchat-128.png": {
+      "bytes": 12133,
+      "sha256": "ec1b3ca1bff65ee02cea3813b1d4d470cd1429e42b96ba50b44fce358b2596f1"
+    },
+    "branding/generated/shadowchat-16.png": {
+      "bytes": 879,
+      "sha256": "8cbe82fb59e83654f6fc509fe99d775a7f128588dde72944cb789f17387f634f"
+    },
+    "branding/generated/shadowchat-256.png": {
+      "bytes": 27622,
+      "sha256": "8d9e440c314f02a75ac4fc5ec33593de26c1e60b24db2e1b21743f0e12a791e7"
+    },
+    "branding/generated/shadowchat-32.png": {
+      "bytes": 2211,
+      "sha256": "417bbcd7c401556d9a2a87be80f2e2cf4364e7f7e5c589987ec707d4289a6d24"
+    },
+    "branding/generated/shadowchat-48.png": {
+      "bytes": 3831,
+      "sha256": "6b592ee6b96cb5a297c00025f3231b52c381f00ec1b2cf1efbe53f38874adc35"
+    },
+    "branding/generated/shadowchat-512.png": {
+      "bytes": 65895,
+      "sha256": "69b8c28370fd87f5a4fa62615af66fcefd2d8fd6eb8f535b21b85c1c6f582348"
+    },
+    "branding/generated/shadowchat-512.webp": {
+      "bytes": 37290,
+      "sha256": "c279b890526dd5b28af4383400817884fd711ac7902be82bc0ca2ea466104b76"
+    },
+    "branding/generated/shadowchat-64.png": {
+      "bytes": 5339,
+      "sha256": "12760bd9bc828c47624aab6583e9e0892065adbd5e78aa6037835b7e811a078f"
+    }
+  }
+}

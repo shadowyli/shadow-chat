@@ -1,123 +1,99 @@
-//////////////////////////////////////////////////////////////////////
-//
-// BeeBEEP Copyright (C) 2010-2021 Marco Mastroddi
-//
-// BeeBEEP is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published
-// by the Free Software Foundation, either version 3 of the License,
-// or (at your option) any later version.
-//
-// BeeBEEP is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with BeeBEEP. If not, see <http://www.gnu.org/licenses/>.
-//
-// Author: Marco Mastroddi <marco.mastroddi(AT)gmail.com>
-//
-// $Id: Updater.cpp 1455 2020-12-23 10:17:53Z mastroddi $
-//
-//////////////////////////////////////////////////////////////////////
-
-#include "HttpDownloader.h"
-#include "Settings.h"
 #include "Updater.h"
+#include "ShadowUpdateManifest.h"
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkProxy>
+#include <QSslSocket>
+#include <QTimer>
 
-
-Updater::Updater( QObject *parent )
- : QObject( parent ), m_versionAvailable( "" ), m_downloadUrl( "" ), m_news( "" )
+Updater::Updater(QObject* parent, const QUrl& manifest_url)
+  : QObject(parent), m_manifestUrl(manifest_url)
 {
-  setObjectName( "Updater" );
+  setObjectName("Updater");
+}
+
+QUrl Updater::productionManifestUrl()
+{
+  return QUrl(QStringLiteral("https://flowx.gz/updates/shadowchat.json"));
+}
+
+bool Updater::allowsVersion(const QString& current) const
+{
+  return m_manifestValid && ShadowUpdateManifest::allowsVersion(current, m_versionAvailable);
 }
 
 void Updater::checkForNewVersion()
 {
-  m_versionAvailable = "";
-  m_downloadUrl = "";
-  m_news = "";
-  QUrl url( Settings::instance().lastVersionUrl() );
-#ifdef SHADOWCHAT_SAFE_BUILD
-  if( url.scheme() != QLatin1String( "https" ) || url.host() != QLatin1String( "shadowyli.github.io" ) ||
-      !url.path().startsWith( QLatin1String( "/shadow-chat/" ) ) )
+  if(m_checking)
+    return;
+  m_manifestValid = false;
+  m_versionAvailable.clear();
+  m_downloadUrl.clear();
+  m_news.clear();
+  m_error.clear();
+  const QUrl url = m_manifestUrl.isEmpty() ? productionManifestUrl() : m_manifestUrl;
+  const bool local = url.scheme() == QLatin1String("http") &&
+    (url.host() == QLatin1String("localhost") || url.host() == QLatin1String("127.0.0.1") ||
+     url.host() == QLatin1String("::1"));
+  if(!url.isValid() || (!m_manifestUrl.isEmpty() && !local) ||
+     !url.userInfo().isEmpty() || url.hasQuery() || url.hasFragment() ||
+     url.path() != QLatin1String("/updates/shadowchat.json"))
   {
-    qWarning() << "ShadowChat blocked an invalid update manifest URL";
+    m_error = QStringLiteral("更新源无效：仅允许固定发布地址或测试构造器指定的本机地址。");
     emit jobCompleted();
     return;
   }
-#endif
-
-  HttpDownloader* http_downloader = new HttpDownloader( this );
-  connect( http_downloader, SIGNAL( downloadCompleted( const QString& ) ),this, SLOT( onDownloadCompleted( const QString& ) ), Qt::QueuedConnection );
-  connect( http_downloader, SIGNAL( jobFinished() ), this, SIGNAL( jobCompleted() ) );
-
-  http_downloader->setOverwriteExistingFiles( true );
-  http_downloader->addUrl( url );
-
-  QMetaObject::invokeMethod( http_downloader, "startDownload", Qt::QueuedConnection );
-}
-
-void Updater::onDownloadCompleted( const QString& file_path )
-{
-  HttpDownloader* http_downloader = qobject_cast<HttpDownloader*>( sender() );
-  if( !http_downloader )
+  if(url.scheme() == QLatin1String("https") && !QSslSocket::supportsSsl())
   {
-    qWarning() << "Updater received a signal from invalid HttpDownloader instance";
+    m_error = QStringLiteral("无法建立安全连接：缺少或不兼容的 TLS 运行库。请联系管理员修复安装后重试。");
+    emit jobCompleted();
     return;
   }
-
-#ifdef BEEBEEP_DEBUG
-  qDebug() << qPrintable( file_path ) << "download completed";
-#endif
-
-  QSettings sets( file_path, QSettings::IniFormat );
-  if( !sets.allKeys().isEmpty() )
-  {
-    sets.beginGroup( Settings::instance().operatingSystem( false ) );
-    m_versionAvailable = sets.value( "CurrentVersion", "" ).toString();
-    m_downloadUrl = sets.value( "DownloadUrl", "" ).toString();
-    sets.endGroup();
-    sets.beginGroup( "Info" );
-    m_news = sets.value( "News", "" ).toString();
-    sets.endGroup();
-  }
-
-  if( m_versionAvailable.isEmpty() )
-    qWarning() << file_path << "is not valid to check new version";
-
-  if( !m_downloadUrl.isEmpty() )
-  {
-    QUrl url = QUrl::fromUserInput( m_downloadUrl );
-#ifdef SHADOWCHAT_SAFE_BUILD
-    const bool product_page = url.scheme() == QLatin1String( "https" ) &&
-                              url.host() == QLatin1String( "shadowyli.github.io" ) &&
-                              url.path().startsWith( QLatin1String( "/shadow-chat/" ) );
-    const bool github_release = url.scheme() == QLatin1String( "https" ) &&
-                                url.host() == QLatin1String( "github.com" ) &&
-                                url.path().startsWith( QLatin1String( "/shadowyli/shadow-chat/releases/" ) );
-    if( !product_page && !github_release )
+  m_checking = true;
+  QNetworkAccessManager* manager = new QNetworkAccessManager(this);
+  manager->setProxy(QNetworkProxy::NoProxy);
+  QNetworkRequest request(url);
+  request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+  request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
+  request.setAttribute(QNetworkRequest::CacheSaveControlAttribute, false);
+  request.setRawHeader("Accept", "application/json");
+  request.setRawHeader("Cache-Control", "no-cache, no-store");
+  QNetworkReply* reply = manager->get(request);
+  reply->setReadBufferSize(65537);
+  QTimer* timeout = new QTimer(reply);
+  timeout->setSingleShot(true);
+  connect(timeout, &QTimer::timeout, reply, [reply]() {
+    reply->setProperty("shadowTimedOut", true);
+    reply->abort();
+  });
+  timeout->start(8000);
+  connect(reply, &QNetworkReply::readyRead, reply, [reply]() {
+    if(reply->bytesAvailable() > 65536)
     {
-      qWarning() << "ShadowChat blocked an untrusted update download URL";
-      m_downloadUrl.clear();
+      reply->setProperty("shadowOversized", true);
+      reply->abort();
     }
+  });
+  connect(reply, &QNetworkReply::finished, this, [this, reply, manager]() {
+    if(reply->property("shadowTimedOut").toBool())
+      m_error = QStringLiteral("版本校验超时，请检查网络后重试。");
+    else if(reply->property("shadowOversized").toBool())
+      m_error = QStringLiteral("更新服务响应过大，无法校验版本。");
+    else if(reply->error() != QNetworkReply::NoError)
+      m_error = QStringLiteral("无法安全连接更新服务：%1").arg(reply->errorString());
+    else if(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() != 200)
+      m_error = QStringLiteral("更新服务返回异常状态：%1。").arg(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt());
     else
-#endif
-      m_downloadUrl = url.toString();
-  }
-
-#ifdef SHADOWCHAT_SAFE_BUILD
-  // The static manifest is intentionally data-only. Do not render remotely
-  // supplied HTML/news in chats in the hardened build.
-  m_news.clear();
-#endif
-
-  QFile file_downloaded( file_path );
-  if( !file_downloaded.remove() )
-  {
-    qWarning() << "Unable to remove file" << file_path << "now so it is added to temporaty files";
-    Settings::instance().addTemporaryFilePath( file_path );
-  }
-
-  http_downloader->cleanUp();
+    {
+      m_manifestValid = ShadowUpdateManifest::parse(reply->readAll(), reply->url(), &m_versionAvailable, &m_downloadUrl);
+      if(!m_manifestValid)
+        m_error = QStringLiteral("发布清单未发布或内容无效，暂时无法确认当前版本。");
+    }
+    m_checking = false;
+    reply->deleteLater();
+    manager->deleteLater();
+    emit jobCompleted();
+  });
 }
+
+void Updater::onDownloadCompleted(const QString&) {}

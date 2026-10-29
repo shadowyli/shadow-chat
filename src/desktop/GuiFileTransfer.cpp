@@ -35,7 +35,7 @@ GuiFileTransfer::GuiFileTransfer( QWidget *parent )
 {
   setObjectName( "GuiFileTransfer" );
   QStringList labels;
-  labels << "" << "%" << tr( "Time left" ) << tr( "File" ) << tr( "User" ) << tr( "Status" ) << "";
+  labels << QStringLiteral("操作") << QStringLiteral("进度") << QStringLiteral("剩余时间") << QStringLiteral("文件") << QStringLiteral("同事") << QStringLiteral("状态") << "";
   setHeaderLabels( labels );
   setRootIsDecorated( false );
   setSortingEnabled( false );
@@ -43,6 +43,10 @@ GuiFileTransfer::GuiFileTransfer( QWidget *parent )
   sortItems( GuiFileTransferItem::ColumnSort, Qt::DescendingOrder );
   setContextMenuPolicy( Qt::CustomContextMenu );
   setSelectionMode( QAbstractItemView::SingleSelection );
+  setFont(QFont(QStringLiteral("Microsoft YaHei UI"),10));
+  setAlternatingRowColors(true);
+  setIconSize(QSize(20,20));
+  setStyleSheet(QStringLiteral("QTreeWidget { background: #FFFFFF; alternate-background-color: #F8FAFD; color: #243044; border: 0; outline: 0; } QTreeWidget::item { min-height: 38px; padding: 6px 10px; border-bottom: 1px solid #E8EDF4; } QTreeWidget::item:selected { background: #EAF1FF; color: #1C4FB0; } QHeaderView::section { background: #F4F7FC; color: #697B94; border: 0; padding: 10px; font-weight: 500; }"));
 
   QHeaderView* hv = header();
 #if QT_VERSION >= 0x050000
@@ -61,14 +65,25 @@ GuiFileTransfer::GuiFileTransfer( QWidget *parent )
   hv->setResizeMode( GuiFileTransferItem::ColumnProgress, QHeaderView::Stretch );
 #endif
 
-  setColumnWidth( GuiFileTransferItem::ColumnCancel, 32 );
-  setColumnWidth( GuiFileTransferItem::ColumnReport, 48 );
-  setColumnWidth( GuiFileTransferItem::ColumnTimeLeft, 40 );
-  hv->hide();
+  setColumnWidth( GuiFileTransferItem::ColumnCancel, 64 );
+  setColumnWidth( GuiFileTransferItem::ColumnReport, 70 );
+  setColumnWidth( GuiFileTransferItem::ColumnTimeLeft, 90 );
+  hv->setMinimumSectionSize(64);
+  hv->show();
 
   connect( this, SIGNAL( itemClicked( QTreeWidgetItem*, int ) ), this, SLOT( checkItemClicked( QTreeWidgetItem*, int ) ) );
   connect( this, SIGNAL( itemDoubleClicked( QTreeWidgetItem*, int ) ), this, SLOT( checkItemDoubleClicked( QTreeWidgetItem*, int ) ) );
   connect( this, SIGNAL( customContextMenuRequested( const QPoint& ) ), this, SLOT( openMenu( const QPoint& ) ) );
+}
+
+void GuiFileTransfer::paintEvent( QPaintEvent* event )
+{
+  QTreeWidget::paintEvent(event);
+  if(topLevelItemCount()==0)
+  {
+    QPainter painter(viewport());painter.setPen(QColor("#697B94"));
+    painter.drawText(viewport()->rect().adjusted(24,20,-24,-20),Qt::AlignCenter,QStringLiteral("暂无传输任务\n发送和接收的文件会显示在这里"));
+  }
 }
 
 void GuiFileTransfer::updateUser( const User& u )
@@ -250,12 +265,9 @@ void GuiFileTransfer::openMenu( const QPoint& p )
 
       if( item->isStopped() )
       {
-        if( Settings::instance().resumeFileTransfer() && item->transferState() != FileTransferPeer::Completed )
+        if( item->transferState() != FileTransferPeer::Completed )
         {
-          if( item->transferState() == FileTransferPeer::Paused )
-            mp_menuContext->addAction( IconManager::instance().icon( "play.png" ), tr( "Resume transfer" ), this, SLOT( resumeTransfer() ) );
-          else
-            mp_menuContext->addAction( IconManager::instance().icon( "play.png" ), tr( "Try to resume transfer" ), this, SLOT( resumeTransfer() ) );
+          mp_menuContext->addAction( IconManager::instance().icon( "play.png" ), QStringLiteral( "从头重试" ), this, SLOT( resumeTransfer() ) );
         }
         mp_menuContext->addSeparator();
         mp_menuContext->addAction( IconManager::instance().icon( "remove.png" ), tr( "Remove transfer" ), this, SLOT( removeTransfer() ) );
@@ -309,14 +321,8 @@ void GuiFileTransfer::resumeTransfer()
   GuiFileTransferItem* item = findSelectedItem();
   if( !item )
     return;
-  if( item->transferState() != FileTransferPeer::Paused )
-  {
-    QString q_txt = tr( "Do you want to try resuming the transfer of %1?" ).arg( item->fileInfo().name() );
-    if( QMessageBox::question( this, Settings::instance().programName(), q_txt, tr( "Yes" ), tr( "No" ), QString(), 0, 1 ) != 0 )
-      return;
-  }
-
-  item->setMessage( tr( "Resuming transfer" ) + QString( " (%1)").arg( tr( "Please wait" ) ), FileTransferPeer::Queue );
+  if( item->transferState() == FileTransferPeer::Completed ) return;
+  item->setMessage( QStringLiteral( "正在从头重试，请稍候" ), FileTransferPeer::Queue );
   emit resumeTransfer( item->userId(), item->fileInfo() );
 }
 

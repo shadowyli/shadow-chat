@@ -47,6 +47,8 @@
 #include "Random.h"
 #include "Settings.h"
 #include "ShadowWorkspaceArchive.h"
+#include "ShadowLocalAccounts.h"
+#include "ShadowUpdateGate.h"
 #include "ShortcutManager.h"
 #ifdef BEEBEEP_USE_HUNSPELL
   #include "SpellChecker.h"
@@ -150,6 +152,31 @@ int main( int argc, char *argv[] )
   Settings::instance().loadRcFile();
   Settings::instance().createLocalUser( "" );
   Settings::instance().setDataFolder();
+  ShadowUpdateGate update_gate( Settings::instance().version( false, false, false ) );
+  QTimer::singleShot( 0, &update_gate, &ShadowUpdateGate::checkNow );
+  if( update_gate.exec() != QDialog::Accepted )
+  {
+    Settings::close();
+    return 0;
+  }
+#ifndef BEEBEEP_UX_PREVIEW
+  QString account_email;
+  QString account_folder;
+  if( !ShadowLocalAccounts::login( &account_email, &account_folder ) )
+  {
+    Settings::close();
+    return 0;
+  }
+  Settings::instance().setAccountDataFolder( account_folder );
+  {
+    QSettings startup_settings( QDir( ShadowLocalAccounts().root() ).filePath( "session.ini" ), QSettings::IniFormat );
+    if( !startup_settings.value( "startupConfigured", false ).toBool() )
+    {
+      if( Settings::instance().addStartOnSystemBoot() )
+        startup_settings.setValue( "startupConfigured", true );
+    }
+  }
+#endif
   {
     QString workspace_restore_folder;
     QString workspace_error;
@@ -160,6 +187,21 @@ int main( int argc, char *argv[] )
   }
   qDebug() << "Settings path:" << qPrintable( Settings::instance().currentSettingsFilePath() );
   Settings::instance().load();
+#ifndef BEEBEEP_UX_PREVIEW
+  User account_user = Settings::instance().localUser();
+  account_user.setAccountName( account_email );
+  VCard account_card = account_user.vCard();
+  account_card.setEmail( account_email );
+  account_user.setVCard( account_card );
+  Settings::instance().setLocalUser( account_user );
+  // Attachment destinations must never fall back to a previous Windows user's profile.
+  if( Settings::instance().firstTime() )
+  {
+    const QString receive_folder = QDir( account_folder ).filePath( QString::fromUtf8( "接收文件" ) );
+    QDir().mkpath( receive_folder );
+    Settings::instance().setDownloadDirectory( receive_folder );
+  }
+#endif
 #ifdef BEEBEEP_UX_PREVIEW
   Settings::instance().setFirstTime( false );
   Settings::instance().setAskChangeUserAtStartup( false );
@@ -280,6 +322,18 @@ int main( int argc, char *argv[] )
 
   /* Init Main Window */
   GuiMain mw;
+  mw.setUpdateGate( &update_gate );
+  QObject::connect( &update_gate, &ShadowUpdateGate::runtimeBlocked, &bee_core, [&bee_core, &update_gate]() {
+    bee_core.blockForUpdate();
+    foreach( QWidget* window, qApp->topLevelWidgets() )
+      if( window != &update_gate )
+        window->setEnabled( false );
+  }, Qt::DirectConnection );
+  QObject::connect( &update_gate, &ShadowUpdateGate::exitRequested, &mw, [&mw]() {
+    mw.forceShutdown();
+    qApp->quit();
+  } );
+  update_gate.startMonitoring();
   QObject::connect( &bee_app, SIGNAL( enteringInIdle() ), &mw, SLOT( setInIdle() ) );
   QObject::connect( &bee_app, SIGNAL( exitingFromIdle() ), &mw, SLOT( exitFromIdle() ) );
   QObject::connect( &bee_app, SIGNAL( showUp() ), &mw, SLOT( raiseOnTop() ) );
@@ -306,6 +360,9 @@ int main( int argc, char *argv[] )
   Settings::instance().setRecentEmoticons( EmoticonManager::instance().saveRencentEmoticons() );
   Settings::instance().setFavoriteEmoticons( EmoticonManager::instance().saveFavoriteEmoticons() );
   Settings::instance().loadRcFile();
+#ifndef BEEBEEP_UX_PREVIEW
+  Settings::instance().setAccountDataFolder( account_folder );
+#endif
   Settings::instance().save();
 
   /* CleanUp */
@@ -339,5 +396,7 @@ int main( int argc, char *argv[] )
   Log::instance().close();
   Settings::close();
   /* Exit */
+  if( bee_app.property( "shadowRestartForLogin" ).toBool() )
+    QProcess::startDetached( QCoreApplication::applicationFilePath(), QStringList() );
   return iRet;
 }

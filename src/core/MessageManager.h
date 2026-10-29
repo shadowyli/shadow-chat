@@ -43,7 +43,7 @@ public:
   int countMessagesToSendInChatId( VNumber ) const;
 
   void addSentMessage( VNumber to_user_id, VNumber chat_id, const Message& );
-  bool setMessageReceived( VNumber msg_id );
+  bool setMessageReceived( VNumber msg_id, VNumber user_id = ID_INVALID );
   bool hasMessageNotReceivedYet( VNumber user_id ) const;
 
   inline VNumber nextUserWithUnsentMessages() const;

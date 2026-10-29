@@ -1,0 +1,9 @@
+QT += core gui widgets network xml multimedia printsupport
+CONFIG += console c++11
+CONFIG -= app_bundle
+TEMPLATE = app
+TARGET = local_accounts_test
+win32-msvc*: QMAKE_CXXFLAGS += /utf-8
+INCLUDEPATH += ../src ../src/core ../src/desktop
+SOURCES += local_accounts_test.cpp ../src/desktop/ShadowLocalAccounts.cpp ../src/desktop/ShadowWorkspaceArchive.cpp
+HEADERS += ../src/desktop/ShadowLocalAccounts.h ../src/desktop/ShadowWorkspaceArchive.h

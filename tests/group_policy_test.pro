@@ -1,0 +1,9 @@
+QT += core gui widgets network xml multimedia printsupport
+CONFIG += console c++11 release
+CONFIG -= app_bundle debug_and_release
+TEMPLATE = app
+TARGET = group_policy_test
+INCLUDEPATH += ../src/core
+SOURCES += group_policy_test.cpp ../src/core/Group.cpp
+HEADERS += ../src/core/ShadowGroupPolicy.h ../src/core/Group.h
+win32-msvc*: QMAKE_CXXFLAGS += /utf-8

@@ -122,7 +122,9 @@ bool GuiImageBatchPreview::isImageBatch( const QStringList& file_paths )
   foreach( const QString& file_path, file_paths )
   {
     QFileInfo file_info( file_path );
-    if( !file_info.isFile() || !Bee::isFileTypeImage( file_info.suffix() ) )
+    const QString suffix=file_info.suffix().toLower();
+    const bool previewable=QStringList({"jpg","jpeg","png","gif","bmp","webp"}).contains(suffix);
+    if( !file_info.isFile() || !previewable )
       return false;
   }
   return true;

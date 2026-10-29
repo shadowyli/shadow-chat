@@ -293,6 +293,14 @@ qint64 ConnectionSocket::readBlock()
   else
     emit dataReceived( decrypted_byte_array );
 
+  // readyRead is edge-triggered. A second frame already in Qt's buffer may
+  // otherwise wait for the next heartbeat (or forever on file peers). Drain
+  // asynchronously so a busy sender cannot monopolize the GUI event loop.
+  const qint64 header_size = m_protocolVersion > SECURE_LEVEL_2_PROTO_VERSION ?
+    static_cast<qint64>( sizeof(DATA_BLOCK_SIZE_32) ) : static_cast<qint64>( sizeof(DATA_BLOCK_SIZE_16) );
+  if( !m_isAborted && bytesAvailable() >= header_size )
+    QMetaObject::invokeMethod( this, "readBlock", Qt::QueuedConnection );
+
   return byte_array_read_size;
 }
 

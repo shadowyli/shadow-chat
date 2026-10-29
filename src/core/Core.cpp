@@ -187,6 +187,8 @@ bool Core::checkSavingPaths()
 
 bool Core::start()
 {
+  if( m_updateBlocked )
+    return false;
   if( isConnected() )
   {
     qDebug() << "Core is already connected to" << qPrintable( Settings::instance().programName() ) << "network";
@@ -321,8 +323,6 @@ bool Core::start()
                          .arg( QString( "<a href=\"%1\">%2</a>" ).arg( Settings::instance().helpWebSite() ).arg( tr( "help page" ) ) ),
                          DispatchToChat, ChatMessage::System, false );
 
-  if( Settings::instance().checkNewVersionAtStartup() )
-    QTimer::singleShot( 3000, this, SLOT( checkNewVersion() ) );
 
 #ifndef SHADOWCHAT_SAFE_BUILD
  #ifdef BEEBEEP_DEBUG
@@ -389,6 +389,18 @@ void Core::onMulticastDnsServiceRegistered()
 }
 #endif
 
+void Core::blockForUpdate()
+{
+  if( m_updateBlocked )
+    return;
+  m_updateBlocked = true;
+  const bool resume_transfers = Settings::instance().resumeFileTransfer();
+  Settings::instance().setResumeFileTransfer( true );
+  stop();
+  Settings::instance().setResumeFileTransfer( resume_transfers );
+  Settings::instance().save();
+}
+
 void Core::stop()
 {
   qDebug() << "Stopping network core...";
@@ -435,6 +447,8 @@ void Core::stop()
 
 void Core::restart()
 {
+  if( m_updateBlocked )
+    return;
   showMessage( tr( "Disconnecting" ), 3000 );
   qDebug() << "Restarting network core...";
   mp_broadcaster->stopBroadcasting();
@@ -641,7 +655,7 @@ void Core::onUpdaterJobCompleted()
 
   qDebug() << "Latest version on website is" << qPrintable( latest_version ) << "(update is recommended)";
 
-  QString html_msg = QString( "%1 <b>%2</b>. <a href=""%3"">%4</a>." ).arg( IconManager::instance().toHtml( "update.png", "*!*" ),
+  QString html_msg = QString( "%1 <b>%2</b>. <a href=\"%3\">%4</a>." ).arg( IconManager::instance().toHtml( "update.png", "*!*" ),
                                                            tr( "New version is available" ), download_url.toHtmlEscaped(),
                                                            tr( "Click here to download" ) );
 
@@ -721,6 +735,7 @@ void Core::onTickEvent( int ticks )
       }
     }
 
+    processPendingFileTransfers();
     mp_broadcaster->onTickEvent( ticks );
 
     if( Settings::instance().tickIntervalBroadcasting() > 0 && (ticks % Settings::instance().tickIntervalBroadcasting() == 0) )

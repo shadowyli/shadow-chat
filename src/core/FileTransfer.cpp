@@ -93,6 +93,31 @@ void FileTransfer::resetServerFiles()
   }
 }
 
+void FileTransfer::authorizeFileForUser( VNumber file_id, VNumber user_id )
+{
+  m_fileRecipients[file_id].insert( user_id );
+}
+
+bool FileTransfer::hasUploadToUser( VNumber user_id ) const
+{
+  foreach( FileTransferPeer* peer, m_peers )
+    if( !peer->isDownload() && peer->remoteUserId() == user_id && peer->isActive() ) return true;
+  return false;
+}
+
+void FileTransfer::revokeChatTransfers( VNumber user_id, const QString& chat_private_id )
+{
+  foreach( const FileInfo& file, m_files )
+    if( file.chatPrivateId() == chat_private_id && m_fileRecipients.contains( file.id() ) )
+    {
+      if( user_id == ID_INVALID ) m_fileRecipients[file.id()].clear();
+      else m_fileRecipients[file.id()].remove( user_id );
+    }
+  foreach( FileTransferPeer* peer, m_peers )
+    if( !peer->isDownload() && peer->fileInfo().chatPrivateId() == chat_private_id &&
+        (user_id == ID_INVALID || peer->remoteUserId() == user_id) ) peer->cancelTransfer();
+}
+
 void FileTransfer::removeFilesToUser( VNumber user_id )
 {
   int peer_counter = 0;
@@ -151,7 +176,8 @@ FileInfo FileTransfer::addFile( const QFileInfo& fi, const QString& share_folder
   if( file_info.isValid() )
   {
     QString file_hash = Protocol::instance().fileInfoHash( fi );
-    if( file_info.fileHash() == file_hash )
+    if( file_info.fileHash() == file_hash && file_info.size() == fi.size() &&
+        file_info.lastModified().toMSecsSinceEpoch() == fi.lastModified().toMSecsSinceEpoch() )
       return file_info;
     else
       removeFile( fi.absoluteFilePath() );
@@ -206,7 +232,9 @@ void FileTransfer::setupPeer( FileTransferPeer* transfer_peer, qintptr socket_de
   connect( transfer_peer, SIGNAL( operationCompleted() ), this, SLOT( deletePeer() ) );
 
   transfer_peer->setConnectionDescriptor( socket_descriptor, server_port );
-  int delay = Random::number32( 1, 9 ) * 100;
+  // Concurrency is already bounded by activeDownloads(). Do not add a fresh
+  // 100-900 ms handshake delay to every small file in an engineering project.
+  int delay = 0;
 #ifdef BEEBEEP_DEBUG
   qDebug() << qPrintable( transfer_peer->name() ) << "starts in" << delay << "ms";
 #endif
@@ -255,6 +283,13 @@ void FileTransfer::checkUploadRequest( const FileInfo& file_info_to_check )
   }
 
   FileInfo file_info;
+
+  if( m_fileRecipients.contains( file_info_to_check.id() ) &&
+      !m_fileRecipients.value( file_info_to_check.id() ).contains( upload_peer->remoteUserId() ) )
+  {
+    upload_peer->cancelTransfer();
+    return;
+  }
 
   if( file_info_to_check.isInShareBox() )
   {
@@ -342,8 +377,9 @@ void FileTransfer::checkUploadRequest( const FileInfo& file_info_to_check )
     }
   }
 
-  if( file_info_to_check.startingPosition() == file_info.size() )
+  if( file_info.size() > 0 && file_info_to_check.startingPosition() == file_info.size() )
   {
+    upload_peer->setFileInfo( FileInfo::Upload, file_info );
     upload_peer->skipTransfer();
     return;
   }

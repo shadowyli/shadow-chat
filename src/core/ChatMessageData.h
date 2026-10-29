@@ -42,12 +42,15 @@ public:
   inline void setGroupName( const QString& );
   inline const QDateTime& groupLastModified() const;
   inline void setGroupLastModified( const QDateTime& );
+  const QString& groupOwnerHash() const { return m_groupOwnerHash; }
+  void setGroupOwnerHash( const QString& value ) { m_groupOwnerHash = value; }
 
 private:
   QColor m_textColor;
   QString m_groupId;
   QString m_groupName;
   QDateTime m_groupLastModified;
+  QString m_groupOwnerHash;
 
 };
 

@@ -75,6 +75,10 @@ bool SaveChatList::saveToFile( const QString& file_name, bool silent_mode  )
 {
   if( !Settings::instance().enableSaveData() || !Settings::instance().chatAutoSave() )
   {
+#ifdef SHADOWCHAT_SAFE_BUILD
+    // Turning off future saving must never erase already saved conversations.
+    return false;
+#else
     if( QFile::exists( file_name ) )
     {
       if( !silent_mode )
@@ -87,6 +91,7 @@ bool SaveChatList::saveToFile( const QString& file_name, bool silent_mode  )
       }
     }
     return false;
+#endif
   }
 
   QString file_name_tmp = file_name + ".tmp";
@@ -175,7 +180,7 @@ bool SaveChatList::saveChats( QDataStream* stream, bool silent_mode )
     }
 
     chat_lines = html_text.split( "<br>", QString::SkipEmptyParts, Qt::CaseInsensitive );
-    if( chat_lines.size() > Settings::instance().chatMaxLineSaved() )
+    if( Settings::instance().chatMaxLineSaved() >= 0 && chat_lines.size() > Settings::instance().chatMaxLineSaved() )
     {
       if( !silent_mode )
         qWarning() << "Chat exceeds line size limit with" << chat_lines.size();
@@ -211,7 +216,7 @@ bool SaveChatList::saveChats( QDataStream* stream, bool silent_mode )
       }
       html_text = it.value();
       chat_lines = html_text.split( "<br>", QString::SkipEmptyParts, Qt::CaseInsensitive );
-      if( chat_lines.size() > Settings::instance().chatMaxLineSaved() )
+      if( Settings::instance().chatMaxLineSaved() >= 0 && chat_lines.size() > Settings::instance().chatMaxLineSaved() )
       {
         if( !silent_mode )
           qWarning() << "History exceeds line size limit with" << chat_lines.size();

@@ -5,6 +5,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "ShadowWorkspaceArchive.h"
+#include "ShadowAttachmentBundle.h"
 
 #include <QCryptographicHash>
 #include <QSaveFile>
@@ -14,7 +15,7 @@ namespace
 {
   const quint32 ShadowWorkspaceMagic = 0x53435753; // SCWS
   const quint16 ShadowWorkspaceVersion = 1;
-  const quint32 ShadowWorkspaceMaxEntries = 8;
+  const quint32 ShadowWorkspaceMaxEntries = 16;
   const quint64 ShadowWorkspaceMaxEntrySize = 128ULL * 1024ULL * 1024ULL;
   const quint64 ShadowWorkspaceMaxTotalSize = 256ULL * 1024ULL * 1024ULL;
   const quint64 ShadowWorkspaceMaxArchiveSize = 260ULL * 1024ULL * 1024ULL;
@@ -52,12 +53,33 @@ QStringList ShadowWorkspaceArchive::allowedEntryNames()
   return QStringList() << QStringLiteral( "beebeep.ini" )
                        << QStringLiteral( "beebeep.dat" )
                        << QStringLiteral( "beebeep.off" )
-                       << QStringLiteral( "beehosts.ini" );
+                       << QStringLiteral( "beehosts.ini" )
+                       << QStringLiteral( ".shadow-account.ini" )
+                       << QStringLiteral( ".shadow-paths.ini" )
+                       << QStringLiteral( "pending-transfers.json" )
+                       << QStringLiteral( "message-delivery.json" )
+                       << QStringLiteral( "conversation-preferences.ini" )
+                       << QStringLiteral( "peer-avatars.ini" );
+}
+
+qint64 ShadowWorkspaceArchive::attachmentSize( const QString& folder )
+{
+  return ShadowAttachmentBundle::estimate( folder );
+}
+
+bool ShadowWorkspaceArchive::exportWithAttachments( const QString& data_folder, const QString& attachment_folder, const QString& archive_path, QString* error_message )
+{
+  QTemporaryDir temporary;
+  if( !temporary.isValid() ) { setError( error_message, QStringLiteral( "无法创建备份临时目录。" ) ); return false; }
+  const QString core = QDir( temporary.path() ).filePath( QStringLiteral( "core.workspace" ) );
+  return exportWorkspace( data_folder, core, error_message ) &&
+         ShadowAttachmentBundle::write( core, attachment_folder, archive_path, error_message );
 }
 
 bool ShadowWorkspaceArchive::exportWorkspace( const QString& data_folder, const QString& archive_path, QString* error_message )
 {
   QList<Entry> entries;
+  quint64 total_size = 0;
   foreach( const QString& file_name, allowedEntryNames() )
   {
     QFile file( QDir( data_folder ).filePath( file_name ) );
@@ -68,7 +90,8 @@ bool ShadowWorkspaceArchive::exportWorkspace( const QString& data_folder, const 
       setError( error_message, QStringLiteral( "无法读取 %1。" ).arg( file_name ) );
       return false;
     }
-    if( static_cast<quint64>( file.size() ) > ShadowWorkspaceMaxEntrySize )
+    if( static_cast<quint64>( file.size() ) > ShadowWorkspaceMaxEntrySize ||
+        total_size + static_cast<quint64>( file.size() ) > ShadowWorkspaceMaxTotalSize )
     {
       setError( error_message, QStringLiteral( "%1 过大，无法加入工作区。" ).arg( file_name ) );
       return false;
@@ -76,6 +99,12 @@ bool ShadowWorkspaceArchive::exportWorkspace( const QString& data_folder, const 
     Entry entry;
     entry.name = file_name;
     entry.data = file.readAll();
+    if( entry.data.size() != file.size() )
+    {
+      setError( error_message, QStringLiteral( "读取 %1 失败。" ).arg( file_name ) );
+      return false;
+    }
+    total_size += static_cast<quint64>( entry.data.size() );
     entries.append( entry );
   }
 
@@ -119,6 +148,14 @@ bool ShadowWorkspaceArchive::readArchive( const QString& archive_path, QList<Ent
     return false;
   }
   entries->clear();
+
+  if( ShadowAttachmentBundle::isBundle( archive_path ) )
+  {
+    QTemporaryDir temporary;
+    const QString core = QDir( temporary.path() ).filePath( QStringLiteral( "core.workspace" ) );
+    return temporary.isValid() && ShadowAttachmentBundle::unpack( archive_path, core, QString(), Q_NULLPTR, error_message ) &&
+           readArchive( core, entries, error_message );
+  }
 
   const QFileInfo archive_info( archive_path );
   if( !archive_info.exists() || archive_info.size() <= 0 || static_cast<quint64>( archive_info.size() ) > ShadowWorkspaceMaxArchiveSize )
@@ -194,12 +231,43 @@ bool ShadowWorkspaceArchive::readArchive( const QString& archive_path, QList<Ent
   return true;
 }
 
+bool ShadowWorkspaceArchive::archiveEmail( const QString& archive_path, QString* email, QString* error_message )
+{
+  QList<Entry> entries;
+  if( !readArchive( archive_path, &entries, error_message ) ) return false;
+  if( email ) email->clear();
+  foreach( const Entry& entry, entries )
+  {
+    if( entry.name != QStringLiteral( ".shadow-account.ini" ) ) continue;
+    QTemporaryFile temporary;
+    if( !temporary.open() || temporary.write( entry.data ) != entry.data.size() || !temporary.flush() )
+    {
+      setError( error_message, QStringLiteral( "无法读取备份账号资料。" ) );
+      return false;
+    }
+    QSettings metadata( temporary.fileName(), QSettings::IniFormat );
+    if( email ) *email = metadata.value( QStringLiteral( "email" ) ).toString().trimmed().toLower();
+  }
+  return true;
+}
+
 bool ShadowWorkspaceArchive::stageImport( const QString& data_folder, const QString& archive_path, QString* error_message )
 {
   QList<Entry> entries;
   if( !readArchive( archive_path, &entries, error_message ) )
     return false;
-  Q_UNUSED( entries )
+  const QString credentials_path = QDir( data_folder ).filePath( QStringLiteral( ".shadow-account.ini" ) );
+  if( QFileInfo::exists( credentials_path ) )
+  {
+    QSettings credentials( credentials_path, QSettings::IniFormat );
+    QString incoming_email;
+    if( !archiveEmail( archive_path, &incoming_email, error_message ) ) return false;
+    if( !incoming_email.isEmpty() && incoming_email != credentials.value( QStringLiteral( "email" ) ).toString().trimmed().toLower() )
+    {
+      setError( error_message, QStringLiteral( "备份属于其他邮箱账号，请退出后从登录页恢复。" ) );
+      return false;
+    }
+  }
 
   if( !QDir().mkpath( data_folder ) )
   {
@@ -214,11 +282,21 @@ bool ShadowWorkspaceArchive::stageImport( const QString& data_folder, const QStr
     return false;
   }
   QSaveFile pending( pendingFilePath( data_folder ) );
-  if( !pending.open( QIODevice::WriteOnly ) || pending.write( source.readAll() ) != source.size() || !pending.commit() )
+  if( !pending.open( QIODevice::WriteOnly ) )
   {
     setError( error_message, QStringLiteral( "无法暂存工作区，请检查数据目录权限。" ) );
     return false;
   }
+  while( !source.atEnd() )
+  {
+    const QByteArray chunk = source.read( 1024 * 1024 );
+    if( chunk.isEmpty() || pending.write( chunk ) != chunk.size() )
+    {
+      setError( error_message, QStringLiteral( "备份暂存失败，请检查剩余空间。" ) );
+      return false;
+    }
+  }
+  if( !pending.commit() ) { setError( error_message, QStringLiteral( "无法保存待恢复备份。" ) ); return false; }
   return true;
 }
 
@@ -228,12 +306,59 @@ bool ShadowWorkspaceArchive::applyPendingImport( const QString& data_folder, QSt
   if( !QFileInfo::exists( pending_path ) )
     return true;
 
+  if( ShadowAttachmentBundle::isBundle( pending_path ) )
+  {
+    QTemporaryDir temporary( QDir( data_folder ).filePath( QStringLiteral( ".restore-XXXXXX" ) ) );
+    if( !temporary.isValid() ) { setError( error_message, QStringLiteral( "无法创建恢复临时目录。" ) ); return false; }
+    const QString core = QDir( temporary.path() ).filePath( QStringLiteral( "core.workspace" ) );
+    const QString attachments = QDir( temporary.path() ).filePath( QStringLiteral( "attachments" ) );
+    QString original_root;
+    if( !ShadowAttachmentBundle::unpack( pending_path, core, attachments, &original_root, error_message ) ) return false;
+    // Restore into a fresh directory; existing received files are never replaced.
+    const QString destination = QDir( data_folder ).filePath( QString::fromUtf8( "接收文件/迁移-%1" ).arg( QUuid::createUuid().toString( QUuid::WithoutBraces ) ) );
+    QDir().mkpath( QFileInfo( destination ).absolutePath() );
+    if( !QDir().mkpath( attachments ) || !QDir().rename( attachments, destination ) )
+    { setError( error_message, QStringLiteral( "无法保存恢复的附件，原记录未改变。" ) ); return false; }
+    const QString envelope = QDir( temporary.path() ).filePath( QStringLiteral( "envelope.workspace" ) );
+    if( !QFile::rename( pending_path, envelope ) ) { QDir( destination ).removeRecursively(); return false; }
+    QString restored;
+    if( !stageImport( data_folder, core, error_message ) || !applyPendingImport( data_folder, &restored, error_message ) )
+    {
+      QFile::remove( pending_path ); QFile::rename( envelope, pending_path );
+      QDir( destination ).removeRecursively();
+      return false;
+    }
+    QSettings mapping( QDir( data_folder ).filePath( QStringLiteral( ".shadow-paths.ini" ) ), QSettings::IniFormat );
+    mapping.setValue( QStringLiteral( "sourceRoot" ), original_root ); mapping.setValue( QStringLiteral( "targetRoot" ), destination ); mapping.sync();
+    QSettings profile( QDir( data_folder ).filePath( QStringLiteral( "beebeep.ini" ) ), QSettings::IniFormat );
+    profile.setValue( QStringLiteral( "Gui/DownloadDirectory" ), destination );
+    profile.setValue( QStringLiteral( "Gui/LastDirectorySelected" ), destination ); profile.sync();
+    if( restore_folder ) *restore_folder = restored;
+    return true;
+  }
+
   QList<Entry> entries;
   if( !readArchive( pending_path, &entries, error_message ) )
     return false;
 
   QDir data_dir( data_folder );
-  const QString restore_name = QStringLiteral( "workspace-restore-%1" ).arg( QDateTime::currentDateTime().toString( QStringLiteral( "yyyyMMdd-HHmmss" ) ) );
+  // Existing account imports preserve the destination login credentials.
+  QFile credentials( data_dir.filePath( QStringLiteral( ".shadow-account.ini" ) ) );
+  if( credentials.exists() )
+  {
+    if( !credentials.open( QIODevice::ReadOnly ) )
+    {
+      setError( error_message, QStringLiteral( "无法读取当前账号资料。" ) );
+      return false;
+    }
+    const QByteArray existing_credentials = credentials.readAll();
+    credentials.close();
+    bool found = false;
+    for( int i = 0; i < entries.size(); ++i )
+      if( entries[i].name == QStringLiteral( ".shadow-account.ini" ) ) { entries[i].data = existing_credentials; found = true; }
+    if( !found ) { Entry entry; entry.name = QStringLiteral( ".shadow-account.ini" ); entry.data = existing_credentials; entries.append( entry ); }
+  }
+  const QString restore_name = QStringLiteral( "workspace-restore-%1-%2" ).arg( QDateTime::currentDateTime().toString( QStringLiteral( "yyyyMMdd-HHmmss" ) ), QUuid::createUuid().toString( QUuid::WithoutBraces ) );
   const QString restore_path = data_dir.filePath( restore_name );
   if( !QDir().mkpath( restore_path ) )
   {
@@ -272,14 +397,22 @@ bool ShadowWorkspaceArchive::applyPendingImport( const QString& data_folder, QSt
 
   if( !write_ok )
   {
+    bool rollback_ok = true;
     foreach( const QString& name, allowed_names )
-      QFile::remove( data_dir.filePath( name ) );
+      if( QFileInfo::exists( data_dir.filePath( name ) ) && !QFile::remove( data_dir.filePath( name ) ) ) rollback_ok = false;
     foreach( const QString& name, originally_present )
-      QFile::copy( QDir( restore_path ).filePath( name ), data_dir.filePath( name ) );
-    setError( error_message, QStringLiteral( "导入失败，原工作区已从恢复点还原。" ) );
+      if( !QFile::copy( QDir( restore_path ).filePath( name ), data_dir.filePath( name ) ) ) rollback_ok = false;
+    setError( error_message, rollback_ok ? QStringLiteral( "导入失败，原工作区已从恢复点还原。" )
+      : QStringLiteral( "导入失败，自动还原未完成。原数据仍在恢复点：%1。请关闭影聊并保留此目录。" ).arg( restore_path ) );
     return false;
   }
 
+  QSettings imported_settings( data_dir.filePath( QStringLiteral( "beebeep.ini" ) ), QSettings::IniFormat );
+  const QString own_download_folder = data_dir.filePath( QString::fromUtf8( "接收文件" ) );
+  QDir().mkpath( own_download_folder );
+  imported_settings.setValue( QStringLiteral( "Gui/DownloadDirectory" ), own_download_folder );
+  imported_settings.setValue( QStringLiteral( "Gui/LastDirectorySelected" ), own_download_folder );
+  imported_settings.sync();
   QFile::remove( pending_path );
   if( restore_folder )
     *restore_folder = restore_path;
