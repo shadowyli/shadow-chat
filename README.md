@@ -4,10 +4,12 @@
 
 ## 下载
 
-当前开发版本为 Windows 10/11 x86 测试版 1.1.1，通过 FlowX 内网「工具站」分发：`/tools/shadowchat`。本地开发入口与验证结果见交付报告；尚未部署到生产内网网站。
+当前开发版本为 Windows 10/11 x86 测试版 1.1.2，通过 FlowX「工具站」
+`/tools/shadowchat` 分发。本地交付、dev 验收与 main 发布分别记录；
+本地准备或 GitHub prerelease 不代表公司服务器已经部署。
 
 每个交付版本同时归档源码和安装包，规则见 [逐版本发布规范](docs/VERSION-RELEASE-POLICY.md)。
-本轮版本说明见 [1.1.1 测试版](docs/releases/1.1.1-test.md)。
+本轮版本说明见 [1.1.2 测试版](docs/releases/1.1.2-test.md)。
 
 安装后可从开始菜单或桌面启动“影聊”。覆盖安装与卸载默认保留独立账号目录中的数据。完整目标和验收范围见 [首版验收清单](docs/RELEASE-ACCEPTANCE.md)，测试步骤见 [本地测试指南](docs/LOCAL-TEST-GUIDE.md)。
 
@@ -22,8 +24,8 @@
 - 私聊、项目群、群主权限、@、引用、截图、粘贴和拖拽；离线文字与素材队列在本机保存。
 - 历史记录按消息、文件、图片和视频、链接分类；工作区备份可选包含附件。
 - 工作区导出 / 导入，用于换电脑迁移聊天偏好和本地设置。
-- 从 1.1.1 起启动与运行中强制检查版本，旧版或校验失败时停止使用并提供下载、
-  重试和退出。部署公司版本清单及下载页后方可投入试用，旧客户端需先手动升级。
+- 1.1.2 取消强更，版本服务失败不影响启动或收发。只有更高同通道版本才自动提醒，
+  每天最多一次；当前最新版不自动弹窗。手动检查可随时进行，旧 1.1.1 用户手动升级。
 - 保留局域网聊天与文件传输能力，默认关闭桌面共享、语音、插件和统计上报。
 
 ## 安全边界
@@ -33,7 +35,8 @@
 - 核心聊天和文件传输在局域网内完成，不提供云端中转或外部文件 relay。
 - 安全构建关闭第三方插件、遥测、桌面共享、语音和外部程序启动。
 - ShareBox、自动下载和网络消息路径会做相对路径、目录 containment、大小和完整性校验。
-- 更新只读取 `https://flowx.gz/updates/shadowchat.json` 静态清单，不上传聊天内容、文件或用户信息，不自动安装。
+- 更新只读取构建环境固定的版本清单：local 为本机测试源，dev 为预发源，
+  main 为正式源。不上传聊天内容、文件或用户信息，不自动安装；清单不能任意更换更新源。
 
 请注意：局域网本身仍应使用公司的网络隔离、终端防护和访问控制策略；影聊不能限制用户使用其他软件传输文件。
 
@@ -50,7 +53,10 @@ python packaging\prepare_recovery.py
 python packaging\build_installer.py
 ```
 
-最终安装包输出到 `dist\影聊-1.1.1-test-x86-安装包.exe`。安装包及本次构建程序的 SHA-256 写入 `dist\release-build.json`。可在已配置 Qt PATH 的 x86 VS 开发者命令提示符运行 `scripts\build-windows.cmd` 和 `scripts\test-windows.cmd`；后者覆盖账号、队列、历史、头像与备份等核心回归。发布前建议运行：
+安装包输出路径和环境以 `dist\release-build.json` 为准，该回执记录版本、通道、
+构建环境和 SHA-256。构建入口与环境参数见本轮构建报告。
+可在已配置 Qt PATH 的 x86 VS 开发者命令提示符运行 `scripts\build-windows.cmd`
+和 `scripts\test-windows.cmd`；后者覆盖更新提醒、账号、队列、历史、头像与备份等核心回归。发布前建议运行：
 
 ```powershell
 .\tests\release\workspace_archive_test.exe

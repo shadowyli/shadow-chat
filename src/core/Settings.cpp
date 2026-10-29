@@ -824,7 +824,8 @@ QString Settings::version( bool build_version, bool qt_version, bool debug_info 
 {
   QString s_version = QString( BEEBEEP_VERSION );
   if( build_version )
-    s_version += QString( "-%1" ).arg( BEEBEEP_BUILD );
+    s_version += QString( "-%1 [%2 / %3]" ).arg( BEEBEEP_BUILD )
+      .arg( QString::fromLatin1( ShadowBuild::environment() ), QString::fromLatin1( ShadowBuild::channel() ) );
 
   if( debug_info )
   {

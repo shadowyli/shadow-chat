@@ -52,8 +52,6 @@ QString shadowRecipientKey( const User& user )
 
 void Core::processPendingFileTransfers()
 {
-  if( m_updateBlocked )
-    return;
   if( !shadowOutbox.open( Settings::instance().dataFolder() ) || !mp_fileTransfer->isActive() ) return;
   QSet<QString> activeRecipients;
   foreach( ShadowTransferQueue::Task task, shadowOutbox.tasks() )
@@ -127,8 +125,6 @@ void Core::cancelPendingFileTransfers( VNumber user_id, VNumber chat_id )
 
 bool Core::startFileTransferServer()
 {
-  if( m_updateBlocked )
-    return false;
   if( mp_fileTransfer->isActive() )
   {
 #ifdef BEEBEEP_DEBUG
@@ -164,8 +160,6 @@ void Core::stopFileTransferServer()
 
 bool Core::downloadFile( VNumber user_id, const FileInfo& fi, bool show_message )
 {
-  if( m_updateBlocked )
-    return false;
   User u = UserManager::instance().findUser( user_id );
   if( !u.isValid() )
   {
@@ -434,8 +428,6 @@ bool Core::showFilesUploadPreviewInChat( const Chat& c, const QStringList& file_
 
 int Core::sendFilesFromChat( VNumber chat_id, const QStringList& file_path_list )
 {
-  if( m_updateBlocked )
-    return 0;
   if( file_path_list.isEmpty() )
     return 0;
 
@@ -484,8 +476,6 @@ int Core::sendFilesFromChat( VNumber chat_id, const QStringList& file_path_list 
 
 bool Core::sendFile( VNumber user_id, const QString& file_path, const QString& share_folder, bool to_share_box, VNumber chat_id )
 {
-  if( m_updateBlocked )
-    return false;
   QString icon_html = IconManager::instance().toHtml( "red-ball.png", "*F*" );
   if( !Settings::instance().enableFileTransfer() )
   {
@@ -512,8 +502,6 @@ bool Core::sendFile( VNumber user_id, const QString& file_path, const QString& s
 
 bool Core::sendFileToUser( const User&u, const QString& file_path, const QString& share_folder, bool to_share_box, const Chat& chat_selected )
 {
-  if( m_updateBlocked )
-    return false;
   if( u.isLocal() )
     return false;
 
@@ -947,8 +935,6 @@ bool Core::sendFolder( const User& u, const QFileInfo& file_info, const QString&
 
 void Core::addFolderToFileTransfer()
 {
-  if( m_updateBlocked )
-    return;
   BuildFileShareList *bfsl = qobject_cast<BuildFileShareList*>( sender() );
   if( !bfsl )
   {
@@ -1154,8 +1140,6 @@ void Core::sendShareBoxList()
 
 void Core::downloadFromShareBox( VNumber from_user_id, const FileInfo& fi, const QString& to_path )
 {
-  if( m_updateBlocked )
-    return;
 #ifdef BEEBEEP_DEBUG
   QString from_path = fi.shareFolder().isEmpty() ? fi.name() : QString( "%1/%2" ).arg( fi.shareFolder(), fi.name() );
   qDebug() << "Download path" << from_path << "from user" << from_user_id << "to path" << to_path
@@ -1171,8 +1155,6 @@ void Core::downloadFromShareBox( VNumber from_user_id, const FileInfo& fi, const
 
 void Core::uploadToShareBox( VNumber to_user_id, const FileInfo& fi, const QString& to_path )
 {
-  if( m_updateBlocked )
-    return;
 #ifdef BEEBEEP_DEBUG
   qDebug() << "Upload file" << fi.path() << "to path" << to_path << "of user" << to_user_id;
 #endif
@@ -1181,8 +1163,6 @@ void Core::uploadToShareBox( VNumber to_user_id, const FileInfo& fi, const QStri
 
 bool Core::resumeFileTransfer( VNumber user_id, const FileInfo& file_info )
 {
-  if( m_updateBlocked )
-    return false;
   if( file_info.isDownload() )
   {
 #ifdef BEEBEEP_DEBUG

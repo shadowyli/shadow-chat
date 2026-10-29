@@ -82,7 +82,7 @@
 #include "ShadowWorkspaceArchive.h"
 #include "ShadowLocalAccounts.h"
 #include "Updater.h"
-#include "ShadowUpdateGate.h"
+#include "ShadowUpdateController.h"
 #include "ShadowMention.h"
 #include "ShadowConversationPreferences.h"
 #include "UserManager.h"
@@ -631,6 +631,8 @@ void GuiMain::closeEvent( QCloseEvent* e )
 #endif
   // quit now on last window closed
   qApp->setQuitOnLastWindowClosed( true );
+  if( m_updates )
+    m_updates->shutdown();
 
   e->accept();
 }
@@ -654,6 +656,8 @@ void GuiMain::showNextChat()
 
 void GuiMain::forceShutdown()
 {
+  if( m_updates )
+    m_updates->shutdown();
   qDebug() << "Shutdown...";
   m_forceShutdown = true;
   if( beeCore->isConnected() )
@@ -1173,12 +1177,6 @@ void GuiMain::createMenus()
   act->setCheckable( true );
   act->setChecked( Settings::instance().resetGeometryAtStartup() );
   act->setData( 26 );
-  act = mp_menuStartupSettings->addAction( tr( "Check for new version" ), this, SLOT( settingsChanged() ) );
-  act->setCheckable( true );
-  act->setChecked( true );
-  act->setEnabled( false );
-  act->setToolTip( QStringLiteral( "启动时及运行中每 5 分钟必须校验版本，无法关闭。" ) );
-  act->setData( 43 );
   mp_menuStartupSettings->addSeparator();
   act = mp_menuStartupSettings->addAction( IconManager::instance().icon( "timer.png" ), tr( "Delay first connection" ) + QString( "..." ), this, SLOT( settingsChanged() ) );
   act->setData( 65 );
@@ -2382,9 +2380,8 @@ void GuiMain::showShadowSettings()
   security_layout->setSpacing( 7 );
   QLabel* security_title = new QLabel( QStringLiteral( "安全与更新" ), security_card );
   security_title->setObjectName( "ShadowOnboardingStep" );
-  QCheckBox* update_check = new QCheckBox( QStringLiteral( "启动时及运行中每 5 分钟强制校验版本" ), security_card );
-  update_check->setChecked( true );
-  update_check->setEnabled( false );
+  QLabel* update_check = new QLabel( QStringLiteral( "异步检查更新，每个自然日最多建议一次，不影响使用。" ), security_card );
+  update_check->setWordWrap( true );
   update_check->setToolTip( QStringLiteral( "只访问影聊的静态版本清单，不上传姓名、联系人、文件或使用数据。" ) );
   QLabel* security_text = new QLabel( QStringLiteral( "聊天、文件和通讯录留在局域网；第三方插件、云端转发和从聊天中运行程序已关闭。" ), security_card );
   security_text->setWordWrap( true );
@@ -2418,7 +2415,6 @@ void GuiMain::showShadowSettings()
   Settings::instance().setUseReturnToSendMessage( enter_check->isChecked() );
   Settings::instance().setConfirmOnDownloadFile( confirm_download_check->isChecked() );
   Settings::instance().setDownloadDirectory( QDir::toNativeSeparators( download_folder->text() ) );
-  Settings::instance().setCheckNewVersionAtStartup( update_check->isChecked() );
   Settings::instance().save();
   if( mp_actBeepOnNewMessage )
     mp_actBeepOnNewMessage->setChecked( sound_check->isChecked() );
@@ -4938,8 +4934,8 @@ bool GuiMain::openWebUrl( const QString& web_url )
 
 void GuiMain::checkNewVersion()
 {
-  if( m_updateGate )
-    m_updateGate->checkNow();
+  if( m_updates )
+    m_updates->checkManually();
 }
 
 void GuiMain::openWebSite()

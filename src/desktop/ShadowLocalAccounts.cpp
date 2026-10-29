@@ -28,7 +28,11 @@ bool checkPassword( QSettings& settings, const QString& password )
 }
 
 ShadowLocalAccounts::ShadowLocalAccounts( const QString& root )
-  : m_root( root.isEmpty() ? QDir( QStandardPaths::writableLocation( QStandardPaths::DocumentsLocation ) ).filePath( QString::fromUtf8("影聊/accounts") ) : root ), m_useInstalledRecovery( root.isEmpty() ) {}
+  : m_root( root.isEmpty() ?
+      (qApp && !qApp->property("shadowAccountRoot").toString().isEmpty() ?
+        qApp->property("shadowAccountRoot").toString() :
+        QDir( QStandardPaths::writableLocation( QStandardPaths::DocumentsLocation ) ).filePath( QString::fromUtf8("影聊/accounts") )) : root ),
+    m_useInstalledRecovery( root.isEmpty() && (!qApp || qApp->property("shadowAccountRoot").toString().isEmpty()) ) {}
 
 QString ShadowLocalAccounts::normalizeEmail( const QString& email )
 {

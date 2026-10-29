@@ -521,8 +521,6 @@ int Core::archiveAllChats()
 
 int Core::sendChatMessage( VNumber chat_id, const QString& msg, bool is_important, bool can_be_delayed, bool is_source_code )
 {
-  if( m_updateBlocked )
-    return 0;
   if( !isConnected() )
   {
     dispatchSystemMessage( chat_id, ID_LOCAL_USER, tr( "Unable to send the message: you are not connected." ), DispatchToChat, ChatMessage::Other, false );
@@ -595,8 +593,6 @@ int Core::sendChatMessage( VNumber chat_id, const QString& msg, bool is_importan
 
 int Core::sendMessageToChat( const Chat& c, const Message& m )
 {
-  if( m_updateBlocked )
-    return 0;
   int messages_sent = 0;
   UserList user_list = c.id() == ID_DEFAULT_CHAT ? UserManager::instance().userList() : UserManager::instance().userList().fromUsersId( c.usersId() );
   if( c.isGroup() && m.type() == Message::Chat && !m.hasFlag( Message::Auto ) &&
@@ -746,8 +742,6 @@ void Core::sendRefuseMessageToGroupChat( const Chat& group_chat )
 
 bool Core::sendMessageToLocalNetwork( const User& to_user, const Message& m )
 {
-  if( m_updateBlocked )
-    return false;
   Connection* c = connection( to_user.id() );
   if( !c )
   {

@@ -87,8 +87,6 @@ Connection* Core::createConnection()
 
 void Core::newPeerFound( const QHostAddress& sender_ip, int sender_port )
 {
-  if( m_updateBlocked )
-    return;
   if( !isConnected() )
     return;
 
@@ -138,13 +136,6 @@ void Core::newPeerFound( const QHostAddress& sender_ip, int sender_port )
 
 void Core::checkNewConnection( qintptr socket_descriptor )
 {
-  if( m_updateBlocked )
-  {
-    QTcpSocket rejected;
-    if( rejected.setSocketDescriptor( socket_descriptor ) )
-      rejected.abort();
-    return;
-  }
   Connection *c = createConnection();
   c->initSocket( socket_descriptor, mp_listener->serverPort() );
   qDebug() << "New connection to port" << mp_listener->serverPort() << "from" << qPrintable( c->networkAddress().toString() );
@@ -174,11 +165,6 @@ void Core::setupNewConnection( Connection *c )
 
 void Core::addConnectionReadyForUse( Connection* c, const User& u )
 {
-  if( m_updateBlocked )
-  {
-    closeConnection( c );
-    return;
-  }
 #ifdef BEEBEEP_DEBUG
   qDebug() << "Connection from" << qPrintable( c->networkAddress().toString() ) << "is ready for use by" << qPrintable( u.path() );
 #endif
@@ -255,8 +241,6 @@ void Core::closeConnection( Connection *c )
 
 void Core::checkUserAuthentication( const QByteArray& auth_byte_array )
 {
-  if( m_updateBlocked )
-    return;
   Connection* c = qobject_cast<Connection*>( sender() );
   if( !c )
   {

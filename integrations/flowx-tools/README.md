@@ -42,21 +42,29 @@ const isCurrentSection = item => route.name === item.routeName ||
 首次建立 `public/updates/shadowchat.json`：
 
 ```json
-{"schemaVersion":1,"product":"shadowchat","version":"1.1.1","channel":"test","published":false,"downloadPage":"/tools/shadowchat","installerUrl":null,"sha256":null,"size":null,"notes":[],"mandatory":true}
+{"schemaVersion":1,"product":"shadowchat","version":"1.1.2","channel":"test","releaseEnvironment":"local","published":false,"downloadPage":"/tools/shadowchat","installerUrl":null,"sha256":null,"size":null,"notes":[],"mandatory":false}
 ```
 
 验收后在宿主项目根目录运行：
 
 ```text
-node scripts/stageShadowChatRelease.mjs <安装包绝对路径.exe> 1.1.1 "本次更新说明"
+node scripts/stageShadowChatRelease.mjs <安装包绝对路径.exe> 1.1.2 --environment=local --receipt=<release-build.json绝对路径> "本次更新说明"
 npm run build
 ```
 
-脚本计算安装包 SHA-256、大小并更新清单；同版本文件不可覆盖，默认标为测试通道。只有正式验收后才使用 `--stable`。安装包放在 `public/downloads/shadowchat`，不提交 Git。部署先上传安装包再更新清单，版本清单配置 `Cache-Control: no-cache`；服务器保留 SPA fallback。脚本只暂存本机资料，不部署线上。
+脚本核对构建回执的版本、环境、通道、SHA-256 和大小后更新清单。local/dev 为
+test，main 为 stable，不能把 local 测试包直接改标签当正式包。包按环境放入
+`public/downloads/shadowchat/<环境>/`，同版本不同字节拒绝覆盖；相同字节可重复暂存。
+安装包不提交 Git。先上传包后更新清单，清单应 `Cache-Control: no-cache`，
+不能让 SPA fallback 用 HTML 首页冒充 JSON。脚本只暂存本机资料，不部署线上。
 
-从 1.1.1 起强制更新，脚本始终写入 `mandatory: true`。客户端启动和运行中校验
-版本，旧版或无法校验时不放行。正式试用前必须先部署可访问的版本清单、下载页
-和安装包；GitHub Release 不替代公司版本服务。旧客户端需要先人工升级一次。
+1.1.2 取消强更，脚本写入 `mandatory: false`。客户端只有发现同通道更高版本
+才自动提醒，每天最多一次，最新版本不弹窗。版本服务异常不影响登录或收发，
+手动检查可显示错误并重试。旧 1.1.1 用户需手动覆盖升级。
+
+按本地 → dev → main 顺序发布。dev 与 main 使用对应环境构建回执，main 发布与
+PR 合并须经用户确认；缺少服务器权限时提供材料，不把本地暂存称为已部署。
+可运行 `node --test scripts/stageShadowChatRelease.test.mjs` 验证暂存保护。
 
 `logo.png` 从当前客户端 `branding/generated/shadowchat-256.png` 技术缩放资产复制，未改用户提供的颜色。`chat-preview.png` 是当前真实 Qt 主窗口的合成会话验收截图，演示联系人并非真实同事；不用于证明真实网络连接。版本记录由团队根据已实现事实维护，不包含参考网站代码或素材。
 
