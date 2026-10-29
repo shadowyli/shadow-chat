@@ -32,8 +32,8 @@ const canDownload = () => release.value?.published === true && /^\/downloads\/[^
     <div class="platform-heading"><svg aria-hidden="true" viewBox="0 0 24 24" width="36" height="36" fill="currentColor"><path d="M2 4.2 10.7 3v8H2zm10-1.5L22 1.4V11h-9.9zM2 12.4h8.7v8L2 19.2zm10 0H22V22l-9.9-1.4z" /></svg><div><h2>Windows</h2><p>Windows 10 / 11</p></div></div>
     <p v-if="release" class="platform-meta">v{{ release.version }} · x86<span v-if="release.size"> · {{ (release.size / 1024 / 1024).toFixed(1) }} MB</span></p>
     <a v-if="canDownload()" class="download-button" :href="release.installerUrl" download>下载安装包</a>
-    <p class="platform-meta">需保持最新版本才能使用。下载后覆盖安装，保留本地账号、记录和附件。</p>
     <p v-else class="release-status" role="status">{{ error ? '暂时无法读取版本信息，请稍后刷新。' : release ? '验收通过后开放下载' : '正在读取版本信息…' }}</p>
+    <p class="platform-meta">需保持最新版本才能使用。下载后覆盖安装，保留本地账号、记录和附件。</p>
   </section>
   </header>
   <figure class="product-showcase">
