@@ -15,7 +15,10 @@ class ShadowWorkspaceArchive
 public:
   static QString fileExtension();
   static QString pendingFilePath( const QString& data_folder );
+  static bool archiveEmail( const QString& archive_path, QString* email, QString* error_message );
   static bool exportWorkspace( const QString& data_folder, const QString& archive_path, QString* error_message );
+  static bool exportWithAttachments( const QString& data_folder, const QString& attachment_folder, const QString& archive_path, QString* error_message );
+  static qint64 attachmentSize( const QString& attachment_folder );
   static bool stageImport( const QString& data_folder, const QString& archive_path, QString* error_message );
   static bool applyPendingImport( const QString& data_folder, QString* restore_folder, QString* error_message );
 

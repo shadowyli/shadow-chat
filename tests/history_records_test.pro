@@ -1,0 +1,9 @@
+QT += core gui widgets network xml multimedia printsupport
+CONFIG += console c++11
+CONFIG -= app_bundle
+TEMPLATE = app
+TARGET = history_records_test
+win32-msvc*: QMAKE_CXXFLAGS += /utf-8
+INCLUDEPATH += ../src ../src/core ../src/desktop
+SOURCES += history_records_test.cpp
+HEADERS += ../src/desktop/HistoryRecord.h

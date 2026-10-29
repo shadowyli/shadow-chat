@@ -30,6 +30,7 @@
 #include "Protocol.h"
 #include "Settings.h"
 #include "UserManager.h"
+#include "ShadowPeerAvatars.h"
 
 
 void Core::setLocalUserWorkgroups( const QStringList& wkgs )
@@ -138,6 +139,7 @@ bool Core::setLocalUserVCard( const QString& user_color, const VCard& vc )
 
   User u = Settings::instance().localUser();
   QString old_user_nickname = "";
+  const VCard old_vcard = u.vCard();
 
   if( color_changed )
   {
@@ -160,7 +162,6 @@ bool Core::setLocalUserVCard( const QString& user_color, const VCard& vc )
   if( !color_changed && !vc_changed )
     return false;
 
-  VCard old_vcard = u.vCard();
   Settings::instance().setLocalUser( u );
   Settings::instance().save();
   MessageManager::instance().generateSaveMessagesAuthCode();
@@ -184,6 +185,7 @@ void Core::loadUsersAndGroups()
       u = Protocol::instance().loadUser( user_data );
       if( u.isValid() )
       {
+        ShadowPeerAvatars::restore( &u );
         qDebug() << "Loading user:" << qPrintable( u.path() );
         UserManager::instance().setUser( u );
         createPrivateChat( u );
@@ -245,6 +247,8 @@ void Core::loadUsersAndGroups()
 void Core::saveUsersAndGroups()
 {
   QStringList save_data;
+  if( Settings::instance().saveUserList() )
+    ShadowPeerAvatars::save( UserManager::instance().userList().toList() );
 
   if( Settings::instance().saveUserList() )
   {

@@ -1,0 +1,9 @@
+QT = core
+CONFIG += console c++11 release
+CONFIG -= app_bundle debug_and_release
+TEMPLATE = app
+TARGET = message_delivery_test
+INCLUDEPATH += ../src/core
+SOURCES += message_delivery_test.cpp ../src/core/ShadowMessageDelivery.cpp
+HEADERS += ../src/core/ShadowMessageDelivery.h
+win32-msvc*: QMAKE_CXXFLAGS += /utf-8

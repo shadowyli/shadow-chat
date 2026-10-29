@@ -49,6 +49,7 @@ signals:
   void resumeTransfer( VNumber, const FileInfo& );
 
 protected:
+  void paintEvent( QPaintEvent* ) Q_DECL_OVERRIDE;
   GuiFileTransferItem* findItem( VNumber );
   GuiFileTransferItem* createItem( VNumber, const User&, const FileInfo& );
   void showProgress( QTreeWidgetItem*, const FileInfo&, FileSizeType, int );

@@ -1158,7 +1158,8 @@ QString Protocol::saveGroup( const Group& g ) const
     sl << ""; // for future use
   }
 
-  sl << g.lastModified().toString( Qt::ISODate );
+  sl << g.lastModified().toString( Qt::ISODateWithMs );
+  sl << g.ownerHash();
 
   return sl.join( DATA_FIELD_SEPARATOR );
 }
@@ -1234,6 +1235,15 @@ Group Protocol::loadGroup( const QString& group_data_saved )
 #endif
   }
 
+  if( !sl.isEmpty() ) g.setOwnerHash( sl.takeFirst() );
+  if( g.ownerHash().isEmpty() )
+  {
+    QStringList hashes;
+    foreach( const User& member, member_list.toList() )
+      if( !member.hash().isEmpty() ) hashes << member.hash();
+    hashes.sort();
+    if( !hashes.isEmpty() ) g.setOwnerHash( hashes.first() );
+  }
   g.setChatType( Group::GroupChat );
   return g;
 }
@@ -1279,6 +1289,7 @@ Message Protocol::groupChatRequestMessage( const Chat& c, const User& to_user )
   cmd.setGroupId( c.privateId() );
   cmd.setGroupName( c.name() );
   cmd.setGroupLastModified( c.lastModified() );
+  cmd.setGroupOwnerHash( c.group().ownerHash() );
   m.setData( chatMessageDataToString( cmd ) );
   return m;
 }
@@ -1291,6 +1302,7 @@ Message Protocol::groupChatRemoveUserMessage( const Chat& c )
   cmd.setGroupId( c.privateId() );
   cmd.setGroupName( c.name() );
   cmd.setGroupLastModified( c.lastModified() );
+  cmd.setGroupOwnerHash( c.group().ownerHash() );
   m.setData( chatMessageDataToString( cmd ) );
   return m;
 }
@@ -1620,6 +1632,7 @@ Message Protocol::createFolderMessage( const QString& folder_name, const QList<F
     sl << fi.fileHash();
     sl << fi.shareFolder();
     sl.append( fi.chatPrivateId().isEmpty() ? QString( "" ) : fi.chatPrivateId() );
+    sl << (fi.isFolder() ? QStringLiteral( "1" ) : QStringLiteral( "0" ));
     msg_list.append( sl.join( DATA_FIELD_SEPARATOR ) );
   }
 
@@ -1673,6 +1686,11 @@ QList<FileInfo> Protocol::messageFolderToInfoList( const Message& m, const QHost
       fi.setShareFolder( Bee::convertToNativeFolderSeparator( sl_tmp.takeFirst() ) );
       if( !sl_tmp.isEmpty() )
         fi.setChatPrivateId( sl_tmp.takeFirst() );
+      if( !sl_tmp.isEmpty() && sl_tmp.takeFirst() == QLatin1String( "1" ) )
+      {
+        fi.setIsFolder( true );
+        fi.setMimeType( QStringLiteral( "application/x-shadow-directory" ) );
+      }
       file_info_list.append( fi );
     }
     ++it;
@@ -1999,6 +2017,7 @@ ChatMessageData Protocol::dataFromChatMessage( const Message& m ) const
   QString s_group_last_modified = sl.takeFirst();
   if( !s_group_last_modified.isEmpty() )
     cmd.setGroupLastModified( QDateTime::fromString( s_group_last_modified, Qt::ISODate ) );
+  if( !sl.isEmpty() ) cmd.setGroupOwnerHash( sl.takeFirst() );
 
   return cmd;
 }
@@ -2009,7 +2028,8 @@ QString Protocol::chatMessageDataToString( const ChatMessageData& cmd ) const
   sl << (cmd.textColor().isValid() ? cmd.textColor().name() : "");
   sl << (cmd.groupId().size() > 0 ? cmd.groupId() : "");
   sl << (cmd.groupName().size() > 0 ? cmd.groupName() : "");
-  sl << (cmd.groupLastModified().isValid() ? cmd.groupLastModified().toString( Qt::ISODate ) : "");
+  sl << (cmd.groupLastModified().isValid() ? cmd.groupLastModified().toString( Qt::ISODateWithMs ) : "");
+  sl << cmd.groupOwnerHash();
   return sl.join( DATA_FIELD_SEPARATOR );
 }
 

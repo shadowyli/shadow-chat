@@ -43,6 +43,7 @@ Group& Group::operator=( const Group& g )
     m_name = g.m_name;
     m_usersId = g.m_usersId;
     m_privateId = g.m_privateId;
+    m_ownerHash = g.m_ownerHash;
     m_lastModified = g.m_lastModified;
     m_chatType = g.m_chatType;
   }

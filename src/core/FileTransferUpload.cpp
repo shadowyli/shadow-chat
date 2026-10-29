@@ -107,8 +107,14 @@ void FileTransferPeer::sendFileHeader()
   QFileInfo file_info_now_in_system( m_fileInfo.path() );
   if( file_info_now_in_system.exists() )
   {
-    m_fileInfo.setSize( file_info_now_in_system.size() );
-    m_fileInfo.setLastModified( file_info_now_in_system.lastModified() );
+    if( !file_info_now_in_system.isFile() ||
+        file_info_now_in_system.size() != m_fileInfo.size() ||
+        (m_fileInfo.lastModified().isValid() &&
+         file_info_now_in_system.lastModified().toMSecsSinceEpoch() != m_fileInfo.lastModified().toMSecsSinceEpoch()) )
+    {
+      setError( tr( "源文件已修改，请重新选择并发送。" ) );
+      return;
+    }
     if( m_fileInfo.startingPosition() > 0 )
     {
       if( m_fileInfo.startingPosition() > m_fileInfo.size() )

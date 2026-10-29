@@ -4,14 +4,14 @@ Unicode true
 
 !define APP_NAME "影聊"
 !define APP_EXE "ShadowChat.exe"
-!define APP_VERSION "1.0.0"
+!define APP_VERSION "1.1.1"
 !define APP_PUBLISHER "shadowyli"
-!define APP_WEB "https://shadowyli.github.io/shadow-chat/"
+!define APP_WEB "https://flowx.gz/tools/shadowchat"
 !define ROOT "${__FILEDIR__}\.."
-!define PAYLOAD "${ROOT}\dist\影聊-1.0.0-test-x86"
+!define PAYLOAD "${ROOT}\dist\影聊-1.1.1-test-x86"
 
 Name "${APP_NAME} ${APP_VERSION} 测试版"
-OutFile "${ROOT}\dist\影聊-1.0.0-test-x86-安装包.exe"
+OutFile "${ROOT}\dist\影聊-1.1.1-test-x86-安装包.exe"
 InstallDir "$LOCALAPPDATA\Programs\ShadowChat"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
@@ -22,7 +22,7 @@ BrandingText "影聊 · 局域网办公通讯"
 ShowInstDetails nevershow
 ShowUninstDetails nevershow
 
-VIProductVersion "1.0.0.0"
+VIProductVersion "1.1.1.0"
 VIAddVersionKey /LANG=2052 "ProductName" "影聊"
 VIAddVersionKey /LANG=2052 "ProductVersion" "${APP_VERSION}"
 VIAddVersionKey /LANG=2052 "FileVersion" "${APP_VERSION}"
@@ -50,6 +50,20 @@ VIAddVersionKey /LANG=2052 "LegalCopyright" "BeeBEEP contributors and shadowyli"
 Section "影聊" SEC_MAIN
   SectionIn RO
   SetShellVarContext current
+  check_running:
+    IfFileExists "$INSTDIR\${APP_EXE}" 0 ready_to_install
+    ClearErrors
+    FileOpen $0 "$INSTDIR\${APP_EXE}" a
+    IfErrors app_is_running
+    FileClose $0
+    Goto ready_to_install
+  app_is_running:
+    IfSilent cancel_install
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "请先从托盘退出影聊，再点击重试。账号、聊天记录和接收文件会保留。" IDRETRY check_running
+  cancel_install:
+    SetErrorLevel 2
+    Abort
+  ready_to_install:
   SetOutPath "$INSTDIR"
   File /r "${PAYLOAD}\*.*"
 

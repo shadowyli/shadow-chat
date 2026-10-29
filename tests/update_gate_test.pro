@@ -1,0 +1,9 @@
+QT += core gui widgets network testlib
+CONFIG += console c++11 release
+CONFIG -= app_bundle debug_and_release
+TEMPLATE = app
+TARGET = update_gate_test
+INCLUDEPATH += ../src/utils ../src/desktop
+SOURCES += update_gate_test.cpp ../src/utils/Updater.cpp ../src/desktop/ShadowUpdateGate.cpp
+HEADERS += ../src/utils/Updater.h ../src/desktop/ShadowUpdateGate.h
+win32-msvc*: QMAKE_CXXFLAGS += /utf-8

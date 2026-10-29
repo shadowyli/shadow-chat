@@ -25,6 +25,7 @@
 #define BEEBEEP_GUISAVEDCHAT_H
 
 #include "Config.h"
+#include "HistoryRecord.h"
 
 
 class GuiSavedChat : public QMainWindow
@@ -50,6 +51,8 @@ protected slots:
   void saveHistoryAs();
   void findTextInHistory();
   void checkAnchorClicked( const QUrl& );
+  void filterHistory();
+  void locateHistoryResult();
 
 protected:
   void setupToolBar( QToolBar* );
@@ -62,6 +65,13 @@ private:
   QToolBar* mp_barHistory;
   QMenu* mp_menuContext;
   QString m_savedChatName;
+  QTabBar* mp_categories;
+  QComboBox* mp_senderFilter;
+  QComboBox* mp_dateFilter;
+  QComboBox* mp_sortOrder;
+  QListWidget* mp_results;
+  QLabel* mp_resultCount;
+  QList<HistoryRecord> m_records;
 
 };
 

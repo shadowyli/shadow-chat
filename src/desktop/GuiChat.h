@@ -65,6 +65,7 @@ public:
   void updateOnSendingMessage();
   void updateChatColors();
   bool updateChat( const Chat& );
+  void updateUserAvatar( const User& );
 
   void onTickEvent( int );
 
@@ -122,6 +123,9 @@ protected:
 
 private slots:
   void sendMessage();
+  void captureRegionScreenshot();
+  void mentionChatMember();
+  void showStickerPicker();
   void checkWriting();
   void customContextMenu( const QPoint& );
   void showChatMessageFilterMenu();
@@ -167,6 +171,7 @@ protected:
   QString modernChatMessageToText( const ChatMessage& );
   QString modernImageAlbumHtml( const QStringList&, bool from_local_user ) const;
   QString modernMessageId( const ChatMessage& ) const;
+  QString avatarUrlForUser( const User& );
   void updateFilterMessagesButton();
 
 private:
@@ -201,6 +206,7 @@ private:
   QLabel* mp_modernComposerHint;
   bool m_modernMode;
   QSet<QString> m_expandedMessageIds;
+  QHash<VNumber,QString> m_avatarUrls;
 
   QPalette m_defaultChatPalette;
 
