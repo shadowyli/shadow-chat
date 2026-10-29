@@ -38,8 +38,6 @@
 
 void Core::parseMessage( VNumber user_id, const Message& m )
 {
-  if( m_updateBlocked )
-    return;
   User u = UserManager::instance().findUser( user_id );
   if( !u.isValid() )
   {
@@ -51,8 +49,6 @@ void Core::parseMessage( VNumber user_id, const Message& m )
 
 void Core::parseMessage( const User& u, const Message& m )
 {
-  if( m_updateBlocked )
-    return;
   switch( m.type() )
   {
   case Message::User:

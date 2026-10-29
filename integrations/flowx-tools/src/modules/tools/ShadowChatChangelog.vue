@@ -5,6 +5,10 @@ let favicon, previousFavicon
 onMounted(() => { favicon = document.querySelector('link[rel="icon"]'); if (favicon) { previousFavicon = favicon.getAttribute('href'); favicon.setAttribute('href', `${import.meta.env.BASE_URL}tools/shadowchat/logo.png`) } })
 onUnmounted(() => { if (favicon && previousFavicon) favicon.setAttribute('href', previousFavicon) })
 const releases = [
+  { version: '1.1.2', date: '2026-10-29', groups: [
+    { label: '修复', items: ['取消强制更新门禁，断网或版本服务异常时仍可登录、聊天和传文件。', '修复覆盖安装后桌面和开始菜单仍显示旧图标的问题。'] },
+    { label: '改进', items: ['仅发现更高的同通道版本时建议更新，每天最多提醒一次；当前已是最新版时不自动弹窗。', '手动检查更新可随时使用，本地、dev 和 main 的更新通道分别管理。', '下载页精简说明，完整版本记录移至安装框下方。'] },
+  ] },
   { version: '1.1.1', date: '2026-10-29', groups: [
     { label: '新增', items: ['采用新的影聊应用标识。', '启动和使用过程中强制检查更新，旧版本需升级后才能继续使用。'] },
     { label: '改进', items: ['统一个人资料、同事资料、建群、设置、聊天记录与文件传输界面。', '个人资料先显示资料卡，编辑时展开必要字段，附加资料可按需展开。', '统一常用按钮、字体和群聊图标，让操作层级更清楚。'] },

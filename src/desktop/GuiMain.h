@@ -48,7 +48,7 @@ class GuiSystemTray;
 class GuiFileTransfer;
 class GuiUserList;
 class User;
-class ShadowUpdateGate;
+class ShadowUpdateController;
 class QFrame;
 class QLabel;
 class QLineEdit;
@@ -75,7 +75,7 @@ class GuiMain : public QMainWindow
 
 public:
   GuiMain( QWidget* parent = Q_NULLPTR );
-  void setUpdateGate( ShadowUpdateGate* gate ) { m_updateGate = gate; }
+  void setUpdateController( ShadowUpdateController* updates ) { m_updates = updates; }
 
 public slots:
   void loadSession();
@@ -457,7 +457,7 @@ private:
   int m_lastUserStatus;
 
   bool m_forceShutdown;
-  ShadowUpdateGate* m_updateGate = nullptr;
+  ShadowUpdateController* m_updates = nullptr;
   bool m_userSelectOffline;
 
   QShortcut* mp_scMinimizeAllChats;

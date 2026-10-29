@@ -33,17 +33,16 @@ const canDownload = () => release.value?.published === true && /^\/downloads\/[^
     <p v-if="release" class="platform-meta">v{{ release.version }} · x86<span v-if="release.size"> · {{ (release.size / 1024 / 1024).toFixed(1) }} MB</span></p>
     <a v-if="canDownload()" class="download-button" :href="release.installerUrl" download>下载安装包</a>
     <p v-else class="release-status" role="status">{{ error ? '暂时无法读取版本信息，请稍后刷新。' : release ? '验收通过后开放下载' : '正在读取版本信息…' }}</p>
-    <p class="platform-meta">需保持最新版本才能使用。下载后覆盖安装，保留本地账号、记录和附件。</p>
   </section>
+  <RouterLink :to="{name:'tools-shadowchat-changelog'}" class="version-history-link">查看完整版本记录 →</RouterLink>
   </header>
   <figure class="product-showcase">
     <img :src="previewUrl" alt="影聊 Windows 客户端界面：左侧消息和通讯录，右侧聊天与输入框" width="1280" height="820" />
   </figure>
   </div>
-  <section class="release-notes"><h2>版本说明</h2><ul v-if="release"><li v-for="note in release.notes" :key="note">{{ note }}</li></ul><p v-else>版本信息加载后显示。</p><RouterLink :to="{name:'tools-shadowchat-changelog'}" class="version-history-link">查看完整版本记录 →</RouterLink></section>
 </template>
 <style scoped>
-.version-history-link{color:#c3c6cf!important}.version-history-link:focus-visible{outline:2px solid #c3c6cf;outline-offset:5px}
+.version-history-link{display:inline-block;margin-top:16px;color:#c3c6cf!important}.version-history-link:focus-visible{outline:2px solid #c3c6cf;outline-offset:5px}
 </style>
 
 <style scoped>

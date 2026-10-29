@@ -59,7 +59,6 @@ public:
   bool start();
   void stop();
   void restart();
-  void blockForUpdate();
 
 #ifdef BEEBEEP_USE_MULTICAST_DNS
   bool dnsMulticastingIsActive() const;
@@ -186,7 +185,6 @@ signals:
 public slots:
   void sendBroadcastMessage();
   void checkNetworkInterface();
-  void checkNewVersion();
   void postUsageStatistics();
   void onTickEvent( int );
 #ifdef BEEBEEP_USE_MULTICAST_DNS
@@ -218,7 +216,6 @@ public slots:
 
 protected slots:
   bool restartConnection();
-  void onUpdaterJobCompleted();
   void onPostUsageStatisticsJobCompleted();
 #ifdef BEEBEEP_USE_MULTICAST_DNS
   void onMulticastDnsServiceRegistered();
@@ -344,7 +341,6 @@ private:
 #ifdef BEEBEEP_USE_VOICE_CHAT
   VoicePlayer* mp_voicePlayer;
 #endif
-  bool m_updateBlocked = false;
 
 };
 

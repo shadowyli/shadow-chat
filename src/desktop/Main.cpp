@@ -48,7 +48,10 @@
 #include "Settings.h"
 #include "ShadowWorkspaceArchive.h"
 #include "ShadowLocalAccounts.h"
-#include "ShadowUpdateGate.h"
+#include "ShadowUpdateController.h"
+#include "Updater.h"
+#include "Version.h"
+#include <cstdio>
 #include "ShortcutManager.h"
 #ifdef BEEBEEP_USE_HUNSPELL
   #include "SpellChecker.h"
@@ -98,6 +101,19 @@ int main( int argc, char *argv[] )
     return 1;
   }
 
+  if( argc == 2 && (QString::fromLocal8Bit( argv[1] ) == QStringLiteral( "--build-info" ) ||
+                   QString::fromLocal8Bit( argv[1] ) == QStringLiteral( "--version-json" )) )
+  {
+    QJsonObject information;
+    information["version"] = QString::fromLatin1( BEEBEEP_VERSION );
+    information["environment"] = QString::fromLatin1( ShadowBuild::environment() );
+    information["channel"] = QString::fromLatin1( ShadowBuild::channel() );
+    information["updateSource"] = Updater::productionManifestUrl().toString();
+    const QByteArray json = QJsonDocument( information ).toJson( QJsonDocument::Compact ) + '\n';
+    std::fwrite( json.constData(), 1, static_cast<size_t>(json.size()), stdout );
+    return 0;
+  }
+
   // Workaround for ping lag:
   // https://bugreports.qt.io/browse/QTBUG-40332
   qputenv("QT_BEARER_POLL_TIMEOUT", QByteArray::number(-1));
@@ -115,6 +131,27 @@ int main( int argc, char *argv[] )
   bee_app.setOrganizationName( Settings::instance().organizationName() );
   bee_app.setOrganizationDomain( Settings::instance().organizationDomain() );
   bee_app.setApplicationVersion( Settings::instance().version( false, false, false ) );
+
+  const QStringList startup_arguments = bee_app.arguments();
+  const int profile_argument = startup_arguments.indexOf( QStringLiteral( "--profile-root" ) );
+  if( profile_argument >= 0 )
+  {
+    if( profile_argument + 1 >= startup_arguments.size() ||
+        !QDir::isAbsolutePath( startup_arguments.at( profile_argument + 1 ) ) )
+    {
+      qCritical() << "--profile-root requires an absolute directory";
+      Settings::close();
+      return 1;
+    }
+    const QString profile_root = QDir::cleanPath( startup_arguments.at( profile_argument + 1 ) );
+    if( profile_root == QDir( profile_root ).rootPath() || !QDir().mkpath( profile_root ) )
+    {
+      qCritical() << "Unable to use the selected profile directory";
+      Settings::close();
+      return 1;
+    }
+    bee_app.setProperty( "shadowAccountRoot", profile_root );
+  }
 
   if( bee_app.otherInstanceExists() )
   {
@@ -152,13 +189,6 @@ int main( int argc, char *argv[] )
   Settings::instance().loadRcFile();
   Settings::instance().createLocalUser( "" );
   Settings::instance().setDataFolder();
-  ShadowUpdateGate update_gate( Settings::instance().version( false, false, false ) );
-  QTimer::singleShot( 0, &update_gate, &ShadowUpdateGate::checkNow );
-  if( update_gate.exec() != QDialog::Accepted )
-  {
-    Settings::close();
-    return 0;
-  }
 #ifndef BEEBEEP_UX_PREVIEW
   QString account_email;
   QString account_folder;
@@ -168,6 +198,7 @@ int main( int argc, char *argv[] )
     return 0;
   }
   Settings::instance().setAccountDataFolder( account_folder );
+  if( profile_argument < 0 )
   {
     QSettings startup_settings( QDir( ShadowLocalAccounts().root() ).filePath( "session.ini" ), QSettings::IniFormat );
     if( !startup_settings.value( "startupConfigured", false ).toBool() )
@@ -322,18 +353,10 @@ int main( int argc, char *argv[] )
 
   /* Init Main Window */
   GuiMain mw;
-  mw.setUpdateGate( &update_gate );
-  QObject::connect( &update_gate, &ShadowUpdateGate::runtimeBlocked, &bee_core, [&bee_core, &update_gate]() {
-    bee_core.blockForUpdate();
-    foreach( QWidget* window, qApp->topLevelWidgets() )
-      if( window != &update_gate )
-        window->setEnabled( false );
-  }, Qt::DirectConnection );
-  QObject::connect( &update_gate, &ShadowUpdateGate::exitRequested, &mw, [&mw]() {
-    mw.forceShutdown();
-    qApp->quit();
-  } );
-  update_gate.startMonitoring();
+  ShadowUpdateController updates( Settings::instance().version( false, false, false ), &mw, QUrl(),
+    profile_argument >= 0 ? QDir( bee_app.property( "shadowAccountRoot" ).toString() ).filePath( "update-reminders.ini" ) : QString() );
+  updates.setBusyPredicate( [&bee_core]() { return bee_core.hasFileTransferInProgress(); } );
+  mw.setUpdateController( &updates );
   QObject::connect( &bee_app, SIGNAL( enteringInIdle() ), &mw, SLOT( setInIdle() ) );
   QObject::connect( &bee_app, SIGNAL( exitingFromIdle() ), &mw, SLOT( exitFromIdle() ) );
   QObject::connect( &bee_app, SIGNAL( showUp() ), &mw, SLOT( raiseOnTop() ) );
@@ -347,6 +370,7 @@ int main( int argc, char *argv[] )
   QMetaObject::invokeMethod( &mw, "checkWindowFlagsAndShow", Qt::QueuedConnection );
   qDebug() << "Loading saved session";
   mw.loadSession();
+  updates.start();
 
   /* Event Loop */
   qDebug() << "Enter in the main event loop";
@@ -397,6 +421,11 @@ int main( int argc, char *argv[] )
   Settings::close();
   /* Exit */
   if( bee_app.property( "shadowRestartForLogin" ).toBool() )
-    QProcess::startDetached( QCoreApplication::applicationFilePath(), QStringList() );
+  {
+    QStringList restart_arguments;
+    if( profile_argument >= 0 )
+      restart_arguments << QStringLiteral( "--profile-root" ) << bee_app.property( "shadowAccountRoot" ).toString();
+    QProcess::startDetached( QCoreApplication::applicationFilePath(), restart_arguments );
+  }
   return iRet;
 }

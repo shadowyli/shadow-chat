@@ -3,6 +3,7 @@
 int main(int argc,char** argv) {
  QCoreApplication app(argc,argv);
  QJsonObject o; o["schemaVersion"]=1;o["product"]="shadowchat";o["published"]=true;o["version"]="1.1.0";
+ o["channel"]="test";
  o["downloadPage"]="/tools/shadowchat";o["installerUrl"]="/downloads/shadowchat/1.1.0/setup.exe";o["sha256"]=QString(64,'a');
  const QUrl source("https://flowx.gz/updates/shadowchat.json");QString v,d;
  auto parse=[&](){return ShadowUpdateManifest::parse(QJsonDocument(o).toJson(),source,&v,&d);};
@@ -22,5 +23,9 @@ int main(int argc,char** argv) {
  o.remove("mandatory");
  if(!parse() || ShadowUpdateManifest::allowsVersion("1.0.0",v))return 13;
  o["downloadPage"]="/tools/shadowchat?redirect=https://evil.example";if(parse())return 14;
+ o["downloadPage"]="/tools/shadowchat";o["channel"]="stable";if(parse())return 15;
+ if(!ShadowUpdateManifest::parse(QJsonDocument(o).toJson(),source,&v,&d,"stable"))return 16;
+ o.remove("channel");if(parse())return 17;
+ o["channel"]="test";o["mandatory"]=true;if(!parse())return 18;
  qInfo()<<"update manifest: released/unpublished/origin/version/checksum/size checks passed";return 0;
 }

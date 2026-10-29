@@ -6,20 +6,30 @@
 #include <QSslSocket>
 #include <QTimer>
 
-Updater::Updater(QObject* parent, const QUrl& manifest_url)
-  : QObject(parent), m_manifestUrl(manifest_url)
+Updater::Updater(QObject* parent, const QUrl& manifest_url, const QString& test_channel)
+  : QObject(parent), m_manifestUrl(manifest_url),
+    m_channel(test_channel.isEmpty() || manifest_url.isEmpty() ?
+              QString::fromLatin1(ShadowBuild::channel()) : test_channel)
 {
   setObjectName("Updater");
 }
 
 QUrl Updater::productionManifestUrl()
 {
+#if defined(SHADOWCHAT_BUILD_MAIN)
   return QUrl(QStringLiteral("https://flowx.gz/updates/shadowchat.json"));
+#elif defined(SHADOWCHAT_LOCAL_UPDATE_PORT) && !defined(SHADOWCHAT_BUILD_DEV)
+  return QUrl(QStringLiteral("http://127.0.0.1:%1/updates/shadowchat.json").arg(SHADOWCHAT_LOCAL_UPDATE_PORT));
+#else
+  return QUrl(QStringLiteral("https://dev.flowx.gz/updates/shadowchat.json"));
+#endif
 }
 
-bool Updater::allowsVersion(const QString& current) const
+bool Updater::hasNewerVersion(const QString& current) const
 {
-  return m_manifestValid && ShadowUpdateManifest::allowsVersion(current, m_versionAvailable);
+  return m_manifestValid && ShadowUpdateManifest::allowsVersion(current, current) &&
+    ShadowUpdateManifest::allowsVersion(m_versionAvailable, current) &&
+    QVersionNumber::compare(QVersionNumber::fromString(m_versionAvailable), QVersionNumber::fromString(current)) > 0;
 }
 
 void Updater::checkForNewVersion()
@@ -32,7 +42,7 @@ void Updater::checkForNewVersion()
   m_news.clear();
   m_error.clear();
   const QUrl url = m_manifestUrl.isEmpty() ? productionManifestUrl() : m_manifestUrl;
-  const bool local = url.scheme() == QLatin1String("http") &&
+  const bool local = (url.scheme() == QLatin1String("http") || url.scheme() == QLatin1String("https")) &&
     (url.host() == QLatin1String("localhost") || url.host() == QLatin1String("127.0.0.1") ||
      url.host() == QLatin1String("::1"));
   if(!url.isValid() || (!m_manifestUrl.isEmpty() && !local) ||
@@ -85,9 +95,24 @@ void Updater::checkForNewVersion()
       m_error = QStringLiteral("更新服务返回异常状态：%1。").arg(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt());
     else
     {
-      m_manifestValid = ShadowUpdateManifest::parse(reply->readAll(), reply->url(), &m_versionAvailable, &m_downloadUrl);
+      const QByteArray data = reply->readAll();
+      m_manifestValid = ShadowUpdateManifest::parse(data, reply->url(), &m_versionAvailable, &m_downloadUrl, m_channel);
       if(!m_manifestValid)
-        m_error = QStringLiteral("发布清单未发布或内容无效，暂时无法确认当前版本。");
+        m_error = QStringLiteral("暂未获得本通道的有效发布信息。");
+      else
+      {
+        const QJsonValue notes = QJsonDocument::fromJson(data).object().value("notes");
+        QStringList lines;
+        if(notes.isArray())
+        {
+          for(const QJsonValue& note : notes.toArray())
+            if(note.isString())
+              lines.append(note.toString().left(500));
+          m_news = lines.join("\n").left(2000);
+        }
+        else
+          m_news = notes.toString().left(2000);
+      }
     }
     m_checking = false;
     reply->deleteLater();

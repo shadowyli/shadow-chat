@@ -1,7 +1,7 @@
 
 INCLUDEPATH += $$PWD
-HEADERS += desktop/ShadowUpdateGate.h
-SOURCES += desktop/ShadowUpdateGate.cpp
+HEADERS += desktop/ShadowUpdateController.h
+SOURCES += desktop/ShadowUpdateController.cpp
 HEADERS += desktop/ShadowLocalAccounts.h
 HEADERS += desktop/GuiStickerPicker.h
 SOURCES += desktop/GuiStickerPicker.cpp

@@ -1,16 +1,17 @@
 {
   "schemaVersion": 1,
   "product": "shadowchat",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "channel": "test",
+  "releaseEnvironment": "local",
   "published": true,
   "downloadPage": "/tools/shadowchat",
-  "installerUrl": "/downloads/shadowchat/ShadowChat-1.1.1-setup.exe",
-  "sha256": "494354a4137edca66259163c0edff9010d8909fc8904e575fbb30fb9674dd577",
-  "size": 36468376,
+  "installerUrl": "/downloads/shadowchat/local/ShadowChat-1.1.2-local-setup.exe",
+  "sha256": "7f59a75bfae8b5d6e04d5af22307d07941fea7e2bb65dd1659b972c2f8266279",
+  "size": 36472694,
   "notes": [
-    "强制更新：启动和使用中校验版本，旧版或校验失败时停止使用；修复头像刷新与保留，统一个人资料等界面。"
+    "取消强制更新；仅更高同通道版本每天最多建议一次，修复快捷方式图标。"
   ],
-  "mandatory": true,
-  "publishedAt": "2026-10-29T04:41:21.642Z"
+  "mandatory": false,
+  "publishedAt": "2026-10-29T08:23:28.093Z"
 }

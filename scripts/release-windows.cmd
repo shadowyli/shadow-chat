@@ -6,9 +6,5 @@ call "%SHADOWCHAT_VCVARS%"
 if errorlevel 1 exit /b 1
 set "PATH=%SHADOWCHAT_QT_DIR%\bin;%PATH%"
 cd /d "%~dp0.."
-if "%~1"=="test" (
-  call scripts\test-windows.cmd
-) else (
-  call scripts\build-windows.cmd %~1
-)
+python -B -X utf8 scripts\windows_build.py %*
 exit /b %errorlevel%
