@@ -48,6 +48,7 @@ protected:
   bool checkData();
   void saveVCard();
   QString currentAvatarName() const;
+  void resizeProfilePage();
 
 private slots:
   void changePhoto();
@@ -60,6 +61,15 @@ private:
   VCard m_vCard;
   QString m_userColor;
   bool m_regenerateUserHash;
+  QString m_accountEmail;
+  QStackedWidget* m_profilePages;
+  QLabel* m_cardNickname;
+  QLabel* m_cardAccount;
+  QLabel* m_cardPhoto;
+  QLabel* m_cardInfo;
+  QLabel* m_cardEmail;
+  QLabel* m_cardPhone;
+  QLabel* m_cardLocation;
 
 };
 

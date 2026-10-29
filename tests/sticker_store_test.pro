@@ -1,0 +1,9 @@
+QT += core gui gui-private
+CONFIG += console c++11 release
+CONFIG -= app_bundle debug_and_release
+TEMPLATE = app
+TARGET = sticker_store_test
+INCLUDEPATH += ../src/core
+SOURCES += sticker_store_test.cpp ../src/core/ShadowStickerStore.cpp
+HEADERS += ../src/core/ShadowStickerStore.h
+win32-msvc*: QMAKE_CXXFLAGS += /utf-8

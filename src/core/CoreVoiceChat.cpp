@@ -31,6 +31,8 @@
 
 bool Core::sendVoiceMessageToChat( VNumber chat_id, const QString& file_path, qint64 message_duration )
 {
+  if( m_updateBlocked )
+    return false;
   QString icon_html = IconManager::instance().toHtml( "red-ball.png", "*F*" );
 
   if( !Settings::instance().enableFileTransfer() )

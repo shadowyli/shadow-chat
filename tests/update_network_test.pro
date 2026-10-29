@@ -1,0 +1,10 @@
+QT += core network
+QT -= gui
+CONFIG += console c++11 release
+CONFIG -= app_bundle debug_and_release
+TEMPLATE = app
+TARGET = update_network_test
+INCLUDEPATH += ../src/core ../src/utils ../src/desktop ../src/ecdh ../src/sharedesktop ../src/voicechat ../src/gui ../src
+SOURCES += update_network_test.cpp ../src/utils/Updater.cpp
+HEADERS += ../src/utils/Updater.h
+win32-msvc*: QMAKE_CXXFLAGS += /utf-8

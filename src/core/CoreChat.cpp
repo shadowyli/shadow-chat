@@ -36,6 +36,37 @@
 #include "SaveChatList.h"
 #include "Settings.h"
 #include "UserManager.h"
+#include "ShadowGroupPolicy.h"
+#include "ShadowMessageDelivery.h"
+
+namespace {
+ShadowMessageDelivery shadowMessageDelivery;
+QString deliveryRecipient( const User& user )
+{
+  return user.hash().isEmpty() ? user.accountPath().trimmed().toLower() : user.hash();
+}
+}
+
+void Core::checkMessageDeliveryAck( const User& user, VNumber message_id )
+{
+  if( !shadowMessageDelivery.open( Settings::instance().dataFolder() ) ) return;
+  const ShadowMessageDelivery::Result result = shadowMessageDelivery.acknowledge( QString::number( message_id ), deliveryRecipient( user ) );
+  if( !result.changed ) return;
+  const Chat chat = ChatManager::instance().findChatByPrivateId( result.chat, true, ID_INVALID );
+  if( !chat.isValid() ) return;
+  dispatchSystemMessage( chat.id(), ID_LOCAL_USER,
+    tr( "消息“%1”：已送达 %2/%3 人" ).arg( result.preview.toHtmlEscaped() ).arg( result.delivered ).arg( result.total ),
+    DispatchToChat, ChatMessage::Other, true );
+}
+
+void Core::cancelMessageDelivery( VNumber user_id, VNumber chat_id )
+{
+  if( !shadowMessageDelivery.open( Settings::instance().dataFolder() ) ) return;
+  const Chat chat = ChatManager::instance().chat( chat_id );
+  if( !chat.isGroup() ) return;
+  shadowMessageDelivery.cancel( chat.privateId(), user_id == ID_INVALID ? QString() :
+    deliveryRecipient( UserManager::instance().findUser( user_id ) ) );
+}
 
 
 
@@ -110,6 +141,10 @@ Chat Core::createGroupChat( const User& u, const Group& g, bool broadcast_messag
   QString sHtmlMsg;
 
   Chat c = Protocol::instance().createChat( g, Group::GroupChat );
+  if( c.group().ownerHash().isEmpty() )
+  {
+    Group owned = c.group(); owned.setOwnerHash( u.hash() ); c.setGroup( owned );
+  }
 #ifdef BEEBEEP_DEBUG
   qDebug() << "Creating group chat" << qPrintable( c.name() ) << "with private id" << qPrintable( c.privateId() ) << "by user" << qPrintable( u.name() );
 #else
@@ -139,14 +174,61 @@ Chat Core::createGroupChat( const User& u, const Group& g, bool broadcast_messag
   if( broadcast_message && isConnected() )
   {
     UserList ul = UserManager::instance().userList().fromUsersId( c.usersId() );
-    sendGroupChatRequestMessage( c, ul, User() );
+    sendGroupChatRequestMessage( c, ul, User(), ul.toUsersId() );
   }
 
   return c;
 }
 
-bool Core::changeGroupChat( const User& u, const Group& g )
+bool Core::isLocalGroupOwner( VNumber chat_id ) const
 {
+  const Chat chat = ChatManager::instance().chat( chat_id );
+  return chat.isGroup() && !chat.group().ownerHash().isEmpty() &&
+         chat.group().ownerHash() == Settings::instance().localUser().hash();
+}
+
+bool Core::transferGroupOwnership( VNumber chat_id, VNumber new_owner_id )
+{
+  const Chat chat = ChatManager::instance().chat( chat_id );
+  const User next = UserManager::instance().findUser( new_owner_id );
+  if( !isLocalGroupOwner( chat_id ) || !next.isValid() || next.isLocal() ||
+      !chat.hasUser( new_owner_id ) || next.hash().isEmpty() ) return false;
+  Group changed = chat.group(); changed.setOwnerHash( next.hash() );
+  return changeGroupChat( Settings::instance().localUser(), changed );
+}
+
+bool Core::isGroupDissolved( const QString& private_id ) const
+{
+  QScopedPointer<QSettings> saved( Settings::instance().objectSettings() );
+  return saved->value( "ShadowDissolvedGroups" ).toStringList().contains( private_id );
+}
+
+void Core::markGroupDissolved( const QString& private_id )
+{
+  QScopedPointer<QSettings> saved( Settings::instance().objectSettings() );
+  QStringList groups = saved->value( "ShadowDissolvedGroups" ).toStringList();
+  if( !groups.contains( private_id ) ) groups << private_id;
+  saved->setValue( "ShadowDissolvedGroups", groups ); saved->sync();
+}
+
+bool Core::dissolveGroup( VNumber chat_id )
+{
+  Chat chat = ChatManager::instance().chat( chat_id );
+  if( !isLocalGroupOwner( chat_id ) ) return false;
+  markGroupDissolved( chat.privateId() );
+  Message notice = Protocol::instance().groupChatRemoveUserMessage( chat );
+  notice.setText( "shadow:dissolve" );
+  foreach( const User& member, UserManager::instance().userList().fromUsersId( chat.usersId() ).toList() )
+    if( !member.isLocal() && !sendMessageToLocalNetwork( member, notice ) )
+      MessageManager::instance().addMessageToSend( member.id(), ID_DEFAULT_CHAT, notice );
+  Group relinquished = chat.group(); relinquished.setOwnerHash( "" );
+  chat.setGroup( relinquished ); ChatManager::instance().setChat( chat );
+  return removeChat( chat_id, true );
+}
+
+bool Core::changeGroupChat( const User& u, const Group& requested )
+{
+  Group g = requested;
   Chat c = ChatManager::instance().chat( g.id() );
   if( !c.isValid() )
   {
@@ -154,14 +236,29 @@ bool Core::changeGroupChat( const User& u, const Group& g )
     return false;
   }
 
+  if( g.ownerHash().isEmpty() ) g.setOwnerHash( c.group().ownerHash() );
+  bool ownerIsMember = false;
+  foreach( const User& member, UserManager::instance().userList().fromUsersId( g.usersId() ).toList() )
+    if( member.hash() == g.ownerHash() ) ownerIsMember = true;
+  if( !ownerIsMember || !ShadowGroupPolicy::canChange( c.group(), g, u.id(), u.hash() ) )
+  {
+    showMessage( tr( "只有群主可以修改群名、移除成员或转让群主；普通成员可以邀请同事。" ), 5000 );
+    return false;
+  }
   UserList group_new_members = UserManager::instance().userList().fromUsersId( g.usersId() );
   UserList group_old_members = UserManager::instance().userList().fromUsersId( c.usersId() );
   UserList group_removed_members;
+  QList<VNumber> invited_members;
   QStringList user_added_string_list;
   QStringList user_removed_string_list;
   QStringList user_string_list;
   QString sHtmlMsg;
   bool chat_changed = false;
+  if( c.group().ownerHash() != g.ownerHash() )
+  {
+    Group owned = c.group(); owned.setOwnerHash( g.ownerHash() ); c.setGroup( owned );
+    chat_changed = true;
+  }
 
   if( c.name() != g.name() )
   {
@@ -192,6 +289,8 @@ bool Core::changeGroupChat( const User& u, const Group& g )
         if( c.removeUser( old_user.id() ) )
         {
           MessageManager::instance().removeUnsentMessages( old_user.id(), c.id() );
+          cancelPendingFileTransfers( old_user.id(), c.id() );
+          cancelMessageDelivery( old_user.id(), c.id() );
           user_removed_string_list << Bee::userNameToShow( old_user, true );
         }
       }
@@ -215,7 +314,10 @@ bool Core::changeGroupChat( const User& u, const Group& g )
     if( !u.isLocal() )
     {
       if( c.addUser( u.id() ) )
+      {
+        invited_members << u.id();
         user_added_string_list << Bee::userNameToShow( u, true );
+      }
       user_string_list.append( Bee::userNameToShow( u, true ) );
     }
   }
@@ -251,10 +353,11 @@ bool Core::changeGroupChat( const User& u, const Group& g )
 
     if( u.isLocal() && isConnected() )
     {
-      sendGroupChatRequestMessage( c, group_new_members, User() );
+      sendGroupChatRequestMessage( c, group_new_members, User(), invited_members );
       Message group_remove_user_message = Protocol::instance().groupChatRemoveUserMessage( c );
       foreach( User removed_member, group_removed_members.toList() )
-        sendMessageToLocalNetwork( removed_member, group_remove_user_message );
+        if( !sendMessageToLocalNetwork( removed_member, group_remove_user_message ) )
+          MessageManager::instance().addMessageToSend( removed_member.id(), ID_DEFAULT_CHAT, group_remove_user_message );
     }
   }
   else
@@ -286,6 +389,11 @@ bool Core::removeUserFromGroupChat( const User& u, const QString& chat_private_i
 
   if( u.isLocal() )
   {
+    if( isLocalGroupOwner( c.id() ) && c.usersId().size() > 1 )
+    {
+      showMessage( tr( "请先转让群主，或选择解散群。" ), 5000 );
+      return false;
+    }
     qDebug() << "Removing local user from group chat" << qPrintable( c.name() );
     return removeChat( c.id(), true );
   }
@@ -294,6 +402,8 @@ bool Core::removeUserFromGroupChat( const User& u, const QString& chat_private_i
     if( c.hasUser( u.id() ) )
     {
       MessageManager::instance().removeUnsentMessages( u.id(), c.id() );
+      cancelPendingFileTransfers( u.id(), c.id() );
+      cancelMessageDelivery( u.id(), c.id() );
       QString sHtmlMsg = tr( "%1 %2 has left the group chat %3." ).arg( IconManager::instance().toHtml( "group-remove.png", "*G*" ), Bee::userNameToShow( u, true ), QString( "<b>%1</b>" ).arg( Bee::replaceHtmlSpecialCharacters( c.name() ) ) );
       c.removeUser( u.id() );
       c.setLastModifiedToNow();
@@ -317,12 +427,8 @@ bool Core::removeLocalUserFromGroupChatByOther( const User& other_user, const QS
     return false;
   if( !c.isGroup() )
     return false;
-  QString sHtmlMsg = tr( "%1 %2 wants to remove you from the group chat %3. If you agree please leave the group." ).arg( IconManager::instance().toHtml( "group-remove.png", "*G*" ), Bee::userNameToShow( other_user, true ), QString( "<b>%1</b>" ).arg( Bee::replaceHtmlSpecialCharacters( c.name() ) ) );
-  c.addMessage( ChatMessage( ID_SYSTEM_MESSAGE, Protocol::instance().systemMessage( sHtmlMsg ), ChatMessage::System, true ) );
-  ChatManager::instance().setChat( c );
-  dispatchSystemMessage( ID_DEFAULT_CHAT, other_user.id(), sHtmlMsg, DispatchToChat, ChatMessage::System, false );
-  emit chatChanged( c );
-  return true;
+  if( other_user.hash() != c.group().ownerHash() ) return false;
+  return removeChat( c.id(), true );
 }
 
 bool Core::removeChat( VNumber chat_id, bool save_chat_messages )
@@ -334,6 +440,12 @@ bool Core::removeChat( VNumber chat_id, bool save_chat_messages )
   if( c.isDefault() )
     return false;
 
+  if( isLocalGroupOwner( c.id() ) && c.usersId().size() > 1 )
+  {
+    showMessage( tr( "请先转让群主，或选择解散群。" ), 5000 );
+    return false;
+  }
+
   if( save_chat_messages && ChatManager::instance().setChatToSavedChats( c ) )
   {
     dispatchSystemMessage( ID_DEFAULT_CHAT, ID_LOCAL_USER, tr( "%1 %2 is added to saved chats." )
@@ -343,6 +455,8 @@ bool Core::removeChat( VNumber chat_id, bool save_chat_messages )
 
   clearMessagesInChat( c.id(), !save_chat_messages );
   MessageManager::instance().removeUnsentMessages( ID_INVALID, c.id() );
+  cancelPendingFileTransfers( ID_INVALID, c.id() );
+  cancelMessageDelivery( ID_INVALID, c.id() );
 
   if( c.isPrivate() )
   {
@@ -407,6 +521,8 @@ int Core::archiveAllChats()
 
 int Core::sendChatMessage( VNumber chat_id, const QString& msg, bool is_important, bool can_be_delayed, bool is_source_code )
 {
+  if( m_updateBlocked )
+    return 0;
   if( !isConnected() )
   {
     dispatchSystemMessage( chat_id, ID_LOCAL_USER, tr( "Unable to send the message: you are not connected." ), DispatchToChat, ChatMessage::Other, false );
@@ -479,8 +595,22 @@ int Core::sendChatMessage( VNumber chat_id, const QString& msg, bool is_importan
 
 int Core::sendMessageToChat( const Chat& c, const Message& m )
 {
+  if( m_updateBlocked )
+    return 0;
   int messages_sent = 0;
   UserList user_list = c.id() == ID_DEFAULT_CHAT ? UserManager::instance().userList() : UserManager::instance().userList().fromUsersId( c.usersId() );
+  if( c.isGroup() && m.type() == Message::Chat && !m.hasFlag( Message::Auto ) &&
+      shadowMessageDelivery.open( Settings::instance().dataFolder() ) )
+  {
+    QStringList recipients;
+    foreach( const User& recipient, user_list.toList() )
+      if( !recipient.isLocal() ) recipients << deliveryRecipient( recipient );
+    const QString preview = Bee::removeHtmlTags( m.text() ).simplified().left( 40 );
+    if( shadowMessageDelivery.begin( QString::number( m.id() ), c.privateId(), recipients, preview ) )
+      dispatchSystemMessage( c.id(), ID_LOCAL_USER,
+        tr( "消息“%1”：已送达 0/%2 人" ).arg( preview.toHtmlEscaped() ).arg( recipients.size() ),
+        DispatchToChat, ChatMessage::Other, true );
+  }
   QStringList offline_users;
   foreach( User u, user_list.toList() )
   {
@@ -568,7 +698,7 @@ void Core::sendWritingMessage( VNumber chat_id )
   }
 }
 
-void Core::sendGroupChatRequestMessage( const Chat& group_chat, const UserList& user_list, const User& to_user )
+void Core::sendGroupChatRequestMessage( const Chat& group_chat, const UserList& user_list, const User& to_user, const QList<VNumber>& invited )
 {
   Message group_message;
   foreach( User u, user_list.toList() )
@@ -583,12 +713,14 @@ void Core::sendGroupChatRequestMessage( const Chat& group_chat, const UserList& 
       group_message = Protocol::instance().groupChatRequestMessage_obsolete( group_chat, u );
     else
       group_message = Protocol::instance().groupChatRequestMessage( group_chat, u );
+    if( invited.contains( u.id() ) ) group_message.addFlag( Message::Create );
 
 #ifdef BEEBEEP_DEBUG
     qDebug() << "Send group chat request message from" << qPrintable( group_chat.name() ) << "to" << qPrintable( u.name() );
 #endif
 
-    sendMessageToLocalNetwork( u, group_message );
+    if( !sendMessageToLocalNetwork( u, group_message ) )
+      MessageManager::instance().addMessageToSend( u.id(), ID_DEFAULT_CHAT, group_message );
   }
 }
 
@@ -603,14 +735,19 @@ void Core::sendRefuseMessageToGroupChat( const Chat& group_chat )
       continue;
 
     if( !sendMessageToLocalNetwork( u, group_refuse_message ) )
+    {
+      MessageManager::instance().addMessageToSend( u.id(), ID_DEFAULT_CHAT, group_refuse_message );
       dispatchSystemMessage( group_chat.id(), ID_LOCAL_USER, tr( "%1 %2 cannot be informed that you have left the group." )
                              .arg( IconManager::instance().toHtml( "group-remove.png", "*G*" ) ).arg( Bee::userNameToShow( u, true ) ),
                              DispatchToChat, ChatMessage::System, false );
+    }
   }
 }
 
 bool Core::sendMessageToLocalNetwork( const User& to_user, const Message& m )
 {
+  if( m_updateBlocked )
+    return false;
   Connection* c = connection( to_user.id() );
   if( !c )
   {
@@ -817,6 +954,8 @@ int Core::checkOfflineMessagesForUser( const User& u, bool on_new_connection )
 
       if( c->sendMessage( mr.message() ) )
       {
+        if( mr.message().type() == Message::Chat && u.protocolVersion() >= RECEIVED_MESSAGE_PROTO_VERSION )
+          MessageManager::instance().addSentMessage( u.id(), mr.chatId(), mr.message() );
         if( mr.isChatValid() && !chat_list.contains( mr.chatId() ) )
           chat_list.append( mr.chatId() );
         messages_sent++;

@@ -320,6 +320,12 @@ void ChatManager::addToRefusedChat( const ChatRecord& cr )
     m_refusedChats.append( cr );
 }
 
+void ChatManager::removeRefusedChat( const QString& chat_private_id )
+{
+  for( int i = m_refusedChats.size() - 1; i >= 0; --i )
+    if( m_refusedChats[i].privateId() == chat_private_id ) m_refusedChats.removeAt( i );
+}
+
 bool ChatManager::isChatRefused( const QString& chat_private_id ) const
 {
   ChatRecord cr( "", chat_private_id );

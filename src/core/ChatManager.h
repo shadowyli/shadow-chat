@@ -76,6 +76,7 @@ public:
 
   void addToRefusedChat( const ChatRecord& );
   bool isChatRefused( const QString& chat_private_id ) const;
+  void removeRefusedChat( const QString& chat_private_id );
   inline const QList<ChatRecord>& refusedChats() const;
   inline void clearRefusedChats();
 

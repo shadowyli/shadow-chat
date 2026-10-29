@@ -259,14 +259,15 @@ bool MessageManager::saveMessages( bool save_unsent_messages_also )
 void MessageManager::addSentMessage( VNumber to_user_id, VNumber chat_id, const Message& m )
 {
   m_sentMessages.append( MessageRecord( to_user_id, chat_id, m ) );
+  saveUnsentMessages( true );
 }
 
-bool MessageManager::setMessageReceived( VNumber msg_id )
+bool MessageManager::setMessageReceived( VNumber msg_id, VNumber user_id )
 {
   QList<MessageRecord>::iterator it = m_sentMessages.begin();
   while( it != m_sentMessages.end() )
   {
-    if( (*it).message().id() == msg_id )
+    if( (*it).message().id() == msg_id && (user_id == ID_INVALID || (*it).toUserId() == user_id) )
     {
 #ifdef BEEBEEP_DEBUG
       qDebug() << "Message manager sets" << msg_id << "as message received from user" << (*it).toUserId();

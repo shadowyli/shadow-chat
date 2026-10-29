@@ -36,10 +36,99 @@
 #include "Protocol.h"
 #include "Settings.h"
 #include "UserManager.h"
+#include "ShadowTransferQueue.h"
 
+namespace {
+ShadowTransferQueue shadowOutbox;
+bool shadowDispatchingOutbox = false;
+QString shadowTransferBatch;
+QString shadowActiveAlbum;
+QHash<QString, QDateTime> shadowOfferActivity;
+QString shadowRecipientKey( const User& user )
+{
+  return user.hash().isEmpty() ? user.accountPath().trimmed().toLower() : user.hash();
+}
+}
+
+void Core::processPendingFileTransfers()
+{
+  if( m_updateBlocked )
+    return;
+  if( !shadowOutbox.open( Settings::instance().dataFolder() ) || !mp_fileTransfer->isActive() ) return;
+  QSet<QString> activeRecipients;
+  foreach( ShadowTransferQueue::Task task, shadowOutbox.tasks() )
+  {
+    User recipient;
+    foreach( const User& candidate, UserManager::instance().userList().toList() )
+      if( shadowRecipientKey( candidate ) == task.recipient ) { recipient = candidate; break; }
+    Chat chat = ChatManager::instance().findChatByPrivateId( task.chat, false, recipient.id() );
+    if( task.group && (!chat.isValid() || !chat.hasUser( ID_LOCAL_USER ) ||
+                       (recipient.isValid() && !chat.hasUser( recipient.id() ))) )
+    {
+      shadowOutbox.remove( task.id );
+      continue;
+    }
+    if( task.state == "offered" )
+    {
+      if( !recipient.isValid() || !isUserConnected( recipient.id() ) )
+      {
+        task.state = "pending"; task.completed.clear(); shadowOutbox.update( task );
+      }
+      else
+      {
+        const QDateTime now = QDateTime::currentDateTimeUtc();
+        if( mp_fileTransfer->hasUploadToUser( recipient.id() ) ) shadowOfferActivity[task.id] = now;
+        if( shadowOfferActivity.contains( task.id ) && shadowOfferActivity[task.id].secsTo( now ) > 120 )
+        {
+          task.state = "failed"; task.error = tr( "接收方未完成接收，请重新发送：%1" ).arg( QFileInfo( task.source ).fileName() );
+          shadowOutbox.update( task ); shadowOfferActivity.remove( task.id );
+          dispatchSystemMessage( chat.isValid() ? chat.id() : ID_DEFAULT_CHAT, recipient.id(),
+            task.error.toHtmlEscaped() + QStringLiteral( "（%1）" ).arg( recipient.name().toHtmlEscaped() ),
+            chat.isValid() ? DispatchToChat : DispatchToDefaultAndPrivateChat, ChatMessage::FileTransfer, true );
+        }
+        else activeRecipients.insert( task.recipient );
+      }
+      continue;
+    }
+    if( task.state != "pending" || !recipient.isValid() || !isUserConnected( recipient.id() ) ||
+        activeRecipients.contains( task.recipient ) ) continue;
+    QString error;
+    if( !ShadowTransferQueue::sourceUnchanged( task, &error ) )
+    {
+      task.state = "failed"; task.error = error; shadowOutbox.update( task );
+      dispatchSystemMessage( chat.isValid() ? chat.id() : ID_DEFAULT_CHAT, recipient.id(), error.toHtmlEscaped(),
+                             chat.isValid() ? DispatchToChat : DispatchToDefaultAndPrivateChat, ChatMessage::FileTransfer, true );
+      continue;
+    }
+    task.state = "offered";
+    shadowOfferActivity[task.id] = QDateTime::currentDateTimeUtc();
+    if( !shadowOutbox.update( task ) ) continue;
+    shadowDispatchingOutbox = true;
+    shadowActiveAlbum = task.batch;
+    const bool accepted = sendFileToUser( recipient, task.source, "", false, chat );
+    shadowActiveAlbum.clear();
+    shadowDispatchingOutbox = false;
+    if( !accepted ) { task.state = "failed"; task.error = tr( "无法开始传输，请重新发送。" ); shadowOutbox.update( task ); }
+    else activeRecipients.insert( task.recipient );
+  }
+}
+
+
+void Core::cancelPendingFileTransfers( VNumber user_id, VNumber chat_id )
+{
+  if( !shadowOutbox.open( Settings::instance().dataFolder() ) ) return;
+  const Chat chat = ChatManager::instance().chat( chat_id );
+  const User user = UserManager::instance().findUser( user_id );
+  mp_fileTransfer->revokeChatTransfers( user_id, chat.privateId() );
+  foreach( const ShadowTransferQueue::Task& task, shadowOutbox.tasks() )
+    if( task.chat == chat.privateId() && (user_id == ID_INVALID || task.recipient == shadowRecipientKey( user )) )
+      shadowOutbox.remove( task.id );
+}
 
 bool Core::startFileTransferServer()
 {
+  if( m_updateBlocked )
+    return false;
   if( mp_fileTransfer->isActive() )
   {
 #ifdef BEEBEEP_DEBUG
@@ -62,12 +151,21 @@ bool Core::startFileTransferServer()
 
 void Core::stopFileTransferServer()
 {
+  // Logout/shutdown is a suspension of the outbox, not a user retry failure.
+  if( shadowOutbox.open( Settings::instance().dataFolder() ) )
+    foreach( ShadowTransferQueue::Task task, shadowOutbox.tasks() )
+      if( task.state == "offered" )
+      {
+        task.state = "pending"; task.completed.clear(); shadowOutbox.update( task );
+      }
   mp_fileTransfer->stopListener();
   Protocol::instance().createFileShareListMessage( FileShare::instance().local(), -1 );
 }
 
 bool Core::downloadFile( VNumber user_id, const FileInfo& fi, bool show_message )
 {
+  if( m_updateBlocked )
+    return false;
   User u = UserManager::instance().findUser( user_id );
   if( !u.isValid() )
   {
@@ -141,6 +239,47 @@ void Core::checkFileTransferMessage( VNumber peer_id, VNumber user_id, const Fil
   {
     qWarning() << "Unable to find user" << user_id << "for the file transfer" << qPrintable( fi.name() ) << "in Core::checkFileTransferMessage(...)";
     return;
+  }
+
+  if( !fi.isDownload() && FileTransferPeer::stateIsStopped( ft_state ) &&
+      shadowOutbox.open( Settings::instance().dataFolder() ) )
+  {
+    foreach( ShadowTransferQueue::Task task, shadowOutbox.tasks() )
+    {
+      if( task.state != "offered" || task.recipient != shadowRecipientKey( u ) ) continue;
+      bool matches = false;
+      const QString source = ShadowTransferQueue::canonicalPath( fi.path() );
+      foreach( const QJsonValue& value, task.files )
+        if( value.toObject()["path"].toString() == source ) { matches = true; break; }
+      if( !matches ) continue;
+      shadowOfferActivity[task.id] = QDateTime::currentDateTimeUtc();
+      if( ft_state == FileTransferPeer::Completed )
+      {
+        if( !task.completed.contains( source ) ) task.completed << source;
+        if( task.completed.size() == task.files.size() ) task.state = "completed";
+        // In-progress file counts are intentionally volatile: a restart retries
+        // the whole folder. Avoid rewriting the complete manifest per file.
+        shadowOutbox.update( task, task.state == "completed" );
+        if( task.state == "completed" )
+        {
+          int delivered = 0, recipients = 0;
+          QStringList batchTasks;
+          foreach( const ShadowTransferQueue::Task& sibling, shadowOutbox.tasks() )
+            if( sibling.batch == task.batch && sibling.source == task.source )
+            {
+              ++recipients; if( sibling.state == "completed" ) ++delivered;
+              batchTasks << sibling.id;
+            }
+          Chat destination = ChatManager::instance().findChatByPrivateId( task.chat, false, u.id() );
+          dispatchSystemMessage( destination.isValid() ? destination.id() : ID_DEFAULT_CHAT, ID_LOCAL_USER,
+            tr( "已送达 %1/%2 人：%3" ).arg( delivered ).arg( recipients ).arg( QFileInfo( task.source ).fileName().toHtmlEscaped() ),
+            destination.isValid() ? DispatchToChat : DispatchToDefaultAndPrivateChat, ChatMessage::FileTransfer, true );
+          if( delivered == recipients ) foreach( const QString& id, batchTasks ) shadowOutbox.remove( id );
+        }
+      }
+      else { task.state = "failed"; task.error = msg; shadowOutbox.update( task ); }
+      break;
+    }
   }
 
   QString icon_html = IconManager::instance().toHtml( fi.isDownload() ? "download.png" : "upload.png", "*F*" );
@@ -224,7 +363,12 @@ void Core::checkFileTransferMessage( VNumber peer_id, VNumber user_id, const Fil
     if( !sys_msg.isEmpty() )
       dispatchSystemMessage( chat_to_show_message.isValid() ? chat_to_show_message.id() : ID_DEFAULT_CHAT, u.id(), sys_msg, chat_to_show_message.isValid() ? DispatchToChat : DispatchToDefaultAndPrivateChat, ChatMessage::FileTransfer, false );
     if( !sys_msg_img_preview.isEmpty() )
+    {
+      const QRegularExpression albumExpression( QStringLiteral( "(?:^|;)shadow-album=([a-fA-F0-9{}-]{36,38})(?:;|$)" ) );
+      const QRegularExpressionMatch album = albumExpression.match( fi.mimeType() );
+      if( album.hasMatch() ) sys_msg_img_preview.prepend( QStringLiteral( "<!--shadow-album:%1-->" ).arg( album.captured( 1 ) ) );
       dispatchSystemMessage( chat_to_show_message.isValid() ? chat_to_show_message.id() : ID_DEFAULT_CHAT, u.id(), sys_msg_img_preview, chat_to_show_message.isValid() ? DispatchToChat : DispatchToDefaultAndPrivateChat, ChatMessage::ImagePreview, true );
+    }
     if( !sys_msg_open_file.isEmpty() )
       dispatchSystemMessage( chat_to_show_message.isValid() ? chat_to_show_message.id() : ID_DEFAULT_CHAT, u.id(), sys_msg_open_file, chat_to_show_message.isValid() ? DispatchToChat : DispatchToDefaultAndPrivateChat, ChatMessage::FileTransfer, true );
   }
@@ -283,12 +427,15 @@ bool Core::showFilesUploadPreviewInChat( const Chat& c, const QStringList& file_
   foreach( QString preview_item , preview_list)
     preview_msg += QString( " %1 " ).arg( preview_item );
   preview_msg += QString( "</div>" );
+  if( !shadowTransferBatch.isEmpty() ) preview_msg.prepend( QStringLiteral( "<!--shadow-album:%1-->" ).arg( shadowTransferBatch ) );
   dispatchSystemMessage( c.id(), ID_LOCAL_USER, preview_msg, DispatchToChat, ChatMessage::ImagePreview, true );
   return true;
 }
 
 int Core::sendFilesFromChat( VNumber chat_id, const QStringList& file_path_list )
 {
+  if( m_updateBlocked )
+    return 0;
   if( file_path_list.isEmpty() )
     return 0;
 
@@ -310,6 +457,7 @@ int Core::sendFilesFromChat( VNumber chat_id, const QStringList& file_path_list 
   QStringList to_users;
   QStringList file_sent_list;
   UserList chat_members = c.isDefault() ? UserManager::instance().userList() : UserManager::instance().userList().fromUsersId( c.usersId() );
+  shadowTransferBatch = QUuid::createUuid().toString();
   foreach( QString file_path, file_path_list )
   {
     foreach( User u, chat_members.toList() )
@@ -330,11 +478,14 @@ int Core::sendFilesFromChat( VNumber chat_id, const QStringList& file_path_list 
   }
 
   showFilesUploadPreviewInChat( c, file_sent_list );
+  shadowTransferBatch.clear();
   return files_sent;
 }
 
 bool Core::sendFile( VNumber user_id, const QString& file_path, const QString& share_folder, bool to_share_box, VNumber chat_id )
 {
+  if( m_updateBlocked )
+    return false;
   QString icon_html = IconManager::instance().toHtml( "red-ball.png", "*F*" );
   if( !Settings::instance().enableFileTransfer() )
   {
@@ -361,6 +512,8 @@ bool Core::sendFile( VNumber user_id, const QString& file_path, const QString& s
 
 bool Core::sendFileToUser( const User&u, const QString& file_path, const QString& share_folder, bool to_share_box, const Chat& chat_selected )
 {
+  if( m_updateBlocked )
+    return false;
   if( u.isLocal() )
     return false;
 
@@ -381,11 +534,16 @@ bool Core::sendFileToUser( const User&u, const QString& file_path, const QString
     return false;
   }
 
-  if( !file.isDir() && file.size() <= 0 )
+  if( !shadowDispatchingOutbox && !to_share_box && share_folder.isEmpty() )
   {
-    dispatchSystemMessage( chat_selected.isValid() ? chat_selected.id() : ID_DEFAULT_CHAT, u.id(), tr( "%1 Unable to send %2 to %3: file is empty." ).arg( icon_html, file_path, Bee::userNameToShow( u, true ) ),
-                           chat_selected.isValid() ? DispatchToChat : DispatchToDefaultAndPrivateChat, ChatMessage::FileTransfer, false );
-    return false;
+    QString error;
+    const bool queued = shadowOutbox.open( Settings::instance().dataFolder() ) &&
+      shadowOutbox.enqueue( shadowRecipientKey( u ), chat_selected.privateId(), chat_selected.isGroup(), file_path, &error, shadowTransferBatch );
+    const QString status = queued ? tr( "等待发送 %1 给 %2，双方软件在线后自动发送。" )
+      .arg( file.fileName(), Bee::userNameToShow( u, true ) ) : tr( "无法加入待发送队列：%1" ).arg( error );
+    dispatchSystemMessage( chat_selected.isValid() ? chat_selected.id() : ID_DEFAULT_CHAT, u.id(), status.toHtmlEscaped(),
+                           chat_selected.isValid() ? DispatchToChat : DispatchToDefaultAndPrivateChat, ChatMessage::FileTransfer, true );
+    return queued;
   }
 
   if( !isUserConnected( u.id() ) )
@@ -407,6 +565,9 @@ bool Core::sendFileToUser( const User&u, const QString& file_path, const QString
   else
   {
     FileInfo fi = mp_fileTransfer->addFile( file, share_folder, to_share_box, chat_selected.privateId(), FileInfo::File, -1 );
+    if( !shadowActiveAlbum.isEmpty() && Bee::isFileTypeImage( fi.suffix() ) )
+      fi.setMimeType( fi.mimeType() + QStringLiteral( ";shadow-album=" ) + shadowActiveAlbum );
+    if( shadowDispatchingOutbox ) mp_fileTransfer->authorizeFileForUser( fi.id(), u.id() );
     Connection* c = connection( u.id() );
     if( c )
     {
@@ -728,6 +889,43 @@ void Core::buildLocalShareList()
 
 bool Core::sendFolder( const User& u, const QFileInfo& file_info, const QString& chat_private_id )
 {
+  if( shadowDispatchingOutbox )
+  {
+    foreach( const ShadowTransferQueue::Task& task, shadowOutbox.tasks() )
+    {
+      if( task.state != "offered" || task.recipient != shadowRecipientKey( u ) ||
+          task.source != ShadowTransferQueue::canonicalPath( file_info.absoluteFilePath() ) ) continue;
+      Connection* target = connection( u.id() );
+      if( !target ) return false;
+      QList<FileInfo> files;
+      QDir root( task.source );
+      foreach( const QString& path, task.directories )
+      {
+        const QFileInfo directory( path );
+        const QString relative = root.relativeFilePath( directory.absolutePath() );
+        FileInfo entry( Protocol::instance().newId(), FileInfo::Upload );
+        entry.setNameAndSuffix( directory.fileName() );
+        entry.setShareFolder( file_info.fileName() + (relative == "." ? QString() : "/" + relative) );
+        entry.setChatPrivateId( chat_private_id ); entry.setIsFolder( true );
+        files << entry;
+      }
+      foreach( const QJsonValue& value, task.files )
+      {
+        QFileInfo source( value.toObject()["path"].toString() );
+        const QString relative = root.relativeFilePath( source.absolutePath() );
+        const QString folder = file_info.fileName() + (relative == "." ? QString() : "/" + relative);
+        FileInfo file = Protocol::instance().fileInfo( source, folder, false, chat_private_id, FileInfo::File );
+        file.setHostAddress( Settings::instance().localUser().networkAddress().hostAddress() );
+        file.setHostPort( mp_fileTransfer->serverPort() );
+        files << file;
+        mp_fileTransfer->authorizeFileForUser( file.id(), u.id() );
+      }
+      mp_fileTransfer->addFileInfoList( files );
+      Message offer = Protocol::instance().createFolderMessage( file_info.fileName(), files, mp_fileTransfer->serverPort() );
+      return offer.isValid() && target->sendMessage( offer );
+    }
+    return false;
+  }
   QString icon_html = IconManager::instance().toHtml( "upload.png", "*F*" );
 
   Chat chat_to_show_message = ChatManager::instance().findChatByPrivateId( chat_private_id, false, u.id() );
@@ -749,6 +947,8 @@ bool Core::sendFolder( const User& u, const QFileInfo& file_info, const QString&
 
 void Core::addFolderToFileTransfer()
 {
+  if( m_updateBlocked )
+    return;
   BuildFileShareList *bfsl = qobject_cast<BuildFileShareList*>( sender() );
   if( !bfsl )
   {
@@ -954,6 +1154,8 @@ void Core::sendShareBoxList()
 
 void Core::downloadFromShareBox( VNumber from_user_id, const FileInfo& fi, const QString& to_path )
 {
+  if( m_updateBlocked )
+    return;
 #ifdef BEEBEEP_DEBUG
   QString from_path = fi.shareFolder().isEmpty() ? fi.name() : QString( "%1/%2" ).arg( fi.shareFolder(), fi.name() );
   qDebug() << "Download path" << from_path << "from user" << from_user_id << "to path" << to_path
@@ -969,6 +1171,8 @@ void Core::downloadFromShareBox( VNumber from_user_id, const FileInfo& fi, const
 
 void Core::uploadToShareBox( VNumber to_user_id, const FileInfo& fi, const QString& to_path )
 {
+  if( m_updateBlocked )
+    return;
 #ifdef BEEBEEP_DEBUG
   qDebug() << "Upload file" << fi.path() << "to path" << to_path << "of user" << to_user_id;
 #endif
@@ -977,6 +1181,8 @@ void Core::uploadToShareBox( VNumber to_user_id, const FileInfo& fi, const QStri
 
 bool Core::resumeFileTransfer( VNumber user_id, const FileInfo& file_info )
 {
+  if( m_updateBlocked )
+    return false;
   if( file_info.isDownload() )
   {
 #ifdef BEEBEEP_DEBUG

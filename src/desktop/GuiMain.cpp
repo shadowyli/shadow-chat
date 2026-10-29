@@ -78,7 +78,13 @@
 #include "ShortcutManager.h"
 #include "SpellChecker.h"
 #include "ShadowStyle.h"
+#include "ShadowDialogStyle.h"
 #include "ShadowWorkspaceArchive.h"
+#include "ShadowLocalAccounts.h"
+#include "Updater.h"
+#include "ShadowUpdateGate.h"
+#include "ShadowMention.h"
+#include "ShadowConversationPreferences.h"
 #include "UserManager.h"
 #ifdef Q_OS_WIN
   #include <qt_windows.h>
@@ -268,6 +274,10 @@ void GuiMain::initShortcuts()
 
 void GuiMain::setupChatConnections( GuiChat* gui_chat )
 {
+  connect( gui_chat, &GuiChat::openSavedChatRequest, this, [this]( VNumber chat_id ) {
+    MessageManager::instance().saveMessages( true );
+    showSavedChatSelected( ChatManager::instance().chatName( chat_id ) );
+  });
   connect( gui_chat, SIGNAL( newMessage( VNumber, const QString&, bool ) ), this, SLOT( sendMessage( VNumber, const QString&, bool ) ) );
   connect( gui_chat, SIGNAL( writing( VNumber ) ), beeCore, SLOT( sendWritingMessage( VNumber ) ) );
   connect( gui_chat, SIGNAL( nextChat() ), this, SLOT( showNextChat() ) );
@@ -1165,7 +1175,9 @@ void GuiMain::createMenus()
   act->setData( 26 );
   act = mp_menuStartupSettings->addAction( tr( "Check for new version" ), this, SLOT( settingsChanged() ) );
   act->setCheckable( true );
-  act->setChecked( Settings::instance().checkNewVersionAtStartup() );
+  act->setChecked( true );
+  act->setEnabled( false );
+  act->setToolTip( QStringLiteral( "启动时及运行中每 5 分钟必须校验版本，无法关闭。" ) );
   act->setData( 43 );
   mp_menuStartupSettings->addSeparator();
   act = mp_menuStartupSettings->addAction( IconManager::instance().icon( "timer.png" ), tr( "Delay first connection" ) + QString( "..." ), this, SLOT( settingsChanged() ) );
@@ -1448,6 +1460,11 @@ void GuiMain::createMenus()
   mp_actResumeFileTransfer->setCheckable( true );
   mp_actResumeFileTransfer->setChecked( Settings::instance().resumeFileTransfer() );
   mp_actResumeFileTransfer->setData( 97 );
+#ifdef SHADOWCHAT_SAFE_BUILD
+  // This release always restarts failed tasks and retains both file versions.
+  mp_actResumeFileTransfer->setVisible( false );
+  mp_menuExistingFile->menuAction()->setVisible( false );
+#endif
   act = mp_menuFileTransferSettings->addAction( "", this, SLOT( settingsChanged() ) );
   act->setCheckable( true );
   act->setData( 100 );
@@ -1907,6 +1924,45 @@ void GuiMain::createModernShell()
   QMenu* workspace_menu = more_menu->addMenu( ShadowStyle::actionIcon( QStringLiteral( "folder-open" ) ), QStringLiteral( "工作区与换机" ) );
   workspace_menu->addAction( QStringLiteral( "导出工作区…" ), this, SLOT( exportShadowWorkspace() ) );
   workspace_menu->addAction( QStringLiteral( "导入工作区…" ), this, SLOT( importShadowWorkspace() ) );
+  QAction* auto_login_action = more_menu->addAction( QStringLiteral( "启动时自动登录" ) );
+  auto_login_action->setCheckable( true );
+  auto_login_action->setChecked( ShadowLocalAccounts().autoLoginEnabled() );
+  connect( auto_login_action, &QAction::toggled, this, []( bool enabled ) { ShadowLocalAccounts().setAutoLoginEnabled( enabled ); } );
+  more_menu->addAction( QStringLiteral( "设置安全恢复密码…" ), this, [this]() {
+    ShadowLocalAccounts accounts;
+    bool ok = false;
+    if( accounts.hasRecoveryPassword() )
+    {
+      const QString previous = QInputDialog::getText( this, QStringLiteral( "安全恢复密码" ), QStringLiteral( "请输入当前恢复密码" ), QLineEdit::Password, QString(), &ok );
+      if( !ok ) return;
+      if( !accounts.verifyRecoveryPassword( previous ) ) { QMessageBox::warning( this, QStringLiteral( "安全恢复密码" ), QStringLiteral( "当前恢复密码不正确。" ) ); return; }
+    }
+    const QString password = QInputDialog::getText( this, QStringLiteral( "负责人设置" ), QStringLiteral( "设置统一恢复密码（至少 8 位），请由负责人保管。\n设置后可导出团队恢复配置，随安装包统一部署。" ), QLineEdit::Password, QString(), &ok );
+    if( !ok ) return;
+    const QString confirm = QInputDialog::getText( this, QStringLiteral( "确认恢复密码" ), QStringLiteral( "再次输入恢复密码" ), QLineEdit::Password, QString(), &ok );
+    if( !ok ) return;
+    if( password != confirm || !accounts.setRecoveryPassword( password ) )
+      QMessageBox::warning( this, QStringLiteral( "安全恢复密码" ), QStringLiteral( "两次输入不一致、密码不足 8 位或保存失败。" ) );
+    else QMessageBox::information( this, QStringLiteral( "安全恢复密码" ), QStringLiteral( "本机恢复密码已配置。请负责人妥善保管。" ) );
+  } );
+  more_menu->addAction( QStringLiteral( "导出团队恢复配置…" ), this, [this]() {
+    ShadowLocalAccounts accounts;
+    if( !accounts.hasRecoveryPassword() ) { QMessageBox::information( this, QStringLiteral( "团队恢复配置" ), QStringLiteral( "请负责人先设置安全恢复密码。" ) ); return; }
+    bool ok = false;
+    const QString password = QInputDialog::getText( this, QStringLiteral( "负责人验证" ), QStringLiteral( "请输入当前恢复密码" ), QLineEdit::Password, QString(), &ok );
+    if( !ok ) return;
+    if( !accounts.verifyRecoveryPassword( password ) ) { QMessageBox::warning( this, QStringLiteral( "团队恢复配置" ), QStringLiteral( "恢复密码不正确。" ) ); return; }
+    const QString path = QFileDialog::getSaveFileName( this, QStringLiteral( "导出团队恢复配置" ), QStringLiteral( "shadowchat-recovery.ini" ), QStringLiteral( "恢复配置 (*.ini)" ) );
+    if( path.isEmpty() ) return;
+    if( !accounts.exportRecoveryConfiguration( path ) ) QMessageBox::warning( this, QStringLiteral( "团队恢复配置" ), QStringLiteral( "导出失败，请检查保存位置。" ) );
+    else QMessageBox::information( this, QStringLiteral( "团队恢复配置" ), QStringLiteral( "配置只包含加盐密码校验值。将它随安装包部署到程序目录，所有新电脑即可使用同一个恢复密码。" ) );
+  } );
+  more_menu->addAction( QStringLiteral( "退出账号 / 切换账号…" ), this, [this]() {
+    if( QMessageBox::question( this, QStringLiteral( "退出账号" ), QStringLiteral( "退出将中断当前收发，未完成文件下次需重新传输。\n退出后将显示登录页，是否继续？" ) ) != QMessageBox::Yes ) return;
+    ShadowLocalAccounts().logout();
+    qApp->setProperty( "shadowRestartForLogin", true );
+    forceShutdown();
+  } );
   more_menu->addSeparator();
   mp_menuSettings->setTitle( QStringLiteral( "高级设置" ) );
   mp_menuMain->setTitle( QStringLiteral( "系统工具" ) );
@@ -2257,7 +2313,8 @@ void GuiMain::showShadowSettings()
   dialog.setWindowTitle( QStringLiteral( "影聊设置" ) );
   dialog.setModal( true );
   dialog.setMinimumWidth( 620 );
-  dialog.setStyleSheet( ShadowStyle::applicationStyleSheet() );
+  ShadowDialogStyle::apply(&dialog);
+  dialog.setStyleSheet(ShadowStyle::applicationStyleSheet()+dialog.styleSheet());
   Bee::removeContextHelpButton( &dialog );
 
   QVBoxLayout* root_layout = new QVBoxLayout( &dialog );
@@ -2265,8 +2322,10 @@ void GuiMain::showShadowSettings()
   root_layout->setSpacing( 14 );
   QLabel* title = new QLabel( QStringLiteral( "设置" ), &dialog );
   title->setObjectName( "ShadowOnboardingTitle" );
+  title->setProperty("role","title");
   QLabel* subtitle = new QLabel( QStringLiteral( "日常会用到的选项都在这里；网络端口等低频项目收在“高级设置”中。" ), &dialog );
   subtitle->setObjectName( "ShadowOnboardingSubtitle" );
+  subtitle->setProperty("role","hint");
   subtitle->setWordWrap( true );
   root_layout->addWidget( title );
   root_layout->addWidget( subtitle );
@@ -2323,8 +2382,9 @@ void GuiMain::showShadowSettings()
   security_layout->setSpacing( 7 );
   QLabel* security_title = new QLabel( QStringLiteral( "安全与更新" ), security_card );
   security_title->setObjectName( "ShadowOnboardingStep" );
-  QCheckBox* update_check = new QCheckBox( QStringLiteral( "每 7 天检查一次新版本" ), security_card );
-  update_check->setChecked( Settings::instance().checkNewVersionAtStartup() );
+  QCheckBox* update_check = new QCheckBox( QStringLiteral( "启动时及运行中每 5 分钟强制校验版本" ), security_card );
+  update_check->setChecked( true );
+  update_check->setEnabled( false );
   update_check->setToolTip( QStringLiteral( "只访问影聊的静态版本清单，不上传姓名、联系人、文件或使用数据。" ) );
   QLabel* security_text = new QLabel( QStringLiteral( "聊天、文件和通讯录留在局域网；第三方插件、云端转发和从聊天中运行程序已关闭。" ), security_card );
   security_text->setWordWrap( true );
@@ -2339,12 +2399,16 @@ void GuiMain::showShadowSettings()
   root_layout->addWidget( security_card );
 
   QDialogButtonBox* buttons = new QDialogButtonBox( QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog );
+  buttons->setLayoutDirection(Qt::RightToLeft);
   buttons->button( QDialogButtonBox::Save )->setText( QStringLiteral( "保存" ) );
   buttons->button( QDialogButtonBox::Save )->setObjectName( "ShadowPrimaryButton" );
+  buttons->button( QDialogButtonBox::Save )->setProperty("role","primary");
+  buttons->button( QDialogButtonBox::Save )->setStyleSheet(QStringLiteral("QPushButton { background:#2463EB; color:white; border:1px solid #2463EB; border-radius:7px; padding:6px 18px; } QPushButton:hover { background:#1D52CB; }"));
+  buttons->button( QDialogButtonBox::Save )->setDefault(true);
   buttons->button( QDialogButtonBox::Cancel )->setText( QStringLiteral( "取消" ) );
   connect( buttons, SIGNAL( accepted() ), &dialog, SLOT( accept() ) );
   connect( buttons, SIGNAL( rejected() ), &dialog, SLOT( reject() ) );
-  root_layout->addWidget( buttons );
+  root_layout->addWidget( buttons, 0, Qt::AlignRight );
 
   if( dialog.exec() != QDialog::Accepted )
     return;
@@ -2380,7 +2444,17 @@ void GuiMain::exportShadowWorkspace()
   if( !target_path.endsWith( QLatin1Char( '.' ) + ShadowWorkspaceArchive::fileExtension(), Qt::CaseInsensitive ) )
     target_path += QLatin1Char( '.' ) + ShadowWorkspaceArchive::fileExtension();
   QString error_message;
-  if( !ShadowWorkspaceArchive::exportWorkspace( Settings::instance().dataFolder(), target_path, &error_message ) )
+  const qint64 attachment_bytes = ShadowWorkspaceArchive::attachmentSize( Settings::instance().downloadDirectory() );
+  const QMessageBox::StandardButton choice = QMessageBox::question( this, QStringLiteral( "备份附件" ),
+    QStringLiteral( "是否包含接收的图片和文件？预计附件大小：%1 GB。\n选择“否”仅备份账号资料和聊天记录。" ).arg( double( attachment_bytes ) / (1024.0*1024*1024), 0, 'f', 2 ),
+    QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel, QMessageBox::No );
+  if( choice == QMessageBox::Cancel ) return;
+  QApplication::setOverrideCursor( Qt::WaitCursor );
+  const bool exported = choice == QMessageBox::Yes
+    ? ShadowWorkspaceArchive::exportWithAttachments( Settings::instance().dataFolder(), Settings::instance().downloadDirectory(), target_path, &error_message )
+    : ShadowWorkspaceArchive::exportWorkspace( Settings::instance().dataFolder(), target_path, &error_message );
+  QApplication::restoreOverrideCursor();
+  if( !exported )
   {
     QMessageBox::critical( this, QStringLiteral( "导出失败" ), error_message );
     return;
@@ -2480,6 +2554,9 @@ void GuiMain::updateModernListState()
   }
 
   bool show_empty_state = false;
+  bool has_known_colleague = false;
+  foreach(const User& user,UserManager::instance().userList().toList())
+    if(user.isValid()&&!user.isLocal()){has_known_colleague=true;break;}
   if( m_modernPrimaryPage == 0 && ChatManager::instance().countNotEmptyChats( false ) == 0 )
   {
     show_empty_state = true;
@@ -2487,7 +2564,7 @@ void GuiMain::updateModernListState()
     mp_modernEmptyHint->setText( QStringLiteral( "从通讯录找到同事，发出第一条消息。" ) );
     mp_modernEmptyAction->setText( QStringLiteral( "打开通讯录" ) );
   }
-  else if( m_modernPrimaryPage == 1 && beeCore->connectedUsers() == 0 )
+  else if( m_modernPrimaryPage == 1 && !has_known_colleague )
   {
     show_empty_state = true;
     if( m_coreIsConnecting )
@@ -2718,7 +2795,7 @@ void GuiMain::createMainWidgets()
   connect( mp_webView, SIGNAL( newsLoadFinished( bool ) ), this, SLOT( onNewsLoad( bool ) ) );
 #endif
 
-  mp_dockFileTransfers = new QDockWidget( tr( "File Transfers" ), this );
+  mp_dockFileTransfers = new QDockWidget( QStringLiteral("文件传输"), this );
   mp_dockFileTransfers->setObjectName( "GuiFileTransferDock" );
   mp_fileTransfer = new GuiFileTransfer( this );
   mp_dockFileTransfers->setWidget( mp_fileTransfer );
@@ -3489,6 +3566,12 @@ void GuiMain::setChatInactiveWindowOpacityLevelInAction( QAction* act )
 
 void GuiMain::setChatMaxLinesToSaveInAction( QAction* act )
 {
+#ifdef SHADOWCHAT_SAFE_BUILD
+  act->setText( QStringLiteral( "保留全部聊天记录（手动清空）" ) );
+  act->setEnabled( false );
+  act->setChecked( false );
+  return;
+#endif
   act->setText( tr( "Save maximum %1 lines of chat" ).arg( Settings::instance().chatMaxLineSaved() ) );
   act->setEnabled( Settings::instance().chatAutoSave() );
   act->setChecked( Settings::instance().chatMaxLineSaved() > 0 );
@@ -3621,12 +3704,36 @@ void GuiMain::onNewChatMessage( const Chat& c, const ChatMessage& cm )
   bool floating_chat_created = false;
   bool alert_can_be_notified = false;
 
+  const ShadowConversationPreferences conversationPreferences;
+  bool incomingContent = !cm.isFromLocalUser() && !cm.isFromSystem() &&
+    (cm.type() == ChatMessage::Chat || cm.isVoice() || cm.isFromAutoresponder());
+  // Transfer progress also uses system messages. Only completed, saved material
+  // with a remote sender should restore a conversation the user closed.
+  if( cm.isFromSystem() && cm.canBeSaved() && (cm.isFileTransfer() || cm.isImagePreview()) )
+  {
+    const QRegularExpression senderPattern( QStringLiteral("<!--shadow-sender:([A-Za-z0-9+/=]+)-->") );
+    const QRegularExpressionMatch senderMatch = senderPattern.match( cm.message() );
+    if( senderMatch.hasMatch() )
+    {
+      const QString sender = QString::fromUtf8( QByteArray::fromBase64( senderMatch.captured( 1 ).toLatin1() ) );
+      incomingContent = !sender.isEmpty() && sender != Settings::instance().localUser().name();
+    }
+  }
+  if( incomingContent && conversationPreferences.hidden( c ) )
+  {
+    conversationPreferences.reveal( c );
+    mp_chatList->updateChat( c );
+  }
+  const bool mentioned = c.isGroup() && !cm.isFromLocalUser() && !cm.isFromSystem() &&
+    shadowMentionsUser( Bee::removeHtmlTags( cm.message() ), Settings::instance().localUser().name() );
   if( c.isDefault() )
     alert_can_be_notified = cm.alertCanBeSent() && Settings::instance().enableDefaultChatNotifications();
   else if( c.isGroup() )
-    alert_can_be_notified = cm.alertCanBeSent() && !Settings::instance().isNotificationDisabledForGroup( c.privateId() );
+    alert_can_be_notified = cm.alertCanBeSent() && (mentioned || !Settings::instance().isNotificationDisabledForGroup( c.privateId() ));
   else
     alert_can_be_notified = cm.alertCanBeSent();
+  if( !mentioned && conversationPreferences.muted( c ) )
+    alert_can_be_notified = false;
 
   GuiFloatingChat* fl_chat = floatingChat( c.id() );
   bool open_chat_window = Settings::instance().alwaysOpenChatOnNewMessageArrived() || (!cm.isFromLocalUser() && !cm.isFromSystem() && cm.isImportant() && c.isPrivate());
@@ -3955,7 +4062,7 @@ bool GuiMain::askToDownloadFile( const User& u, const FileInfo& fi, const QStrin
     qDebug() << "You accept to download" << fi.name() << "from" << qPrintable( u.path() );
     if( qfile_info.exists() && Settings::instance().onExistingFileAction() == Settings::GenerateNewFileName )
     {
-      QString file_name = Bee::uniqueFilePath( qfile_info.absoluteFilePath(), true );
+      QString file_name = Bee::uniqueFilePath( qfile_info.absoluteFilePath(), false );
       qDebug() << "File" << qfile_info.absoluteFilePath() << "exists. Save it with new path (auto):" << qPrintable( file_name );
       qfile_info = QFileInfo( file_name );
     }
@@ -4072,21 +4179,42 @@ void GuiMain::downloadFolder( const User& u, const QString& folder_name, const Q
   {
     // Accepted
     qDebug() << "You accept to download folder" << folder_name << "from" << u.path();
-    QString download_folder;
-    int files_to_download = 0;
+    const QString root_name = QDir::fromNativeSeparators( folder_name );
+    if( root_name.isEmpty() || root_name == QLatin1String( "." ) || root_name == QLatin1String( ".." ) || root_name.contains( QLatin1Char( '/' ) ) )
+    {
+      QMessageBox::warning( this, QStringLiteral( "接收文件夹失败" ), QStringLiteral( "文件夹名称无效。" ) ); return;
+    }
+    const QString destination = Bee::uniqueFilePath( QDir( Settings::instance().downloadDirectoryForUser( u ) ).filePath( root_name ), false );
+    if( !QDir().mkpath( destination ) )
+    {
+      QMessageBox::warning( this, QStringLiteral( "接收文件夹失败" ), QStringLiteral( "无法创建文件夹，请检查目录权限和剩余空间。" ) ); return;
+    }
     foreach( FileInfo fi, file_info_list )
     {
-      download_folder = Bee::convertToNativeFolderSeparator( QString( "%1/%2" ).arg( Settings::instance().downloadDirectoryForUser( u ), fi.shareFolder() ) );
+      const QString parent = QDir::fromNativeSeparators( fi.shareFolder() );
+      if( parent != root_name && !parent.startsWith( root_name + QLatin1Char( '/' ) ) )
+      {
+        QMessageBox::warning( this, QStringLiteral( "接收文件夹失败" ), QStringLiteral( "文件夹内容路径无效。" ) ); return;
+      }
+      const QString relative = parent.mid( root_name.size() ).remove( QRegularExpression( QStringLiteral( "^/+" ) ) );
+      const QString download_folder = relative.isEmpty() ? destination : QDir( destination ).filePath( relative );
+      if( fi.isFolder() )
+      {
+        const QString leaf = fi.name();
+        if( leaf.isEmpty() || leaf == QLatin1String( "." ) || leaf == QLatin1String( ".." ) || leaf.contains( QLatin1Char( '/' ) ) || leaf.contains( QLatin1Char( '\\' ) ) ||
+            !QDir().mkpath( QDir( download_folder ).filePath( leaf ) ) )
+        {
+          beeCore->refuseToDownloadFolder( u.id(), folder_name, file_info_list.first().chatPrivateId() );
+          QMessageBox::warning( this, QStringLiteral( "接收文件夹失败" ), QStringLiteral( "无法创建项目目录，请检查路径、权限和剩余空间。" ) );
+          return;
+        }
+        continue;
+      }
       if( !askToDownloadFile( u, fi, download_folder, false ) )
         return;
 
-      files_to_download++;
-
-      if( files_to_download > Settings::instance().maxQueuedDownloads() )
-      {
-        qWarning() << "Unable to download all the" << file_info_list.size() << "files because max queued reached" << Settings::instance().maxQueuedDownloads();
-        break;
-      }
+      // A project folder is one accepted task. Limit active transfer concurrency,
+      // never silently truncate its contents at the queue display limit.
     }
   }
   else
@@ -4138,6 +4266,9 @@ void GuiMain::showChat( VNumber chat_id )
     return;
   }
 
+  const ShadowConversationPreferences conversationPreferences;
+  if( conversationPreferences.hidden( c ) && conversationPreferences.reveal( c ) )
+    mp_chatList->updateChat( c );
   GuiFloatingChat* fl_chat = createFloatingChat( c );
   if( !fl_chat )
     return;
@@ -4621,6 +4752,40 @@ void GuiMain::editGroupChat( VNumber chat_id )
   if( !c.isValid() )
     return;
 
+  if( beeCore->isLocalGroupOwner( chat_id ) )
+  {
+    bool accepted = false;
+    const QString manage = QStringLiteral( "群名称与成员" );
+    const QString transfer = QStringLiteral( "转让群主" );
+    const QString dissolve = QStringLiteral( "解散群" );
+    const QString action = QInputDialog::getItem( this, QStringLiteral( "管理项目群" ), c.name(),
+      QStringList() << manage << transfer << dissolve, 0, false, &accepted );
+    if( !accepted ) return;
+    if( action == transfer )
+    {
+      QStringList names; QList<VNumber> ids;
+      foreach( VNumber id, c.usersId() )
+      {
+        if( id == ID_LOCAL_USER ) continue;
+        const User member = UserManager::instance().findUser( id );
+        if( !member.isValid() ) continue;
+        names << QStringLiteral( "%1 (%2)" ).arg( member.name(), member.accountName() ); ids << id;
+      }
+      if( names.isEmpty() ) { QMessageBox::information( this, QStringLiteral( "转让群主" ), QStringLiteral( "群内还没有其他成员。" ) ); return; }
+      const QString name = QInputDialog::getItem( this, transfer, QStringLiteral( "选择新群主" ), names, 0, false, &accepted );
+      if( accepted && !beeCore->transferGroupOwnership( chat_id, ids.at( names.indexOf( name ) ) ) )
+        QMessageBox::warning( this, transfer, QStringLiteral( "转让失败，请确认群和成员状态后重试。" ) );
+      return;
+    }
+    if( action == dissolve )
+    {
+      if( QMessageBox::question( this, dissolve, QStringLiteral( "解散后成员不能继续在此群收发消息。本机历史和已接收文件会保留。确定解散？" ), QMessageBox::Yes | QMessageBox::No, QMessageBox::No ) == QMessageBox::Yes &&
+          !beeCore->dissolveGroup( chat_id ) )
+        QMessageBox::warning( this, dissolve, QStringLiteral( "解散失败，请稍后重试。" ) );
+      return;
+    }
+  }
+
   if( !Settings::instance().canAddMembersToGroup() && !Settings::instance().canRemoveMembersFromGroup() )
   {
     QMessageBox::information( this, Settings::instance().programName(),
@@ -4698,7 +4863,7 @@ void GuiMain::showSavedChatSelected( const QString& chat_name )
 
   GuiSavedChat* saved_chat = new GuiSavedChat( this );
   saved_chat->setAttribute( Qt::WA_DeleteOnClose, true );
-  saved_chat->resize( qMin( (QApplication::desktop()->availableGeometry().width()-80), 680 ), 420 );
+  saved_chat->resize( qMin( QApplication::desktop()->availableGeometry().width()-80, 1000 ), qMin( QApplication::desktop()->availableGeometry().height()-80, 740 ) );
   connect( saved_chat, SIGNAL( deleteSavedChatRequest( const QString& ) ), this, SLOT( removeSavedChat( const QString& ) ) );
   connect( saved_chat, SIGNAL( openUrl( const QUrl& ) ), this, SLOT( openUrl( const QUrl& ) ) );
   saved_chat->showSavedChat( chat_name );
@@ -4773,8 +4938,8 @@ bool GuiMain::openWebUrl( const QString& web_url )
 
 void GuiMain::checkNewVersion()
 {
-  QString url_and_arguments = Settings::instance().checkVersionWebSite();
-  openWebUrl( url_and_arguments );
+  if( m_updateGate )
+    m_updateGate->checkNow();
 }
 
 void GuiMain::openWebSite()
@@ -6010,7 +6175,9 @@ void GuiMain::onFileTransferMessage( VNumber peer_id, const User& u, const FileI
         return;
       }
 
-      if( Settings::instance().showFileTransferCompletedOnTray() )
+      if( Settings::instance().showFileTransferCompletedOnTray() &&
+          !ShadowConversationPreferences().muted( c ) &&
+          !(c.isGroup() && Settings::instance().isNotificationDisabledForGroup( c.privateId() )) )
         mp_trayIcon->showNewFileArrived( c.id(), tr( "New file from %1" ).arg( u.name() ), false );
 
       GuiFloatingChat* fl_chat = floatingChat( c.id() );

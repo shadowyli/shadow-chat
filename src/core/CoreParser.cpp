@@ -38,6 +38,8 @@
 
 void Core::parseMessage( VNumber user_id, const Message& m )
 {
+  if( m_updateBlocked )
+    return;
   User u = UserManager::instance().findUser( user_id );
   if( !u.isValid() )
   {
@@ -49,6 +51,8 @@ void Core::parseMessage( VNumber user_id, const Message& m )
 
 void Core::parseMessage( const User& u, const Message& m )
 {
+  if( m_updateBlocked )
+    return;
   switch( m.type() )
   {
   case Message::User:
@@ -164,6 +168,12 @@ void Core::parseFileMessage( const User& u, const Message& m )
   }
 
   Chat chat_to_show_message = ChatManager::instance().findChatByPrivateId( fi.chatPrivateId(), false, u.id() );
+  if( !fi.chatPrivateId().isEmpty() && (!chat_to_show_message.isValid() ||
+      !chat_to_show_message.hasUser( u.id() ) || !chat_to_show_message.hasUser( ID_LOCAL_USER )) )
+  {
+    refuseToDownloadFile( u.id(), fi );
+    return;
+  }
 
   if( m.hasFlag( Message::Refused ) )
   {
@@ -285,7 +295,8 @@ void Core::parseGroupMessage( const User& u, const Message& m )
  #ifdef BEEBEEP_DEBUG
     qDebug() << "Group chat request from" << qPrintable( u.path() );
  #endif
-    if( ChatManager::instance().isChatRefused( cmd.groupId() ) )
+    if( isGroupDissolved( cmd.groupId() ) ||
+        (ChatManager::instance().isChatRefused( cmd.groupId() ) && !m.hasFlag( Message::Create )) )
     {
       qWarning() << "Group chat request from" << qPrintable( u.name() ) << "is refused because the chat"
                  << qPrintable( cmd.groupName() ) << "is blocked on id" << qPrintable( cmd.groupId() );
@@ -420,6 +431,7 @@ void Core::parseGroupMessage( const User& u, const Message& m )
     {
       qDebug() << "Group chat request for" << qPrintable( cmd.groupName() ) << "from" << qPrintable( u.name() ) << "is accepted with timestamp" << qPrintable( cmd.groupLastModified().toString( Qt::ISODate ) );
       Group g = group_chat.group();
+      g.setOwnerHash( cmd.groupOwnerHash() );
       g.setName( cmd.groupName() );
       g.setUsers( ul.toUsersId() );
       if( cmd.groupLastModified().isValid() )
@@ -431,6 +443,7 @@ void Core::parseGroupMessage( const User& u, const Message& m )
       if( ul.toList().size() > 1 )
       {
         Group g;
+        g.setOwnerHash( cmd.groupOwnerHash().isEmpty() ? u.hash() : cmd.groupOwnerHash() );
         g.setName( cmd.groupName() );
         g.setPrivateId( cmd.groupId() );
         g.setUsers( ul.toUsersId() );
@@ -438,7 +451,14 @@ void Core::parseGroupMessage( const User& u, const Message& m )
         if( cmd.groupLastModified().isValid() )
           g.setLastModified( cmd.groupLastModified() );
 
-        createGroupChat( u, g, false );
+        bool validOwner = false;
+        foreach( const User& member, ul.toList() )
+          if( member.hash() == g.ownerHash() ) validOwner = true;
+        if( validOwner )
+        {
+          if( m.hasFlag( Message::Create ) ) ChatManager::instance().removeRefusedChat( cmd.groupId() );
+          createGroupChat( u, g, false );
+        }
       }
       else
         qWarning() << "Unable to create group chat" << qPrintable( cmd.groupName() ) << "from user" << qPrintable( u.name() ) << "because members are minus than 2";
@@ -450,6 +470,16 @@ void Core::parseGroupMessage( const User& u, const Message& m )
   }
   else if( m.hasFlag( Message::Delete ) )
   {
+    if( m.text() == "shadow:dissolve" )
+    {
+      const Chat group = ChatManager::instance().findChatByPrivateId( cmd.groupId(), true, ID_INVALID );
+      if( group.isValid() && group.group().ownerHash() == u.hash() )
+      {
+        markGroupDissolved( group.privateId() );
+        removeChat( group.id(), true );
+      }
+      return;
+    }
     removeLocalUserFromGroupChatByOther( u, cmd.groupId() );
   }
   else
@@ -518,13 +548,19 @@ void Core::parseFolderMessage( const User& u, const Message& m )
 
     QString chat_private_id = file_info_list.first().chatPrivateId();
     chat_to_show_message = ChatManager::instance().findChatByPrivateId( chat_private_id, false, u.id() );
+    if( !chat_private_id.isEmpty() && (!chat_to_show_message.isValid() ||
+        !chat_to_show_message.hasUser( u.id() ) || !chat_to_show_message.hasUser( ID_LOCAL_USER )) )
+    {
+      refuseToDownloadFolder( u.id(), folder_name, chat_private_id );
+      return;
+    }
     QString sys_msg = tr( "%1 %2 is sending to you the folder: %3." ).arg( IconManager::instance().toHtml( "download.png", "*F*" ), Bee::userNameToShow( u, true ), folder_name );
     dispatchSystemMessage( chat_to_show_message.id(), u.id(), sys_msg, chat_to_show_message.isValid() ? DispatchToChat : DispatchToAllChatsWithUser, ChatMessage::FileTransfer, false );
 
     QList<FileInfo> file_info_list_allowed;
     foreach( FileInfo fi, file_info_list )
     {
-      if( !Settings::instance().isFileExtensionAllowedInFileTransfer( fi.suffix() ) )
+      if( !fi.isFolder() && !Settings::instance().isFileExtensionAllowedInFileTransfer( fi.suffix() ) )
       {
         qWarning() << "User" << qPrintable( u.path() ) << "is sending to you the file" << fi.name() << "in folder" << folder_name << "but you are not allowed to download this file extension";
         refuseToDownloadFile( u.id(), fi );
@@ -713,7 +749,10 @@ void Core::parseReceivedMessage(const User& u, const Message& m )
       bool ok = false;
       VNumber id_msg_received = m.text().toULongLong( &ok );
       if( ok )
-        MessageManager::instance().setMessageReceived( id_msg_received );
+      {
+        if( MessageManager::instance().setMessageReceived( id_msg_received, u.id() ) )
+          checkMessageDeliveryAck( u, id_msg_received );
+      }
       else
         qWarning() << "Invalid chat message id received from" << qPrintable( u.path() );
     }

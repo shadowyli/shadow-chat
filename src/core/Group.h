@@ -51,6 +51,8 @@ public:
   void setUsers( const QList<VNumber>& );
 
   inline const QString& privateId() const;
+  const QString& ownerHash() const { return m_ownerHash; }
+  void setOwnerHash( const QString& hash ) { m_ownerHash = hash; }
   inline void setPrivateId( const QString& );
 
   inline const QDateTime& lastModified() const;
@@ -65,6 +67,7 @@ private:
   QString m_name;
   QList<VNumber> m_usersId;
   QString m_privateId;
+  QString m_ownerHash;
   QDateTime m_lastModified;
   ChatType m_chatType;
 

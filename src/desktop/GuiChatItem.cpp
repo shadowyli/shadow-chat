@@ -29,6 +29,7 @@
 #include "Settings.h"
 #include "ShadowStyle.h"
 #include "UserManager.h"
+#include "ShadowConversationPreferences.h"
 
 
 GuiChatItem::GuiChatItem( QTreeWidget* parent )
@@ -44,6 +45,9 @@ GuiChatItem::GuiChatItem( QTreeWidget* parent )
 
 bool GuiChatItem::operator<( const QTreeWidgetItem& item ) const
 {
+  const bool pinned=data(0,ChatPinned).toBool();
+  const bool other_pinned=item.data(0,ChatPinned).toBool();
+  if(pinned!=other_pinned)return !pinned;
   if( chatId() == ID_DEFAULT_CHAT )
     return false;
 
@@ -114,7 +118,7 @@ bool GuiChatItem::updateItem( const Chat& c )
     if( c.isGroup() )
     {
       chat_name = c.name();
-      m_defaultIcon = IconManager::instance().icon( "group.png" );
+      m_defaultIcon = ShadowStyle::actionIcon( QStringLiteral("users-three") );
     }
     else
       chat_name = sl.isEmpty() ? c.name() : sl.first();
@@ -132,6 +136,11 @@ bool GuiChatItem::updateItem( const Chat& c )
     chat_name.prepend( QString( "(%1) " ).arg( c.unreadMessages() ) );
 
   chat_name += " ";
+  const ShadowConversationPreferences preferences;
+  const bool pinned=preferences.pinned(c),muted=preferences.muted(c);
+  setData(0,ChatPinned,pinned);setData(0,ChatMuted,muted);
+  if(pinned) {chat_name+=QStringLiteral(" · 置顶");tool_tip+=QStringLiteral("\n已置顶");}
+  if(muted) {chat_name+=QStringLiteral(" · 免打扰");tool_tip+=QStringLiteral("\n消息免打扰（被 @ 时仍提醒）");}
   setText( 0, chat_name );
   setToolTip( 0, tool_tip );
   setData( 0, ChatUnreadMessages, c.unreadMessages() );
@@ -156,7 +165,7 @@ bool GuiChatItem::updateItem( const Chat& c )
 
 void GuiChatItem::onTickEvent( int ticks )
 {
-  if( unreadMessages() > 0 )
+  if( unreadMessages() > 0 && !data(0,ChatMuted).toBool() )
   {
     if( ticks % 2 == 0 )
       setIcon( 0, ShadowStyle::actionIcon( QStringLiteral( "chats-circle" ) ) );

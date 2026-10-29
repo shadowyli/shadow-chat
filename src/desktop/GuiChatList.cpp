@@ -28,6 +28,7 @@
 #include "MessageManager.h"
 #include "Settings.h"
 #include "UserManager.h"
+#include "ShadowConversationPreferences.h"
 
 
 GuiChatList::GuiChatList( QWidget* parent )
@@ -42,6 +43,7 @@ GuiChatList::GuiChatList( QWidget* parent )
   mp_twChatList->setColumnCount( 1 );
   mp_twChatList->setRootIsDecorated( false );
   mp_twChatList->setSortingEnabled( true );
+  mp_twChatList->sortItems(0,Qt::DescendingOrder);
   mp_twChatList->setIconSize( Settings::instance().avatarIconSize() );
   mp_twChatList->setContextMenuPolicy( Qt::CustomContextMenu );
   mp_twChatList->setMouseTracking( true );
@@ -112,9 +114,9 @@ void GuiChatList::updateChat( const Chat& c )
   }
   item->updateItem( c );
 
-  bool hide_item = false;
+  bool hide_item = ShadowConversationPreferences().hidden(c);
 
-  if( !c.isDefault() && Settings::instance().hideEmptyChatsInList() )
+  if( !hide_item && !c.isDefault() && Settings::instance().hideEmptyChatsInList() )
     hide_item = ChatManager::instance().isChatEmpty( c, true );
 
   if( !hide_item && !m_filter.isEmpty() )
@@ -186,6 +188,11 @@ void GuiChatList::showChatMenu( const QPoint& p )
     act = mp_menuContext->addAction( IconManager::instance().icon( "chat.png" ), tr( "Show" ), this, SLOT( openChatSelected() ) );
     mp_menuContext->setDefaultAction( act );
     mp_menuContext->addSeparator();
+    const ShadowConversationPreferences preferences;
+    mp_menuContext->addAction(preferences.pinned(c)?QStringLiteral("取消置顶"):QStringLiteral("置顶会话"),this,SLOT(togglePinSelected()));
+    act=mp_menuContext->addAction(QStringLiteral("消息免打扰"),this,SLOT(toggleMuteSelected()));act->setCheckable(true);act->setChecked(preferences.muted(c));
+    mp_menuContext->addAction(QStringLiteral("移除会话"),this,SLOT(hideChatSelected()));
+    mp_menuContext->addSeparator();
     act = mp_menuContext->addAction( IconManager::instance().icon( "clear.png" ), tr( "Clear" ), this, SLOT( clearChatSelected() ) );
     act->setToolTip( tr( "Clear all chat messages" ) );
     act->setDisabled( ChatManager::instance().isChatEmpty( c, true ) );
@@ -213,7 +220,27 @@ void GuiChatList::showChatMenu( const QPoint& p )
 
 void GuiChatList::openChatSelected()
 {
+  ShadowConversationPreferences().reveal(ChatManager::instance().chat(m_chatSelected));
   emit chatSelected( m_chatSelected );
+}
+
+void GuiChatList::togglePinSelected()
+{
+  const Chat chat=ChatManager::instance().chat(m_chatSelected);ShadowConversationPreferences preferences;
+  if(!preferences.setPinned(chat,!preferences.pinned(chat)))QMessageBox::warning(this,QStringLiteral("会话设置"),QStringLiteral("无法保存置顶设置，请检查磁盘空间与权限。"));
+  updateChat(chat);mp_twChatList->sortItems(0,Qt::DescendingOrder);
+}
+void GuiChatList::toggleMuteSelected()
+{
+  const Chat chat=ChatManager::instance().chat(m_chatSelected);ShadowConversationPreferences preferences;
+  if(!preferences.setMuted(chat,!preferences.muted(chat)))QMessageBox::warning(this,QStringLiteral("会话设置"),QStringLiteral("无法保存免打扰设置，请检查磁盘空间与权限。"));
+  updateChat(chat);
+}
+void GuiChatList::hideChatSelected()
+{
+  const Chat chat=ChatManager::instance().chat(m_chatSelected);
+  if(!ShadowConversationPreferences().setHidden(chat,true))QMessageBox::warning(this,QStringLiteral("会话设置"),QStringLiteral("无法保存会话设置，请检查磁盘空间与权限。"));
+  updateChat(chat);
 }
 
 void GuiChatList::clearChatSelected()
@@ -296,14 +323,15 @@ void GuiChatList::showMenuSettings()
 
 void GuiChatList::selectFirstChat()
 {
-  if( mp_twChatList->topLevelItemCount() > 0 )
+  mp_twChatList->clearSelection();
+  for(int index=0;index<mp_twChatList->topLevelItemCount();++index)
   {
-    QTreeWidgetItem* item = mp_twChatList->topLevelItem( 0 );
-    if( item )
+    QTreeWidgetItem* item = mp_twChatList->topLevelItem(index);
+    if( item && !item->isHidden() )
     {
-      clearChatSelected();
       item->setSelected( true );
       mp_twChatList->setFocus();
+      return;
     }
   }
 }

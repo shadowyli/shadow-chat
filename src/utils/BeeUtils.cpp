@@ -655,6 +655,28 @@ static int GetBoxSize( int pix_size )
 
 QPixmap Bee::avatarForUser( const User& u, const QSize& avatar_size, bool use_available_user_image, int user_status )
 {
+#ifdef SHADOWCHAT_SAFE_BUILD
+  Q_UNUSED(user_status);
+  if(avatar_size.isEmpty()) return QPixmap();
+  QPixmap source;
+  if(use_available_user_image && !u.vCard().photo().isNull())
+    source=u.vCard().photo();
+  else {
+    Avatar avatar;
+    avatar.setName(u.isValid() ? (Settings::instance().useUserFullName() && u.vCard().hasFullName() ? u.vCard().fullName(Settings::instance().useUserFirstNameFirstInFullName()) : u.name()) : "??");
+    avatar.setColor(u.color());
+    avatar.setSize(avatar_size);
+    if(avatar.create()) source=avatar.pixmap();
+  }
+  QPixmap result(avatar_size);result.fill(Qt::transparent);
+  if(source.isNull()) return result;
+  const QPixmap scaled=source.scaled(avatar_size,Qt::KeepAspectRatioByExpanding,Qt::SmoothTransformation);
+  QPainter painter(&result);painter.setRenderHint(QPainter::Antialiasing);
+  QPainterPath clip;const qreal radius=qMax<qreal>(2.0,qMin(avatar_size.width(),avatar_size.height())*0.16);
+  clip.addRoundedRect(QRectF(QPointF(0,0),QSizeF(avatar_size)),radius,radius);painter.setClipPath(clip);
+  painter.drawPixmap((avatar_size.width()-scaled.width())/2,(avatar_size.height()-scaled.height())/2,scaled);
+  return result;
+#else
   QPixmap user_avatar;
   bool default_avatar_used = false;
   if( user_status < 0 )
@@ -719,6 +741,7 @@ QPixmap Bee::avatarForUser( const User& u, const QSize& avatar_size, bool use_av
   }
 
   return pix;
+#endif
 }
 
 QString Bee::toolTipForUser( const User& u, bool only_status )

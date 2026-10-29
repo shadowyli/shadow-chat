@@ -53,6 +53,9 @@ public:
   bool pauseTransfer( VNumber peer_id );
 
   void removeFilesToUser( VNumber user_id );
+  void authorizeFileForUser( VNumber file_id, VNumber user_id );
+  void revokeChatTransfers( VNumber user_id, const QString& chat_private_id );
+  bool hasUploadToUser( VNumber user_id ) const;
 
   inline void clearFiles();
 
@@ -83,6 +86,7 @@ protected slots:
 
 private:
   QList<FileInfo> m_files;
+  QMap<VNumber, QSet<VNumber> > m_fileRecipients;
   QList<FileTransferPeer*> m_peers;
 
 };
@@ -90,7 +94,7 @@ private:
 
 // Inline Functions
 inline bool FileTransfer::isActive() const { return isListening() && serverPort() > 0; }
-inline void FileTransfer::clearFiles() { m_files.clear(); }
+inline void FileTransfer::clearFiles() { m_files.clear(); m_fileRecipients.clear(); }
 inline bool FileTransfer::hasActivePeers() const { return !m_peers.isEmpty(); }
 
 #endif // BEEBEEP_FILETRANSFERSERVER_H

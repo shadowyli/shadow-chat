@@ -1,0 +1,9 @@
+QT += core
+QT -= gui
+CONFIG += console c++11
+CONFIG -= app_bundle
+TEMPLATE = app
+TARGET = update_manifest_test
+INCLUDEPATH += ../src/utils
+SOURCES += update_manifest_test.cpp
+win32-msvc*: QMAKE_CXXFLAGS += /utf-8

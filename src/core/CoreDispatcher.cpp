@@ -97,7 +97,14 @@ bool Core::dispatchChatMessageReceived( VNumber from_user_id, const Message& m )
 
 void Core::dispatchSystemMessage( VNumber chat_id, VNumber from_user_id, const QString& msg, DispatchType dt, ChatMessage::Type cmt, bool can_be_saved )
 {
-  Message m = Protocol::instance().systemMessage( msg );
+  QString saved_message = msg;
+  if( cmt == ChatMessage::FileTransfer || cmt == ChatMessage::ImagePreview )
+  {
+    const User sender = UserManager::instance().findUser( from_user_id );
+    if( sender.isValid() )
+      saved_message.prepend( QStringLiteral( "<!--shadow-sender:%1-->" ).arg( QString::fromLatin1( sender.name().toUtf8().toBase64() ) ) );
+  }
+  Message m = Protocol::instance().systemMessage( saved_message );
   ChatMessage cm( ID_SYSTEM_MESSAGE, m, cmt, can_be_saved );
 
   if( chat_id == ID_INVALID )

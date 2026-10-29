@@ -6,6 +6,8 @@ test/
 /dist/
 /.tools/
 aqtinstall.log
+/delivery-private/
+/integrations/flowx-tools/public/downloads/
 *.obj
 *.pdb
 *.ilk
@@ -26,6 +28,10 @@ aqtinstall.log
 /src/release/
 /tests/release/
 /tests/debug/
+/tests/*.exe
+/tests/moc_*.cpp
+/tests/moc_predefs.h
+/tests/ui_*.h
 /plugins/*/moc_*.cpp
 /plugins/*/moc_predefs.h
 /plugins/*/qrc_*.cpp

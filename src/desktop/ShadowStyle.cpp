@@ -5,6 +5,8 @@
 //////////////////////////////////////////////////////////////////////
 
 #include <QPainter>
+#include <QFontDatabase>
+#include <QDir>
 #include "ShadowStyle.h"
 
 
@@ -40,6 +42,8 @@ namespace
 
 QFont ShadowStyle::applicationFont()
 {
+  static const int chineseFont = QFontDatabase::addApplicationFont(QDir::fromNativeSeparators(qEnvironmentVariable("WINDIR",QStringLiteral("C:/Windows")))+QStringLiteral("/Fonts/msyh.ttc"));
+  Q_UNUSED(chineseFont);
   QFont font( QStringLiteral( "Microsoft YaHei UI" ), 9 );
   font.setStyleStrategy( QFont::PreferAntialias );
   return font;
@@ -76,6 +80,7 @@ QString ShadowStyle::applicationStyleSheet()
   // Semantic token map: brand #2563EB, canvas #F5F7FB, surface #FFFFFF,
   // primary text #172033, secondary text #5F6B7A, stroke #E3E8F0.
   return QStringLiteral(
+    "QWidget { font-family: 'Microsoft YaHei UI', 'Microsoft YaHei', 'Segoe UI'; font-size: 13px; }"
     "QWidget#ShadowRoot { background: #F5F7FB; color: #172033; font-family: 'Microsoft YaHei UI', 'Segoe UI'; }"
     "QWidget#ShadowTitleBar { background: #FFFFFF; border-bottom: 1px solid #E3E8F0; }"
     "QWidget#ShadowShellContent { background: #F5F7FB; }"

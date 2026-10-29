@@ -27,6 +27,7 @@
 #include "Group.h"
 #include "IconManager.h"
 #include "Settings.h"
+#include "ShadowStyle.h"
 #include "UserManager.h"
 
 
@@ -96,7 +97,7 @@ bool GuiGroupItem::updateChat( const Chat& c )
   if( c.id() != itemId() )
     return false;
 
-  setIcon( 0, IconManager::instance().icon( "group.png" ) );
+  setIcon( 0, ShadowStyle::actionIcon( QStringLiteral("users-three") ) );
   setGroupName( c.name(), c.unreadMessages() );
 
   QList<QTreeWidgetItem*> group_children = takeChildren();
@@ -121,8 +122,8 @@ void GuiGroupItem::onTickEvent( int ticks )
   if( isGroup() && m_unreadMessages > 0 )
   {
     if( ticks % 2 == 0 )
-      setIcon( 0, IconManager::instance().icon( "beebeep-message.png" ) );
+      setIcon( 0, ShadowStyle::actionIcon( QStringLiteral("chats-circle") ) );
     else
-      setIcon( 0, IconManager::instance().icon( "group.png" ) );
+      setIcon( 0, ShadowStyle::actionIcon( QStringLiteral("users-three") ) );
   }
 }

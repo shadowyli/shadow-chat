@@ -26,6 +26,10 @@ int main( int argc, char** argv )
   const QString target_path = QDir( temporary_root.path() ).filePath( QStringLiteral( "target" ) );
   QDir().mkpath( source_path );
   QDir().mkpath( target_path );
+  const QByteArray preferences("[peer-fixture]\npinned=true\nmuted=true\nhidden=false\n");
+  if( !writeFile( source_path + QStringLiteral( "/conversation-preferences.ini" ), preferences ) ) return 23;
+  const QByteArray peerAvatars("[peer-fixture]\nphoto=fixture-only\n");
+  if( !writeFile( source_path + QStringLiteral( "/peer-avatars.ini" ), peerAvatars ) ) return 25;
   if( !writeFile( QDir( source_path ).filePath( QStringLiteral( "beebeep.ini" ) ), QByteArrayLiteral( "profile=new" ) ) ||
       !writeFile( QDir( source_path ).filePath( QStringLiteral( "beebeep.dat" ) ), QByteArrayLiteral( "chat=new" ) ) ||
       !writeFile( QDir( target_path ).filePath( QStringLiteral( "beebeep.ini" ) ), QByteArrayLiteral( "profile=old" ) ) )
@@ -50,13 +54,15 @@ int main( int argc, char** argv )
     qCritical() << error_message;
     return 5;
   }
-  if( readFile( QDir( target_path ).filePath( QStringLiteral( "beebeep.ini" ) ) ) != QByteArrayLiteral( "profile=new" ) ||
+  if( !readFile( QDir( target_path ).filePath( QStringLiteral( "beebeep.ini" ) ) ).contains( QByteArrayLiteral( "profile=new" ) ) ||
       readFile( QDir( target_path ).filePath( QStringLiteral( "beebeep.dat" ) ) ) != QByteArrayLiteral( "chat=new" ) )
     return 6;
   if( restore_folder.isEmpty() || readFile( QDir( restore_folder ).filePath( QStringLiteral( "beebeep.ini" ) ) ) != QByteArrayLiteral( "profile=old" ) )
     return 7;
   if( QFileInfo::exists( ShadowWorkspaceArchive::pendingFilePath( target_path ) ) )
     return 8;
+  if( readFile( target_path + QStringLiteral( "/conversation-preferences.ini" ) ) != preferences ) return 24;
+  if( readFile( target_path + QStringLiteral( "/peer-avatars.ini" ) ) != peerAvatars ) return 26;
 
   QFile archive( archive_path );
   if( !archive.open( QIODevice::ReadWrite ) || !archive.seek( qMax<qint64>( 0, archive.size() - 1 ) ) )
@@ -74,5 +80,24 @@ int main( int argc, char** argv )
     return 10;
 
   qInfo() << "workspace archive roundtrip and corruption checks passed";
+  const QString media = QDir( source_path ).filePath( QStringLiteral( "received" ) );
+  QDir().mkpath( media + QStringLiteral( "/project/nested" ) );
+  if( !writeFile( media + QStringLiteral( "/project/nested/texture.png" ), QByteArray( 2 * 1024 * 1024 + 19, 'x' ) ) ) return 11;
+  if( !writeFile( source_path + QStringLiteral( "/.shadow-account.ini" ), QByteArrayLiteral( "email=alice@example.com\npassword=source\n" ) ) ) return 12;
+  if( !writeFile( target_path + QStringLiteral( "/.shadow-account.ini" ), QByteArrayLiteral( "email=alice@example.com\npassword=target\n" ) ) ) return 13;
+  const QString bundle = temporary_root.path() + QStringLiteral( "/attachments.beebeep-workspace" );
+  if( !ShadowWorkspaceArchive::exportWithAttachments( source_path, media, bundle, &error_message ) ) { qCritical()<<error_message;return 14; }
+  QString email;
+  if( !ShadowWorkspaceArchive::archiveEmail( bundle, &email, &error_message ) || email != QStringLiteral( "alice@example.com" ) ) return 15;
+  if( !ShadowWorkspaceArchive::stageImport( target_path, bundle, &error_message ) || !ShadowWorkspaceArchive::applyPendingImport( target_path, &restore_folder, &error_message ) ) {qCritical()<<error_message;return 16;}
+  QSettings migration( target_path + QStringLiteral( "/.shadow-paths.ini" ), QSettings::IniFormat );
+  if( readFile( migration.value( "targetRoot" ).toString() + QStringLiteral( "/project/nested/texture.png" ) ) != QByteArray( 2 * 1024 * 1024 + 19, 'x' ) ) return 17;
+  if( !readFile( target_path + QStringLiteral( "/.shadow-account.ini" ) ).contains( "password=target" ) ) return 18;
+  if( !writeFile( target_path + QStringLiteral( "/.shadow-account.ini" ), QByteArrayLiteral( "email=bob@example.com\npassword=target\n" ) ) ) return 19;
+  if( ShadowWorkspaceArchive::stageImport( target_path, bundle, &error_message ) ) return 20;
+  QFile damaged( bundle ); if( !damaged.open( QIODevice::ReadWrite ) || !damaged.seek( damaged.size()-1 ) )return 21;
+  const char changed = char(damaged.read(1).at(0)^0x7f); damaged.seek(damaged.size()-1); damaged.write(&changed,1);damaged.close();
+  if( ShadowWorkspaceArchive::stageImport( target_path, bundle, &error_message ) )return 22;
+  qInfo()<<"streaming attachment migration, credential preservation, account mismatch and corruption passed";
   return 0;
 }
