@@ -187,6 +187,16 @@ void BuildSavedChatList::loadSavedChats( QDataStream* stream )
       return;
     }
     chat_text = Settings::instance().simpleDecrypt( chat_text_encrypted );
+    // Workspace migrations relocate attachments without changing saved message data.
+    QSettings migration( QDir( Settings::instance().dataFolder() ).filePath( QStringLiteral( ".shadow-paths.ini" ) ), QSettings::IniFormat );
+    const QString old_root = migration.value( QStringLiteral( "sourceRoot" ) ).toString();
+    const QString new_root = migration.value( QStringLiteral( "targetRoot" ) ).toString();
+    if( !old_root.isEmpty() && !new_root.isEmpty() )
+    {
+      chat_text.replace( QUrl::fromLocalFile( old_root ).toString(), QUrl::fromLocalFile( new_root ).toString() );
+      chat_text.replace( QUrl::fromLocalFile( old_root ).toString( QUrl::FullyEncoded ), QUrl::fromLocalFile( new_root ).toString( QUrl::FullyEncoded ) );
+      chat_text.replace( QDir::fromNativeSeparators( old_root ), QDir::fromNativeSeparators( new_root ) );
+    }
 
     qDebug() << "Loading chat" << i << "completed:" << qPrintable( chat_name );
 

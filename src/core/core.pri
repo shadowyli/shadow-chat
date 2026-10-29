@@ -1,7 +1,13 @@
 
 INCLUDEPATH += $$PWD
+QT += gui-private
 
 HEADERS += core/Broadcaster.h \
+  core/ShadowStickerStore.h \
+  core/ShadowTransferQueue.h \
+  core/ShadowGroupPolicy.h \
+  core/ShadowPeerAvatars.h \
+  core/ShadowMessageDelivery.h \
   core/BuildFileList.h \
   core/BuildFileShareList.h \
   core/BuildSavedChatList.h \
@@ -48,6 +54,9 @@ HEADERS += core/Broadcaster.h \
   core/Version.h
 
 SOURCES +=  core/Broadcaster.cpp \
+  core/ShadowStickerStore.cpp \
+  core/ShadowTransferQueue.cpp \
+  core/ShadowMessageDelivery.cpp \
   core/BuildFileList.cpp \
   core/BuildFileShareList.cpp \
   core/BuildSavedChatList.cpp \

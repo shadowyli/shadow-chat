@@ -172,7 +172,17 @@ void FileTransferPeer::checkDownloadData( const QByteArray& byte_array )
     if( file_header.lastModified().isValid() )
       m_fileInfo.setLastModified( file_header.lastModified() );
     setTransferringState();
-    sendTransferData();
+    if( m_fileInfo.size() == 0 )
+    {
+      if( !m_file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+      {
+        setError( tr( "Unable to open file %1" ).arg( m_file.fileName() ) );
+        return;
+      }
+      setTransferCompleted();
+    }
+    else
+      sendTransferData();
     return;
   }
 
@@ -185,13 +195,13 @@ void FileTransferPeer::checkDownloadData( const QByteArray& byte_array )
   m_bytesTransferred = static_cast<FileSizeType>( byte_array.size() );
   m_totalBytesTransferred += m_bytesTransferred;
 
-  sendTransferData(); // send to upload client that data is arrived
-
   if( m_bytesTransferred > 0 )
   {
     if( !m_file.isOpen() )
     {
-      if( !m_file.open( QIODevice::WriteOnly | QIODevice::Append ) )
+      const QIODevice::OpenMode mode = QIODevice::WriteOnly |
+        (m_totalBytesTransferred == m_bytesTransferred ? QIODevice::Truncate : QIODevice::Append);
+      if( !m_file.open( mode ) )
       {
         setError( tr( "Unable to open file %1" ).arg( m_file.fileName() ) );
         return;
@@ -208,15 +218,30 @@ void FileTransferPeer::checkDownloadData( const QByteArray& byte_array )
   }
 
   if( m_totalBytesTransferred > m_fileInfo.size() )
+  {
     setError( tr( "%1 bytes downloaded but the file size is only %2 bytes" ).arg( m_totalBytesTransferred ).arg( m_fileInfo.size() ) );
+    return;
+  }
 
+  // Confirm only bytes successfully written to disk. A full disk must never
+  // make the sender report a successful transfer.
+  if( m_file.isOpen() && !m_file.flush() )
+  {
+    setError( tr( "Unable to write in the file %1" ).arg( m_file.fileName() ) );
+    return;
+  }
   if( m_totalBytesTransferred == m_fileInfo.size() )
     setTransferCompleted();
+  else
+    sendTransferData();
 }
 
 QString FileTransferPeer::temporaryFilePath() const
 {
-  return QString( "%1/%2.%3" ).arg( Settings::instance().cacheFolder(), m_fileInfo.fileHash(), Settings::instance().partiallyDownloadedFileExtension() );
+  // Different senders can offer equal names/sizes/timestamps. Each receive peer
+  // owns its scratch file so concurrent transfers never append to one another.
+  return QString( "%1/%2-%3.%4" ).arg( Settings::instance().cacheFolder(), m_fileInfo.fileHash() )
+    .arg( m_id ).arg( Settings::instance().partiallyDownloadedFileExtension() );
 }
 
 bool FileTransferPeer::removePartiallyDownloadedFile()

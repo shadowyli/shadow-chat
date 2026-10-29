@@ -66,6 +66,9 @@ protected slots:
   void selectBackgroundColor();
   void showMenuSettings();
   void removeUnsentMessagesInChatSelected();
+  void togglePinSelected();
+  void toggleMuteSelected();
+  void hideChatSelected();
 
 protected:
   GuiChatItem* itemFromChatId( VNumber );

@@ -68,7 +68,9 @@ void FileTransferPeer::closeAll()
     m_file.close();
   }
 
-  if( !isTransferCompleted() && isDownload() && m_file.exists() && m_state != FileTransferPeer::Paused && !Settings::instance().resumeFileTransfer() )
+  if( !isTransferCompleted() && isDownload() && m_file.exists() &&
+      m_file.fileName() == temporaryFilePath() &&
+      m_state != FileTransferPeer::Paused && !Settings::instance().resumeFileTransfer() )
     m_file.remove();
 
   computeElapsedTime();
@@ -138,8 +140,16 @@ void FileTransferPeer::setTransferCompleted()
   if( m_state == FileTransferPeer::Completed )
     return;
   qDebug() << qPrintable( name() ) << "has completed the transfer of file" << qPrintable( m_fileInfo.name() ) << "with user id" << remoteUserId();
-  m_state = FileTransferPeer::Completed;
-  closeAll();
+  // Finish the local file before confirming the final block to the sender.
+  if( m_file.isOpen() )
+  {
+    if( isDownload() && !m_file.flush() )
+    {
+      setError( tr( "Unable to write in the file %1" ).arg( m_file.fileName() ) );
+      return;
+    }
+    m_file.close();
+  }
   if( isDownload() && !isSkipped() )
   {
     if( m_fileInfo.path() != m_file.fileName() )
@@ -155,7 +165,7 @@ void FileTransferPeer::setTransferCompleted()
 
       if( file_info_completed_file.exists() )
       {
-        QString new_file_path = Bee::uniqueFilePath( m_fileInfo.path(), true );
+        QString new_file_path = Bee::uniqueFilePath( m_fileInfo.path(), false );
         m_fileInfo.setPath( new_file_path );
       }
       else
@@ -166,7 +176,10 @@ void FileTransferPeer::setTransferCompleted()
         if( !parent_folder.exists() )
         {
           if( !parent_folder.mkpath( "." ) )
-            qWarning() << "Unable to create parent folder" << qPrintable( parent_folder_path );
+          {
+            setError( tr( "Unable to create folder %1" ).arg( parent_folder_path ) );
+            return;
+          }
         }
       }
 
@@ -179,7 +192,10 @@ void FileTransferPeer::setTransferCompleted()
           Bee::setLastModifiedToFile( m_fileInfo.path(), m_fileInfo.lastModified() );
       }
       else
-        qWarning() << qPrintable( name() ) << "cannot rename downloaded file" << qPrintable( m_file.fileName() ) << "to" << qPrintable( m_fileInfo.path() );
+      {
+        setError( tr( "Unable to save downloaded file %1" ).arg( m_fileInfo.path() ) );
+        return;
+      }
     }
     else
     {
@@ -187,6 +203,13 @@ void FileTransferPeer::setTransferCompleted()
         Bee::setLastModifiedToFile( m_fileInfo.path(), m_fileInfo.lastModified() );
     }
   }
+
+  if( isDownload() && !isSkipped() )
+    sendDownloadDataConfirmation();
+  if( m_state == FileTransferPeer::Canceled || m_state == FileTransferPeer::Error )
+    return;
+  m_state = FileTransferPeer::Completed;
+  closeAll();
 
   if( isSkipped() )
     emit message( id(), remoteUserId(), m_fileInfo, QString( "%1 (%2)" ).arg( tr( "Transfer skipped" ), tr( "the file already exists" ) ), m_state );

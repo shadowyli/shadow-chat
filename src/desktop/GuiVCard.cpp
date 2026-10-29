@@ -28,6 +28,8 @@
 #include "IconManager.h"
 #include "PluginManager.h"
 #include "Settings.h"
+#include "ShadowDialogStyle.h"
+#include "ShadowStyle.h"
 #include "UserManager.h"
 
 
@@ -39,10 +41,72 @@ GuiVCard::GuiVCard( QWidget *parent )
 
   setWindowFlags( Qt::Popup );
   setAttribute( Qt::WA_DeleteOnClose, true );
-  setFrameShape( QFrame::StyledPanel );
-  setFrameShadow( QFrame::Raised );
-  setLineWidth( 2 );
-  setMidLineWidth( 1 );
+  setFrameShape( QFrame::NoFrame );
+  setMinimumWidth( 480 );
+  setMaximumWidth( 560 );
+  delete layout();
+  QVBoxLayout* card = new QVBoxLayout( this );
+  card->setContentsMargins( 24, 24, 24, 24 );
+  card->setSpacing( 12 );
+  QFrame* headerPanel = new QFrame(this);
+  headerPanel->setStyleSheet(QStringLiteral("QFrame { background: #EEF4FF; border-radius: 12px; }"));
+  QHBoxLayout* header = new QHBoxLayout(headerPanel);
+  header->setContentsMargins(16,16,16,16);
+  header->setSpacing( 18 );
+  header->addWidget( mp_lPhoto );
+  QVBoxLayout* identity = new QVBoxLayout;
+  QLabel* cardTitle=new QLabel(QStringLiteral("同事资料"),headerPanel);cardTitle->setProperty("role","hint");identity->addWidget(cardTitle);
+  mp_lName->setProperty( "role", "title" );
+  mp_lName->setMinimumHeight(32);
+  mp_lName->setWordWrap( true );
+  mp_lStatusDescription->setProperty( "role", "hint" );
+  identity->addWidget( mp_lName );
+  identity->addWidget( mp_lStatusDescription );
+  identity->addWidget( mp_lStatus );
+  header->addLayout( identity, 1 );
+  card->addWidget( headerPanel );
+  foreach( QLabel* detail, QList<QLabel*>() << mp_lEmail << mp_lPhone << mp_lRoom << mp_lBirthday << mp_lWorkgroups )
+  {
+    detail->setWordWrap( true );
+    card->addWidget( detail );
+  }
+  mp_teInfo->setMinimumHeight( 70 );
+  mp_teInfo->setMaximumHeight( 110 );
+  card->addWidget( mp_teInfo );
+  mp_lPath->setProperty( "role", "hint" );
+  mp_lPath->setWordWrap( true );
+  QPushButton* networkDetails = new QPushButton(QStringLiteral("连接信息"),this);
+  networkDetails->setCheckable(true);networkDetails->setMaximumWidth(120);
+  card->addWidget(networkDetails,0,Qt::AlignLeft);
+  card->addWidget( mp_lPath );
+  mp_lPath->hide();connect(networkDetails,&QPushButton::toggled,mp_lPath,&QWidget::setVisible);
+  QHBoxLayout* primaryActions = new QHBoxLayout;
+  QHBoxLayout* secondaryActions = new QHBoxLayout;
+  foreach( QPushButton* action, QList<QPushButton*>() << mp_pbChat << mp_pbFile << mp_pbFavorite << mp_pbBuzz << mp_pbColor << mp_pbRemove << mp_pbHelp )
+  {
+    action->setMinimumSize( 0, 36 );
+    action->setMaximumSize( QWIDGETSIZE_MAX, QWIDGETSIZE_MAX );
+    action->setIcon( QIcon() );
+  }
+  primaryActions->addWidget( mp_pbChat );
+  primaryActions->addWidget( mp_pbFile );
+  primaryActions->addWidget( mp_pbFavorite );
+  secondaryActions->addWidget( mp_pbBuzz );
+  secondaryActions->addWidget( mp_pbColor );
+  secondaryActions->addWidget( mp_pbRemove );
+  secondaryActions->addWidget( mp_pbHelp );
+  card->addLayout( primaryActions );
+  card->addLayout( secondaryActions );
+  mp_frame->hide();
+  mp_frameBottom->hide();
+  mp_pbChat->setText( QStringLiteral( "发消息" ) );
+  mp_pbChat->setProperty( "role", "primary" );
+  mp_pbFile->setText( QStringLiteral( "发文件" ) );
+  mp_pbFavorite->setText( QStringLiteral( "收藏同事" ) );
+  mp_pbBuzz->setText( QStringLiteral( "提醒" ) );
+  mp_pbColor->setText( QStringLiteral( "昵称颜色" ) );
+  mp_pbRemove->setText( QStringLiteral( "移除同事" ) );
+  mp_pbHelp->setText( QStringLiteral( "求助" ) );
 
   QPalette custom_palette = palette();
   if( Settings::instance().useDarkStyle() )
@@ -62,13 +126,7 @@ GuiVCard::GuiVCard( QWidget *parent )
   }
   setPalette( custom_palette );
 
-  mp_pbChat->setIcon( IconManager::instance().icon( "chat.png" ) );
-  mp_pbFile->setIcon( IconManager::instance().icon( "send-file.png" ) );
-  mp_pbColor->setIcon( IconManager::instance().icon( "font-color.png" ) );
-  mp_pbFavorite->setIcon( IconManager::instance().icon( "star.png" ) );
-  mp_pbRemove->setIcon( IconManager::instance().icon( "delete.png" ) );
-  mp_pbBuzz->setIcon( IconManager::instance().icon( "bell.png" ) );
-  mp_pbHelp->setIcon( IconManager::instance().icon( "help.png" ) );
+  ShadowDialogStyle::apply( this );
 
   connect( mp_pbChat, SIGNAL( clicked() ), this, SLOT( showPrivateChat() ) );
   connect( mp_pbFile, SIGNAL( clicked() ), this, SLOT( sendFile() ) );
@@ -83,8 +141,8 @@ void GuiVCard::setVCard( const User& u, VNumber chat_id, bool core_is_connected 
   m_userId = u.id();
   m_chatId = chat_id;
   QString user_path = u.isStatusConnected() ? QString( "%1: <b>%2</b>&nbsp;&nbsp;&nbsp;%3: <b>%4</b>" )
-                                                .arg( "IP Address" ).arg( u.networkAddress().hostAddress().toString() )
-                                                .arg( "Port" ).arg( u.networkAddress().hostPort() )
+                                                .arg( QStringLiteral( "内网地址" ) ).arg( u.networkAddress().hostAddress().toString() )
+                                                .arg( QStringLiteral( "端口" ) ).arg( u.networkAddress().hostPort() )
                                             : Bee::replaceHtmlSpecialCharacters( u.path() );
   mp_lPath->setText( user_path );
   m_userColor = u.color();
@@ -97,10 +155,10 @@ void GuiVCard::setVCard( const User& u, VNumber chat_id, bool core_is_connected 
     name_txt.append( QString( " %1" ).arg( tr( "from %1" ).arg( u.localHostName().toLower() ) ) );
   if( !u.domainName().isEmpty() )
     name_txt.append( QString( ".%1" ).arg( u.domainName().toLower() ) );
-  mp_lName->setText( name_txt );
+  mp_lName->setText( Bee::replaceHtmlSpecialCharacters( u.name() ) );
 
   if( !u.statusDescription().isEmpty() )
-    mp_lStatusDescription->setText( QString( "<i>%1</i>" ).arg( Bee::replaceHtmlSpecialCharacters( u.statusDescription() ) ) );
+    mp_lStatusDescription->setText( Bee::replaceHtmlSpecialCharacters( u.statusDescription() ) );
   else
     mp_lStatusDescription->hide();
 
@@ -116,21 +174,22 @@ void GuiVCard::setVCard( const User& u, VNumber chat_id, bool core_is_connected 
     mp_lBirthday->hide();
 
   if( !u.vCard().email().isEmpty() )
-    mp_lEmail->setText( u.vCard().email() );
+    mp_lEmail->setText( QStringLiteral("邮箱　")+u.vCard().email() );
   else
     mp_lEmail->hide();
 
-  mp_lPhoto->setPixmap( Bee::avatarForUser( u, QSize( 96, 96 ), true ) );
+  const QPixmap original=u.vCard().photo().isNull()?Bee::avatarForUser(u,QSize(96,96),true):u.vCard().photo();
+  QPixmap rounded(96,96);rounded.fill(Qt::transparent);QPainter portrait(&rounded);portrait.setRenderHint(QPainter::Antialiasing);QPainterPath circle;circle.addEllipse(QRectF(0,0,96,96));portrait.setClipPath(circle);portrait.drawPixmap(0,0,original.scaled(96,96,Qt::KeepAspectRatioByExpanding,Qt::SmoothTransformation));portrait.end();mp_lPhoto->setPixmap(rounded);
 
   mp_lPhoto->setToolTip( Bee::toolTipForUser( u, false ) );
 
   if( !u.vCard().phoneNumber().isEmpty() )
-    mp_lPhone->setText( u.vCard().phoneNumber() );
+    mp_lPhone->setText( QStringLiteral("电话　")+u.vCard().phoneNumber() );
   else
     mp_lPhone->hide();
 
   if( !u.vCard().roomLocation().isEmpty() )
-    mp_lRoom->setText( u.vCard().roomLocation() );
+    mp_lRoom->setText( QStringLiteral("位置　")+u.vCard().roomLocation() );
   else
     mp_lRoom->hide();
 
@@ -148,7 +207,8 @@ void GuiVCard::setVCard( const User& u, VNumber chat_id, bool core_is_connected 
     workgroups_txt = tr( "none" );
     mp_lWorkgroups->setToolTip( "" );
   }
-  mp_lWorkgroups->setText( QString( "<b>%1</b>: %2" ).arg( tr( "Workgroups" ), workgroups_txt ) );
+  mp_lWorkgroups->setText( QString( "<b>%1</b>: %2" ).arg( QStringLiteral( "工作组" ), workgroups_txt ) );
+  mp_lWorkgroups->setVisible(!u.workgroups().isEmpty());
 
   if( !u.vCard().info().isEmpty() )
     mp_teInfo->setPlainText( u.vCard().info() );
@@ -201,12 +261,12 @@ void GuiVCard::setVCard( const User& u, VNumber chat_id, bool core_is_connected 
       mp_pbFavorite->show();
       if( u.isFavorite() )
       {
-        mp_pbFavorite->setIcon( IconManager::instance().icon( "star.png" ) );
+        mp_pbFavorite->setText( QStringLiteral( "取消收藏" ) );
         mp_pbFavorite->setToolTip( tr( "Remove from favorites" ) );
       }
       else
       {
-        mp_pbFavorite->setIcon( IconManager::instance().icon( "star-bn.png" ) );
+        mp_pbFavorite->setText( QStringLiteral( "收藏同事" ) );
         mp_pbFavorite->setToolTip( tr( "Add to favorites" ) );
       }
     }

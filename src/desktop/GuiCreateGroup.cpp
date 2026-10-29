@@ -26,6 +26,8 @@
 #include "GuiCreateGroup.h"
 #include "IconManager.h"
 #include "Settings.h"
+#include "ShadowDialogStyle.h"
+#include "ShadowStyle.h"
 #include "UserManager.h"
 
 
@@ -34,19 +36,42 @@ GuiCreateGroup::GuiCreateGroup( QWidget *parent )
 {
   setupUi( this );
   setObjectName( "GuiCreateGroup" );
+  resize( 520, 540 );
+  setMinimumSize( 480, 440 );
+  layout()->setContentsMargins( 24, 24, 24, 24 );
+  layout()->setSpacing( 14 );
+  mp_labelName->setText( QStringLiteral( "群聊名称" ) );
+  mp_labelName->setProperty( "role", "title" );
+  mp_labelText->setText( QStringLiteral( "选择同事加入群聊" ) );
+  mp_labelText->setProperty( "role", "hint" );
+  mp_leName->setPlaceholderText( QStringLiteral( "例如：美术项目组" ) );
+  mp_leName->setMinimumHeight( 36 );
+  mp_twUsers->setStyleSheet( QStringLiteral( "QTreeWidget { border: 1px solid #E3E8F0; border-radius: 8px; background: white; alternate-background-color: #F8FAFD; } QTreeWidget::item { padding: 10px 8px; min-height: 22px; }" ) );
+  mp_pbOk->setProperty( "role", "primary" );
+  mp_pbOk->setText( QStringLiteral( "创建群聊" ) );
+  mp_pbCancel->setText( QStringLiteral( "取消" ) );
+  QGridLayout* form=qobject_cast<QGridLayout*>(layout());
+  form->removeWidget(mp_pbCancel);form->removeWidget(mp_pbOk);
+  form->addWidget(mp_pbCancel,4,2);form->addWidget(mp_pbOk,4,3);
+  mp_pbCancel->setAutoDefault(false);
+  mp_pbOk->setDefault(true);
+  mp_pbLeave->setText( QStringLiteral( "退出群聊" ) );
+  mp_pbLeave->setMinimumWidth( 0 );
+  ShadowDialogStyle::apply( this );
   Bee::removeContextHelpButton( this );
   setWindowIcon( IconManager::instance().icon( "group-create.png" ) );
 
   QStringList labels;
-  labels << tr( "Users" );
+  labels << QStringLiteral( "同事" );
   mp_twUsers->setHeaderLabels( labels );
 
   mp_twUsers->sortItems( 0, Qt::AscendingOrder );
   mp_twUsers->setAlternatingRowColors( true );
   mp_twUsers->setRootIsDecorated( false );
   mp_twUsers->setSelectionMode( QAbstractItemView::MultiSelection );
+  mp_twUsers->setIconSize(QSize(32,32));
 
-  mp_pbLeave->setIcon( IconManager::instance().icon( "group-remove" ) );
+  mp_pbLeave->setIcon( QIcon() );
 
   connect( mp_pbOk, SIGNAL( clicked() ), this, SLOT( checkAndClose() ) );
   connect( mp_pbCancel, SIGNAL( clicked() ), this, SLOT( reject() ) );
@@ -60,16 +85,22 @@ void GuiCreateGroup::init( const Group& g )
 
 void GuiCreateGroup::loadData()
 {
+  const bool owner = !m_group.isValid() || m_group.ownerHash() == Settings::instance().localUser().hash();
+  mp_leName->setReadOnly( !owner );
   if( m_group.isValid() )
   {
     mp_leName->setText( m_group.name() );
-    setWindowTitle( QString( "%1 - %2" ).arg( tr( "Edit group chat" ) ).arg( Settings::instance().programName() ) );
-    mp_pbLeave->setEnabled( true );
+    setWindowTitle( QStringLiteral( "群聊设置 · 影聊" ) );
+    mp_pbOk->setText( QStringLiteral( "保存" ) );
+    mp_pbLeave->show();
+    mp_pbLeave->setEnabled( !owner || m_group.usersId().size() <= 1 );
   }
   else
   {
     mp_leName->setText( "" );
-    setWindowTitle( QString( "%1 - %2" ).arg( tr( "Create new group chat" ) ).arg( Settings::instance().programName() ) );
+    setWindowTitle( QStringLiteral( "创建群聊 · 影聊" ) );
+    mp_pbOk->setText( QStringLiteral( "创建群聊" ) );
+    mp_pbLeave->hide();
     mp_pbLeave->setEnabled( false );
   }
 
@@ -80,7 +111,7 @@ void GuiCreateGroup::loadData()
   foreach( User u, UserManager::instance().userList().toList() )
   {
     item = new QTreeWidgetItem( mp_twUsers );
-    item->setIcon( 0, Bee::userStatusIcon( u.status() ) );
+    item->setIcon( 0, Bee::avatarForUser( u, QSize(32,32), true ) );
     item->setText( 0, u.name() );
     item->setData( 0, Qt::UserRole+1, u.id() );
     item->setFlags( item->flags() | Qt::ItemIsUserCheckable );
@@ -89,7 +120,7 @@ void GuiCreateGroup::loadData()
     if( m_group.hasUser( u.id() ) )
     {
       item->setCheckState( 0, Qt::Checked );
-      item->setDisabled( !Settings::instance().canRemoveMembersFromGroup() );
+      item->setDisabled( !owner || u.isLocal() || !Settings::instance().canRemoveMembersFromGroup() );
     }
     else
     {

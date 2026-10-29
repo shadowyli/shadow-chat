@@ -29,6 +29,8 @@
 #include "Protocol.h"
 #include "Settings.h"
 #include "UserManager.h"
+#include <QJsonObject>
+#include <QJsonDocument>
 
 
 static QString textImportantPrefix()
@@ -216,6 +218,7 @@ QString GuiChatMessage::chatToHtml( const Chat& c, bool skip_file_transfers, boo
 
   foreach( ChatMessage cm, c.messages() )
   {
+    const int recordStart = html_text.size();
     if( cm.isFromSystem() )
     {
       if( cm.isFileTransfer() || cm.isImagePreview() )
@@ -245,6 +248,20 @@ QString GuiChatMessage::chatToHtml( const Chat& c, bool skip_file_transfers, boo
           chat_users.set( u );
       }
       html_text += formatMessage( u, cm, last_message_user_id, force_timestamp || Settings::instance().chatShowMessageTimestamp(), force_datestamp, skip_system_message, false, true, use_chat_compact );
+    }
+    if(html_text.size() > recordStart) {
+      QJsonObject metadata;
+      QString sender=cm.isFromSystem() ? QString() : Bee::userNameToShow(u, true);
+      if(cm.isFromSystem()) {
+        const QRegularExpressionMatch hint=QRegularExpression("<!--shadow-sender:([A-Za-z0-9+/=]+)-->").match(cm.message());
+        if(hint.hasMatch())sender=QString::fromUtf8(QByteArray::fromBase64(hint.captured(1).toLatin1()));
+      }
+      metadata.insert("sender", sender);
+      const QRegularExpressionMatch album=QRegularExpression("<!--shadow-album:([{}A-Za-z0-9-]+)-->").match(cm.message());
+      if(album.hasMatch())metadata.insert("album",album.captured(1));
+      metadata.insert("time", cm.timestamp().toString(Qt::ISODate));
+      metadata.insert("type", static_cast<int>(cm.type()));
+      html_text.insert(recordStart, QString("<!--shadow-record:%1-->").arg(QString::fromLatin1(QJsonDocument(metadata).toJson(QJsonDocument::Compact).toBase64())));
     }
     last_message_user_id = cm.isImportant() ? ID_IMPORTANT_MESSAGE : cm.userId();
   }

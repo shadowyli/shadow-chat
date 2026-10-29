@@ -298,6 +298,13 @@ void BeeApplication::checkIdle()
 
 void BeeApplication::cleanUp()
 {
+  // Release the single-instance endpoint before a logout-triggered restart.
+  if( mp_localServer )
+  {
+    mp_localServer->close();
+    delete mp_localServer;
+    mp_localServer = Q_NULLPTR;
+  }
   if( mp_tickManager )
   {
     QMetaObject::invokeMethod( mp_tickManager, "stopTicks", Qt::QueuedConnection );

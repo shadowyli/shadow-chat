@@ -1,5 +1,11 @@
 
 INCLUDEPATH += $$PWD
+HEADERS += desktop/ShadowUpdateGate.h
+SOURCES += desktop/ShadowUpdateGate.cpp
+HEADERS += desktop/ShadowLocalAccounts.h
+HEADERS += desktop/GuiStickerPicker.h
+SOURCES += desktop/GuiStickerPicker.cpp
+SOURCES += desktop/ShadowLocalAccounts.cpp
 
 HEADERS += desktop/BeeApplication.h \
   desktop/GuiAddUser.h \

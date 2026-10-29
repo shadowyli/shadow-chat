@@ -24,18 +24,22 @@
 #ifndef BEEBEEP_UPDATER_H
 #define BEEBEEP_UPDATER_H
 
-#include "Config.h"
+#include <QtCore>
 
 class Updater : public QObject
 {
   Q_OBJECT
 
 public:
-  explicit Updater( QObject *parent = Q_NULLPTR );
+  explicit Updater( QObject *parent = Q_NULLPTR, const QUrl& manifest_url = QUrl() );
 
   inline const QString& versionAvailable() const;
   inline const QString& downloadUrl() const;
   inline const QString& news() const;
+  bool manifestValid() const { return m_manifestValid; }
+  QString errorString() const { return m_error; }
+  bool allowsVersion( const QString& current ) const;
+  static QUrl productionManifestUrl();
 
 signals:
   void newVersionAvailable( const QString& );
@@ -51,6 +55,10 @@ private:
   QString m_versionAvailable;
   QString m_downloadUrl;
   QString m_news;
+  QUrl m_manifestUrl;
+  bool m_manifestValid = false;
+  bool m_checking = false;
+  QString m_error;
 
 };
 

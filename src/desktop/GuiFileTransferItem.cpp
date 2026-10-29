@@ -39,7 +39,7 @@ GuiFileTransferItem::GuiFileTransferItem( QTreeWidgetItem* parent )
 
 QIcon GuiFileTransferItem::defaultIcon() const
 {
-  return m_fileInfo.isDownload() ? IconManager::instance().icon( "download.png" ) : IconManager::instance().icon( "upload.png" );
+  return QIcon();
 }
 
 void GuiFileTransferItem::init( VNumber peer_id, const User& u, const FileInfo& fi )
@@ -166,7 +166,15 @@ void GuiFileTransferItem::update()
   }
 
   setToolTip( ColumnCancel, action_tip );
-  setIcon( ColumnCancel, icon );
+  setIcon( ColumnCancel, QIcon() );
+  const QString actionText = m_transferState == FileTransferPeer::Transferring ? QStringLiteral("取消") :
+    m_transferState == FileTransferPeer::Completed ? QStringLiteral("完成") :
+    m_transferState == FileTransferPeer::Error ? QStringLiteral("失败") :
+    m_transferState == FileTransferPeer::Canceled ? QStringLiteral("已取消") :
+    m_transferState == FileTransferPeer::Paused ? QStringLiteral("重试") :
+    m_transferState == FileTransferPeer::Queue ? QStringLiteral("排队") :
+    m_transferState == FileTransferPeer::Starting ? QStringLiteral("开始") : QStringLiteral("等待");
+  setText(ColumnCancel,actionText);
   setText( ColumnSort, sort_string );
 }
 

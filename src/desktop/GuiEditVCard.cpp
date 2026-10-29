@@ -28,20 +28,30 @@
 #include "IconManager.h"
 #include "Settings.h"
 #include "UserManager.h"
+#include "ShadowDialogStyle.h"
 
 
 GuiEditVCard::GuiEditVCard( QWidget *parent )
-  : QDialog( parent ), m_vCard(), m_userColor( "#000000" ), m_regenerateUserHash( false )
+  : QDialog( parent ), m_vCard(), m_userColor( "#000000" ), m_regenerateUserHash( false ), m_profilePages( Q_NULLPTR )
 {
   setupUi( this );
   setObjectName( "GuiEditVCard" );
-  setWindowTitle( tr( "Edit your profile" ) + QString( " - %1" ).arg( Settings::instance().programName() ) );
+  setWindowTitle( QStringLiteral( "我的资料 · 影聊" ) );
   setWindowIcon( IconManager::instance().icon( "profile-edit.png" ) );
   Bee::removeContextHelpButton( this );
 
-  mp_pbChangePhoto->setIcon( IconManager::instance().icon( "add.png" ) );
-  mp_pbRemovePhoto->setIcon( IconManager::instance().icon( "delete.png" ) );
-  mp_pbColor->setIcon( IconManager::instance().icon( "font-color.png" ) );
+  mp_lTitle->setProperty( "role", "title" );
+  mp_lIdentity->setProperty( "role", "hint" );
+  mp_lEmailHint->setProperty( "role", "hint" );
+  mp_pbOk->setProperty( "role", "primary" );
+  ShadowDialogStyle::apply( this );
+  setMinimumWidth( 560 );
+  mp_advanced->hide();
+  connect( mp_pbAdvanced, &QPushButton::toggled, this, [this]( bool expanded ) {
+    mp_advanced->setVisible( expanded );
+    mp_pbAdvanced->setText( expanded ? QStringLiteral( "收起更多资料 ▴" ) : QStringLiteral( "更多资料与设置 ▾" ) );
+    resizeProfilePage();
+  } );
   mp_deBirthday->setToolTip( tr( "If you don't want to show the year to other users use 1900. To remove your birthday use 01/01/1900" ) );
 
   connect( mp_pbOk, SIGNAL( clicked() ), this, SLOT( onOkClicked() ) );
@@ -50,13 +60,73 @@ GuiEditVCard::GuiEditVCard( QWidget *parent )
   connect( mp_pbRemovePhoto, SIGNAL( clicked() ), this, SLOT( removePhoto() ) );
   connect( mp_pbColor, SIGNAL( clicked() ), this, SLOT( changeUserColor() ) );
   connect( mp_pbRegenerateHash, SIGNAL( clicked() ), this, SLOT( regenerateHash() ) );
+
+  // The initial view is a profile card. Editing is an explicit second step;
+  // closing the card never applies changes to the current account.
+  QWidget* editor = new QWidget;
+  editor->setObjectName( "profileEditor" );
+  editor->setProperty( "shadowDialog", true );
+  editor->setLayout( mainLayout );
+  m_profilePages = new QStackedWidget( this );
+  QWidget* card = new QWidget;
+  card->setObjectName( "myProfileCard" );
+  QVBoxLayout* cardLayout = new QVBoxLayout( card );
+  cardLayout->setContentsMargins( 24, 24, 24, 20 ); cardLayout->setSpacing( 22 );
+  QFrame* header = new QFrame;
+  header->setObjectName( "profileCardHeader" );
+  header->setStyleSheet( "QFrame#profileCardHeader{background:#eef4ff;border-radius:12px;}" );
+  QHBoxLayout* headerLayout = new QHBoxLayout( header );
+  headerLayout->setContentsMargins( 22, 24, 22, 24 ); headerLayout->setSpacing( 18 );
+  m_cardPhoto = new QLabel; m_cardPhoto->setObjectName( "profileCardAvatar" ); m_cardPhoto->setFixedSize( 80, 80 );
+  headerLayout->addWidget( m_cardPhoto );
+  QVBoxLayout* identity = new QVBoxLayout;
+  QLabel* ownLabel = new QLabel( QStringLiteral( "我的资料" ) ); ownLabel->setProperty( "role", "hint" );
+  m_cardNickname = new QLabel; m_cardNickname->setObjectName( "profileCardNickname" ); m_cardNickname->setProperty( "role", "title" );
+  m_cardAccount = new QLabel; m_cardAccount->setObjectName( "profileCardAccount" ); m_cardAccount->setProperty( "role", "hint" ); m_cardAccount->setWordWrap( true );
+  identity->addWidget( ownLabel ); identity->addWidget( m_cardNickname ); identity->addWidget( m_cardAccount );
+  headerLayout->addLayout( identity, 1 );
+  QPushButton* edit = new QPushButton( QStringLiteral( "编辑资料" ) ); edit->setObjectName( "editMyProfile" ); edit->setAutoDefault( false );
+  headerLayout->addWidget( edit, 0, Qt::AlignTop );
+  cardLayout->addWidget( header );
+  QLabel* infoTitle = new QLabel( QStringLiteral( "个人简介" ) ); infoTitle->setProperty( "role", "hint" );
+  m_cardInfo = new QLabel; m_cardInfo->setObjectName( "profileCardInfo" ); m_cardInfo->setWordWrap( true ); m_cardInfo->setTextInteractionFlags( Qt::TextSelectableByMouse );
+  cardLayout->addWidget( infoTitle ); cardLayout->addWidget( m_cardInfo );
+  QFormLayout* details = new QFormLayout; details->setHorizontalSpacing( 24 ); details->setVerticalSpacing( 18 );
+  m_cardEmail = new QLabel; m_cardEmail->setWordWrap( true ); m_cardEmail->setTextInteractionFlags( Qt::TextSelectableByMouse );
+  m_cardPhone = new QLabel; m_cardLocation = new QLabel;
+  details->addRow( QStringLiteral( "邮箱" ), m_cardEmail ); details->addRow( QStringLiteral( "电话" ), m_cardPhone ); details->addRow( QStringLiteral( "位置" ), m_cardLocation );
+  cardLayout->addLayout( details ); cardLayout->addStretch();
+  QPushButton* close = new QPushButton( QStringLiteral( "完成" ) ); close->setObjectName( "closeMyProfile" ); close->setAutoDefault( false );
+  QHBoxLayout* footer = new QHBoxLayout; footer->addStretch(); footer->addWidget( close ); cardLayout->addLayout( footer );
+  QScrollArea* editorScroll = new QScrollArea; editorScroll->setObjectName( "profileEditorScroll" );
+  editorScroll->setWidget( editor ); editorScroll->setWidgetResizable( true ); editorScroll->setFrameShape( QFrame::NoFrame );
+  editorScroll->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
+  m_profilePages->addWidget( card ); m_profilePages->addWidget( editorScroll );
+  QVBoxLayout* outer = new QVBoxLayout( this ); outer->setContentsMargins( 0, 0, 0, 0 ); outer->addWidget( m_profilePages );
+  connect( edit, &QPushButton::clicked, this, [this, editorScroll]() { m_profilePages->setCurrentWidget( editorScroll ); resizeProfilePage(); mp_leNickname->setFocus(); } );
+  connect( close, &QPushButton::clicked, this, &QDialog::reject );
+  setStyleSheet( styleSheet() + QStringLiteral( "QWidget{font-family:'Microsoft YaHei UI';font-size:13px;} QLabel[role=title]{font-size:22px;} QLabel[role=hint]{font-size:12px;}" ) );
+}
+
+void GuiEditVCard::resizeProfilePage()
+{
+  if( !m_profilePages ) return;
+  QWidget* page = m_profilePages->currentWidget();
+  QScrollArea* scroll = qobject_cast<QScrollArea*>( page );
+  const int contentHeight = scroll ? scroll->widget()->sizeHint().height() : page->sizeHint().height();
+  const QScreen* display = QGuiApplication::primaryScreen();
+  const int available = display ? qMax( 360, display->availableGeometry().height() - 100 ) : 700;
+  m_profilePages->setFixedHeight( qMin( contentHeight, available ) );
+  adjustSize();
 }
 
 QString GuiEditVCard::currentAvatarName() const
 {
   QString current_avatar_name = "";
   if( Settings::instance().useUserFullName() )
-    current_avatar_name = QString( "%1 %2" ).arg( mp_leFirstName->text().simplified() ).arg( mp_leLastName->text().simplified() ).trimmed();
+    current_avatar_name = Settings::instance().useUserFirstNameFirstInFullName() ?
+      QString( "%1 %2" ).arg( mp_leFirstName->text().simplified(), mp_leLastName->text().simplified() ).trimmed() :
+      QString( "%1 %2" ).arg( mp_leLastName->text().simplified(), mp_leFirstName->text().simplified() ).trimmed();
 
   if( current_avatar_name.isEmpty() )
     current_avatar_name = mp_leNickname->text().simplified();
@@ -79,9 +149,31 @@ void GuiEditVCard::setUserColor( const QString& new_value )
 void GuiEditVCard::setUser( const User& u )
 {
   m_vCard = u.vCard();
+  m_accountEmail = u.accountName().trimmed();
   setUserColor( u.color() );
   m_regenerateUserHash = false;
   loadVCard();
+  mp_lIdentity->setText( QStringLiteral( "正在编辑自己的资料，同事会看到你的昵称和头像。" ) );
+  mp_leEmail->setReadOnly( !m_accountEmail.isEmpty() );
+  if( !m_accountEmail.isEmpty() ) mp_leEmail->setText( m_accountEmail );
+  mp_leEmail->setToolTip( QStringLiteral( "切换账号请使用主菜单的退出登录；修改资料不会更换账号或聊天记录。" ) );
+  m_cardNickname->setText( m_vCard.nickName().isEmpty() ? u.name() : m_vCard.nickName() );
+  m_cardAccount->setText( QStringLiteral( "当前登录 · %1" ).arg( m_accountEmail.isEmpty() ? m_vCard.email() : m_accountEmail ) );
+  m_cardEmail->setText( m_accountEmail.isEmpty() ? m_vCard.email() : m_accountEmail );
+  m_cardInfo->setText( m_vCard.info().isEmpty() ? QStringLiteral( "还没有填写个人简介" ) : m_vCard.info() );
+  m_cardPhone->setText( m_vCard.phoneNumber().isEmpty() ? QStringLiteral( "未填写" ) : m_vCard.phoneNumber() );
+  m_cardLocation->setText( m_vCard.roomLocation().isEmpty() ? QStringLiteral( "未填写" ) : m_vCard.roomLocation() );
+  QPixmap source = m_vCard.photo().isNull() ? Avatar::create( currentAvatarName(), m_userColor, QSize( 80, 80 ) ) : m_vCard.photo();
+  QPixmap circle( 80, 80 ); circle.fill( Qt::transparent );
+  QPainter painter( &circle ); painter.setRenderHint( QPainter::Antialiasing );
+  QPainterPath clip; clip.addEllipse( 0, 0, 80, 80 ); painter.setClipPath( clip );
+  QPixmap scaled = source.scaled( 80, 80, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation );
+  painter.drawPixmap( (80 - scaled.width()) / 2, (80 - scaled.height()) / 2, scaled ); painter.end();
+  m_cardPhoto->setPixmap( circle );
+  foreach( QLabel* label, QList<QLabel*>() << m_cardNickname << m_cardAccount << m_cardEmail << m_cardInfo << m_cardPhone << m_cardLocation )
+    label->setTextFormat( Qt::PlainText );
+  m_profilePages->setCurrentIndex( 0 );
+  resizeProfilePage();
 }
 
 void GuiEditVCard::loadVCard()
@@ -112,7 +204,7 @@ void GuiEditVCard::loadVCard()
   if( m_vCard.photo().isNull() )
     mp_lPhoto->setPixmap( Avatar::create( currentAvatarName(), m_userColor, QSize( 96, 96 ) ) );
   else
-    mp_lPhoto->setPixmap( m_vCard.photo() );
+    mp_lPhoto->setPixmap( m_vCard.photo().scaled( 96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation ) );
 
   mp_lePhone->setText( m_vCard.phoneNumber() );
 
@@ -212,7 +304,7 @@ void GuiEditVCard::saveVCard()
     m_vCard.setBirthday( mp_deBirthday->date() );
   else
     m_vCard.setBirthday( QDate() );
-  m_vCard.setEmail( mp_leEmail->text().simplified() );
+  if( m_accountEmail.isEmpty() ) m_vCard.setEmail( mp_leEmail->text().simplified() );
   m_vCard.setPhoneNumber( mp_lePhone->text().simplified() );
   m_vCard.setRoomLocation( mp_leRoom->text().simplified() );
   m_vCard.setInfo( mp_teInfo->toPlainText().trimmed() );

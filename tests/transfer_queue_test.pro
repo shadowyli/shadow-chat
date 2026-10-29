@@ -1,0 +1,9 @@
+QT = core
+CONFIG += console c++11 release
+CONFIG -= app_bundle debug_and_release
+TEMPLATE = app
+TARGET = transfer_queue_test
+INCLUDEPATH += ../src/core
+SOURCES += transfer_queue_test.cpp ../src/core/ShadowTransferQueue.cpp
+HEADERS += ../src/core/ShadowTransferQueue.h
+win32-msvc*: QMAKE_CXXFLAGS += /utf-8

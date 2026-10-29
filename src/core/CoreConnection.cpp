@@ -87,6 +87,8 @@ Connection* Core::createConnection()
 
 void Core::newPeerFound( const QHostAddress& sender_ip, int sender_port )
 {
+  if( m_updateBlocked )
+    return;
   if( !isConnected() )
     return;
 
@@ -136,6 +138,13 @@ void Core::newPeerFound( const QHostAddress& sender_ip, int sender_port )
 
 void Core::checkNewConnection( qintptr socket_descriptor )
 {
+  if( m_updateBlocked )
+  {
+    QTcpSocket rejected;
+    if( rejected.setSocketDescriptor( socket_descriptor ) )
+      rejected.abort();
+    return;
+  }
   Connection *c = createConnection();
   c->initSocket( socket_descriptor, mp_listener->serverPort() );
   qDebug() << "New connection to port" << mp_listener->serverPort() << "from" << qPrintable( c->networkAddress().toString() );
@@ -165,6 +174,11 @@ void Core::setupNewConnection( Connection *c )
 
 void Core::addConnectionReadyForUse( Connection* c, const User& u )
 {
+  if( m_updateBlocked )
+  {
+    closeConnection( c );
+    return;
+  }
 #ifdef BEEBEEP_DEBUG
   qDebug() << "Connection from" << qPrintable( c->networkAddress().toString() ) << "is ready for use by" << qPrintable( u.path() );
 #endif
@@ -241,6 +255,8 @@ void Core::closeConnection( Connection *c )
 
 void Core::checkUserAuthentication( const QByteArray& auth_byte_array )
 {
+  if( m_updateBlocked )
+    return;
   Connection* c = qobject_cast<Connection*>( sender() );
   if( !c )
   {
@@ -273,6 +289,13 @@ void Core::checkUserAuthentication( const QByteArray& auth_byte_array )
   else
     qDebug() << qPrintable( u.path() ) << "has completed the authentication from peer" << qPrintable( c->networkAddress().toString() );
 
+  const QString local_account_email = Settings::instance().localUser().accountName().trimmed().toLower();
+  if( local_account_email.contains( QLatin1Char( '@' ) ) && u.accountName().trimmed().toLower() == local_account_email )
+  {
+    const QString duplicate_notice = QString::fromUtf8( "发现另一台设备正在使用同一邮箱账号。两台电脑的聊天记录不会自动同步。" );
+    showMessage( duplicate_notice, 15000 );
+    dispatchSystemMessage( ID_DEFAULT_CHAT, ID_LOCAL_USER, duplicate_notice, DispatchToChat, ChatMessage::Connection, false );
+  }
   User user_found = Protocol::instance().recognizeUser( u, Settings::instance().userRecognitionMethod() );
   bool user_path_changed = false;
 
