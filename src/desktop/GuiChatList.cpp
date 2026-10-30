@@ -31,6 +31,7 @@
 #include "ShadowConversationPreferences.h"
 #include "ShadowConversationDelegate.h"
 #include <QDataStream>
+#include <QScrollArea>
 
 
 GuiChatList::GuiChatList( QWidget* parent )
@@ -67,6 +68,7 @@ GuiChatList::GuiChatList( QWidget* parent )
   setStyleSheet( QStringLiteral(
     "QWidget#GuiChatList{background:#F2F7FA;border:0;}"
     "QWidget#ShadowQuickArea{background:#F2F7FA;border:0;}"
+    "QWidget#ShadowQuickItems{background:#F2F7FA;border:0;}"
     "QToolButton[quickChat=true]{background:transparent;border:1px solid transparent;border-radius:7px;padding:3px 0;color:#526174;font-size:11px;}"
     "QToolButton[quickChat=true]:hover{background:#E5EEF9;}"
     "QToolButton[quickChat=true]:focus{border-color:#9BBCEB;}"
@@ -79,23 +81,34 @@ GuiChatList::GuiChatList( QWidget* parent )
     "QLabel#ShadowConversationEmpty{color:#8A96A4;background:#F2F7FA;padding:24px;font-size:12px;}" ) );
   mp_quickArea = new QWidget( this );
   mp_quickArea->setObjectName( QStringLiteral( "ShadowQuickArea" ) );
+  mp_quickArea->setAccessibleName( QStringLiteral( "置顶会话" ) );
   mp_quickArea->setContextMenuPolicy( Qt::PreventContextMenu );
   QVBoxLayout* quickLayout = new QVBoxLayout( mp_quickArea );
   quickLayout->setContentsMargins( 6, 8, 6, 8 );
   quickLayout->setSpacing( 3 );
   QWidget* quickItems = new QWidget( mp_quickArea );
   quickItems->setObjectName( QStringLiteral( "ShadowQuickItems" ) );
+  quickItems->setAttribute( Qt::WA_StyledBackground );
   mp_quickGrid = new QGridLayout( quickItems );
   mp_quickGrid->setContentsMargins( 0, 0, 0, 0 );
   mp_quickGrid->setHorizontalSpacing( 2 );
   mp_quickGrid->setVerticalSpacing( 4 );
   for( int column = 0; column < 5; ++column ) mp_quickGrid->setColumnStretch( column, 1 );
-  quickLayout->addWidget( quickItems );
+  mp_quickScroll = new QScrollArea( mp_quickArea );
+  mp_quickScroll->setObjectName( QStringLiteral( "ShadowPinnedScroll" ) );
+  mp_quickScroll->setFrameShape( QFrame::NoFrame );
+  mp_quickScroll->setWidgetResizable( true );
+  mp_quickScroll->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
+  mp_quickScroll->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+  mp_quickScroll->setStyleSheet( QStringLiteral(
+    "QScrollArea#ShadowPinnedScroll,QWidget#qt_scrollarea_viewport{background:#F2F7FA;border:0;}" ) );
+  mp_quickScroll->setWidget( quickItems );
+  quickLayout->addWidget( mp_quickScroll );
   mp_quickToggle = new QToolButton( mp_quickArea );
   mp_quickToggle->setObjectName( QStringLiteral( "ShadowQuickExpand" ) );
   mp_quickToggle->setFixedSize( 70, 17 );
   mp_quickToggle->setText( QStringLiteral( "⌄" ) );
-  mp_quickToggle->setAccessibleName( QStringLiteral( "展开常用会话" ) );
+  mp_quickToggle->setAccessibleName( QStringLiteral( "展开置顶会话" ) );
   connect( mp_quickToggle, &QToolButton::clicked, this, [this]() {
     m_quickExpanded = !m_quickExpanded;
     m_quickSnapshot.clear();
@@ -274,12 +287,15 @@ void GuiChatList::refreshQuickAccess()
   {
     GuiChatItem* item = static_cast<GuiChatItem*>( mp_twChatList->topLevelItem( index ) );
     const Chat chat = ChatManager::instance().chat( item->chatId() );
-    if( chat.isValid() && !chat.isDefault() && !preferences.hidden( chat ) ) chats << item;
+    if( chat.isValid() && !chat.isDefault() && preferences.pinned( chat ) &&
+        !preferences.hidden( chat ) ) chats << item;
   }
+  if( chats.size() <= 10 ) m_quickExpanded = false;
+  mp_quickArea->setVisible( !chats.isEmpty() );
   QByteArray snapshot;
   QDataStream data( &snapshot, QIODevice::WriteOnly );
-  data << m_quickExpanded;
-  const int displayed = qMin( chats.size(), m_quickExpanded ? 24 : 9 );
+  data << m_quickExpanded << chats.size();
+  const int displayed = m_quickExpanded ? chats.size() : qMin( chats.size(), 10 );
   for( int index = 0; index < displayed; ++index )
   {
     const GuiChatItem* item = chats.at( index );
@@ -299,62 +315,46 @@ void GuiChatList::refreshQuickAccess()
     if( item->widget() ) { item->widget()->hide(); item->widget()->deleteLater(); }
     delete item;
   }
-  QPixmap transferIcon( 42, 42 );
-  transferIcon.fill( Qt::transparent );
-  QPainter painter( &transferIcon );
-  painter.setRenderHint( QPainter::Antialiasing );
-  painter.setPen( Qt::NoPen );
-  painter.setBrush( QColor( "#358EFF" ) );
-  painter.drawEllipse( transferIcon.rect().adjusted( 1, 1, -1, -1 ) );
-  painter.setBrush( Qt::white );
-  painter.drawRoundedRect( QRectF( 10, 14, 23, 17 ), 2, 2 );
-  painter.drawRoundedRect( QRectF( 10, 11, 11, 8 ), 2, 2 );
-  painter.setPen( QPen( QColor( "#358EFF" ), 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin ) );
-  painter.drawLine( QPointF( 15, 22 ), QPointF( 27, 22 ) );
-  painter.drawLine( QPointF( 24, 19 ), QPointF( 27, 22 ) );
-  painter.drawLine( QPointF( 27, 22 ), QPointF( 24, 25 ) );
-  painter.end();
-  for( int index = 0; index <= displayed; ++index )
+  for( int index = 0; index < displayed; ++index )
   {
     QToolButton* button = new QToolButton( mp_quickArea );
     button->setProperty( "quickChat", true );
     button->setContextMenuPolicy( Qt::PreventContextMenu );
     button->setIconSize( QSize( 40, 40 ) );
     button->setToolButtonStyle( Qt::ToolButtonTextUnderIcon );
-    button->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+    button->setSizePolicy( QSizePolicy::Ignored, QSizePolicy::Fixed );
     button->setFixedHeight( 68 );
     button->setMinimumWidth( 0 );
-    if( index == 0 )
-    {
-      button->setObjectName( QStringLiteral( "ShadowQuickTransfers" ) );
-      button->setIcon( QIcon( transferIcon ) );
-      button->setText( QStringLiteral( "文件传输" ) );
-      button->setToolTip( QStringLiteral( "查看文件传输进度" ) );
-      button->setAccessibleName( QStringLiteral( "文件传输" ) );
-      connect( button, &QToolButton::clicked, this, &GuiChatList::viewFileTransfersRequest );
-    }
-    else
-    {
-      const GuiChatItem* item = chats.at( index - 1 );
-      const VNumber chatId = item->chatId();
-      const QString name = item->data( 0, GuiChatItem::ChatName ).toString();
-      button->setObjectName( QStringLiteral( "ShadowQuickChat" ) );
-      button->setProperty( "chatId", QVariant::fromValue<qulonglong>( chatId ) );
-      button->setIcon( QIcon( ShadowStyle::avatarPixmap( item->icon( 0 ), QSize( 40, 40 ) ) ) );
-      QFont labelFont = ShadowStyle::applicationFont();
-      labelFont.setPixelSize( 11 );
-      button->setText( QFontMetrics( labelFont ).elidedText( name, Qt::ElideRight, 50 ) );
-      button->setAccessibleName( name );
-      button->setToolTip( name + (item->data( 0, GuiChatItem::ChatPinned ).toBool()
-        ? QStringLiteral( "\n置顶会话" ) : QStringLiteral( "\n最近会话" )) );
-      connect( button, &QToolButton::clicked, this, [this, chatId]() {
-        setActiveChat( chatId );
-        emit chatSelected( chatId );
-      } );
-    }
+    const GuiChatItem* item = chats.at( index );
+    const VNumber chatId = item->chatId();
+    const QString name = item->data( 0, GuiChatItem::ChatName ).toString();
+    button->setObjectName( QStringLiteral( "ShadowQuickChat" ) );
+    button->setProperty( "chatId", QVariant::fromValue<qulonglong>( chatId ) );
+    button->setIcon( QIcon( ShadowStyle::avatarPixmap( item->icon( 0 ), QSize( 40, 40 ) ) ) );
+    QFont labelFont = ShadowStyle::applicationFont();
+    labelFont.setPixelSize( 11 );
+    button->setText( QFontMetrics( labelFont ).elidedText( name, Qt::ElideRight, 50 ) );
+    button->setAccessibleName( name );
+    button->setToolTip( name + QStringLiteral( "\n置顶会话 · 右键取消置顶" ) );
+    button->setContextMenuPolicy( Qt::CustomContextMenu );
+    QMenu* pinMenu = new QMenu( button );
+    QAction* unpin = pinMenu->addAction( QStringLiteral( "取消置顶" ) );
+    connect( unpin, &QAction::triggered, this, [this, chatId]() {
+      m_chatSelected = chatId;
+      togglePinSelected();
+    } );
+    connect( button, &QWidget::customContextMenuRequested, this, [button, pinMenu]( const QPoint& point ) {
+      pinMenu->popup( button->mapToGlobal( point ) );
+    } );
+    connect( button, &QToolButton::clicked, this, [this, chatId]() {
+      setActiveChat( chatId );
+      emit chatSelected( chatId );
+    } );
     mp_quickGrid->addWidget( button, index / 5, index % 5 );
   }
-  mp_quickToggle->setVisible( chats.size() > 9 );
+  const int rows = qMin( 3, (displayed + 4) / 5 );
+  mp_quickScroll->setFixedHeight( rows * 68 + qMax( 0, rows - 1 ) * 4 );
+  mp_quickToggle->setVisible( chats.size() > 10 );
   QPixmap chevron( 18, 12 );
   chevron.fill( Qt::transparent );
   QPainter chevronPainter( &chevron );
@@ -368,7 +368,7 @@ void GuiChatList::refreshQuickAccess()
   mp_quickToggle->setText( QString() );
   mp_quickToggle->setIcon( QIcon( chevron ) );
   mp_quickToggle->setIconSize( chevron.size() );
-  mp_quickToggle->setToolTip( m_quickExpanded ? QStringLiteral( "收起常用会话" ) : QStringLiteral( "展开常用会话" ) );
+  mp_quickToggle->setToolTip( m_quickExpanded ? QStringLiteral( "收起置顶会话" ) : QStringLiteral( "展开置顶会话" ) );
   mp_quickToggle->setAccessibleName( mp_quickToggle->toolTip() );
 }
 

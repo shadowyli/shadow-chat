@@ -1,4 +1,6 @@
 #include "ShadowDialogChrome.h"
+#include "ShadowWindowShape.h"
+#include "ShadowWindowResize.h"
 
 #include <QApplication>
 #include <QCoreApplication>
@@ -10,6 +12,7 @@
 #include <QLabel>
 #include <QLayout>
 #include <QMouseEvent>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPalette>
@@ -28,8 +31,8 @@ namespace
 const char installedProperty[] = "_shadowDialogChromeInstalled";
 const char decoratedProperty[] = "shadowDialogChrome";
 const int headerHeight = 52;
-const int cornerRadius = 12;
-const int shadowPadding = 24;
+const int cornerRadius = ShadowWindowShape::cornerRadius;
+const int shadowPadding = 14;
 
 class DialogShadow final : public QWidget
 {
@@ -48,11 +51,11 @@ protected:
     QPainter painter( this );
     painter.setRenderHint( QPainter::Antialiasing );
     const QRectF surface = QRectF( rect() ).adjusted( shadowPadding, shadowPadding,
-      -shadowPadding, -shadowPadding ).translated( 0, 5 );
-    for( int distance = 20; distance >= 0; --distance )
+      -shadowPadding, -shadowPadding ).translated( 0, 2 );
+    for( int distance = 10; distance >= 0; --distance )
     {
-      const int alpha = qRound( 42.0 * std::exp( -distance * distance / 98.0 ) );
-      painter.setPen( QPen( QColor( 15, 23, 42, alpha ), 2 ) );
+      const int alpha = qRound( 22.0 * std::exp( -distance * distance / 32.0 ) );
+      painter.setPen( QPen( QColor( 15, 23, 42, alpha ), 1 ) );
       painter.setBrush( Qt::NoBrush );
       painter.drawRoundedRect( surface.adjusted( -distance, -distance, distance, distance ),
         cornerRadius + distance, cornerRadius + distance );
@@ -88,7 +91,7 @@ protected:
     painter.setRenderHint( QPainter::Antialiasing );
     const QColor color = isDown() ? QColor( "#B91C1C" ) :
                          underMouse() ? QColor( "#DC2626" ) : QColor( "#64748B" );
-    painter.setPen( QPen( color, 1.6, Qt::SolidLine, Qt::RoundCap ) );
+    painter.setPen( QPen( color, 1.0, Qt::SolidLine, Qt::SquareCap ) );
     const QPointF center( width() / 2.0, height() / 2.0 );
     painter.drawLine( center + QPointF( -4.5, -4.5 ), center + QPointF( 4.5, 4.5 ) );
     painter.drawLine( center + QPointF( 4.5, -4.5 ), center + QPointF( -4.5, 4.5 ) );
@@ -212,6 +215,7 @@ public:
     m_title->installEventFilter( this );
     updateTitle();
     updateMask();
+    new ShadowWindowResize( dialog, m_surface );
   }
 
 protected:
@@ -353,11 +357,7 @@ private:
       m_surface->clearMask();
       return;
     }
-    const qreal radius = qMin( qreal( cornerRadius ),
-                              qMin( m_surface->width(), m_surface->height() ) / 2.0 );
-    QPainterPath path;
-    path.addRoundedRect( QRectF( m_surface->rect() ), radius, radius );
-    const QRegion mask( path.toFillPolygon().toPolygon() );
+    const QRegion mask = ShadowWindowShape::roundedMask( m_surface->size() );
     if( m_surface->mask() != mask )
       m_surface->setMask( mask );
   }
@@ -385,7 +385,8 @@ bool canDecorate( QDialog* dialog )
     return false;
   if( dialog->windowType() != Qt::Dialog && dialog->windowType() != Qt::Window )
     return false;
-  return !dialog->inherits( "QFileDialog" ) && !dialog->inherits( "QColorDialog" ) &&
+  return !dialog->inherits( "QMessageBox" ) &&
+         !dialog->inherits( "QFileDialog" ) && !dialog->inherits( "QColorDialog" ) &&
          !dialog->inherits( "QFontDialog" ) && !dialog->inherits( "QPrintDialog" ) &&
          !dialog->inherits( "QPageSetupDialog" );
 }
@@ -430,4 +431,10 @@ void ShadowDialogChrome::install( QApplication* application )
     if( canDecorate( dialog ) )
       new DialogChrome( dialog );
   }
+}
+
+void ShadowDialogChrome::decorate( QDialog* dialog )
+{
+  if( qApp && qApp->thread() == QThread::currentThread() && canDecorate( dialog ) )
+    new DialogChrome( dialog );
 }

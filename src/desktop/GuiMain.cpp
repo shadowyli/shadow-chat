@@ -81,6 +81,7 @@
 #include "ShadowDirectoryPage.h"
 #include "ShadowSearchPanel.h"
 #include <QSignalBlocker>
+#include <QScreen>
 #include <QPainterPath>
 #include "ShadowDialogStyle.h"
 #include "ShadowWorkspaceArchive.h"
@@ -89,6 +90,9 @@
 #include "ShadowUpdateController.h"
 #include "ShadowMention.h"
 #include "ShadowConversationPreferences.h"
+#include "ShadowWindowShape.h"
+#include "ShadowWindowResize.h"
+#include "ShadowDevPreview.h"
 #include "UserManager.h"
 #ifdef Q_OS_WIN
   #include <qt_windows.h>
@@ -101,6 +105,15 @@
   #include <Windows.h>
 #endif
 
+
+namespace
+{
+QSize preferredMainWindowSize( const QRect& available )
+{
+  return QSize( qMin( 1120, qMax( 720, available.width() - 64 ) ),
+    qMin( 820, qMax( 520, available.height() - 64 ) ) );
+}
+}
 
 GuiMain::GuiMain( QWidget *parent )
  : QMainWindow( parent ), m_floatingChats()
@@ -134,6 +147,8 @@ GuiMain::GuiMain( QWidget *parent )
   mp_modernWorkspace = Q_NULLPTR;
   mp_modernDirectoryPage = Q_NULLPTR;
   mp_modernContentSplitter = Q_NULLPTR;
+  mp_modernHistorySplitter = Q_NULLPTR;
+  mp_modernHistory = Q_NULLPTR;
   mp_modernSearch = Q_NULLPTR;
   mp_modernSearchPanel = Q_NULLPTR;
   mp_modernNetworkStrip = Q_NULLPTR;
@@ -153,7 +168,6 @@ GuiMain::GuiMain( QWidget *parent )
   mp_modernContactsButton = Q_NULLPTR;
   mp_modernPeopleButton = Q_NULLPTR;
   mp_modernGroupsButton = Q_NULLPTR;
-  mp_modernMoreButton = Q_NULLPTR;
   mp_modernBackButton = Q_NULLPTR;
   mp_modernMinimizeButton = Q_NULLPTR;
   mp_modernMaximizeButton = Q_NULLPTR;
@@ -281,7 +295,6 @@ void GuiMain::initShortcuts()
 void GuiMain::setupChatConnections( GuiChat* gui_chat )
 {
   connect( gui_chat, &GuiChat::openSavedChatRequest, this, [this]( VNumber chat_id ) {
-    MessageManager::instance().saveMessages( true );
     showSavedChatSelected( ChatManager::instance().chatName( chat_id ) );
   });
   connect( gui_chat, SIGNAL( newMessage( VNumber, const QString&, bool ) ), this, SLOT( sendMessage( VNumber, const QString&, bool ) ) );
@@ -321,14 +334,13 @@ void GuiMain::checkWindowFlagsAndShow()
 
   Bee::setWindowStaysOnTop( this, Settings::instance().stayOnTop() );
 
-  if( !isVisible() )
-    show();
-
   if( Settings::instance().resetGeometryAtStartup() || Settings::instance().guiGeometry().isEmpty() )
     resetGeometryAndState();
   else
     restoreGeometryAndState();
 
+  applyStartupWindowSize();
+  if( !isVisible() ) show();
   checkViewActions();
 
 #ifdef Q_OS_WIN
@@ -466,8 +478,8 @@ void GuiMain::changeEvent( QEvent* e )
   QMainWindow::changeEvent( e );
   if( e->type() == QEvent::WindowStateChange && mp_modernMaximizeButton )
   {
-    mp_modernMaximizeButton->setIcon( style()->standardIcon( isMaximized()
-      ? QStyle::SP_TitleBarNormalButton : QStyle::SP_TitleBarMaxButton ) );
+    mp_modernMaximizeButton->setIcon( ShadowStyle::windowControlIcon(isMaximized()
+      ? QStringLiteral("restore") : QStringLiteral("maximize")) );
     mp_modernMaximizeButton->setToolTip( isMaximized() ? QStringLiteral( "还原" ) : QStringLiteral( "最大化" ) );
     updateModernWindowCorners();
   }
@@ -480,28 +492,22 @@ bool GuiMain::nativeEvent( const QByteArray& event_type, void* message, long* re
   MSG* native_message = static_cast<MSG*>( message );
   if( native_message && native_message->message == WM_NCHITTEST && mp_modernTitleBar )
   {
-    const QPoint local_position = mapFromGlobal( QCursor::pos() );
+    POINT pointer = { static_cast<short>( LOWORD( native_message->lParam ) ),
+                      static_cast<short>( HIWORD( native_message->lParam ) ) };
+    if( !ScreenToClient( native_message->hwnd, &pointer ) )
+      return QMainWindow::nativeEvent( event_type, message, result );
+    const qreal scale = devicePixelRatioF();
+    const QPoint local_position( qRound( pointer.x / scale ), qRound( pointer.y / scale ) );
     if( mp_modernSearchPanel && mp_modernSearchPanel->isVisible() &&
         mp_modernSearchPanel->rect().contains( mp_modernSearchPanel->mapFrom( this, local_position ) ) )
     {
       *result = HTCLIENT;
       return true;
     }
-    const int resize_border = 7;
-    if( !isMaximized() )
+    if( ShadowWindowResize::edgesAt( this, local_position ) != Qt::Edges() )
     {
-      const bool on_left = local_position.x() < resize_border;
-      const bool on_right = local_position.x() >= width() - resize_border;
-      const bool on_top = local_position.y() < resize_border;
-      const bool on_bottom = local_position.y() >= height() - resize_border;
-      if( on_top && on_left ) { *result = HTTOPLEFT; return true; }
-      if( on_top && on_right ) { *result = HTTOPRIGHT; return true; }
-      if( on_bottom && on_left ) { *result = HTBOTTOMLEFT; return true; }
-      if( on_bottom && on_right ) { *result = HTBOTTOMRIGHT; return true; }
-      if( on_left ) { *result = HTLEFT; return true; }
-      if( on_right ) { *result = HTRIGHT; return true; }
-      if( on_top ) { *result = HTTOP; return true; }
-      if( on_bottom ) { *result = HTBOTTOM; return true; }
+      *result = HTCLIENT;
+      return true;
     }
 
     const QPoint title_position = mp_modernTitleBar->mapFrom( this, local_position );
@@ -524,6 +530,8 @@ bool GuiMain::nativeEvent( const QByteArray& event_type, void* message, long* re
 
 bool GuiMain::eventFilter( QObject* watched, QEvent* event )
 {
+  if(watched==mp_modernHistory&&event->type()==QEvent::Hide)
+    QTimer::singleShot(0,this,[this]() {updateModernResponsiveLayout();});
   if( watched == mp_modernSearch && mp_modernSearchPanel &&
       (event->type() == QEvent::FocusIn || event->type() == QEvent::MouseButtonPress) )
     QTimer::singleShot( 0, this, [this]() {
@@ -1866,15 +1874,13 @@ void GuiMain::createModernShell()
   title_menu->setIconSize( QSize( 20, 20 ) );
   title_menu->setToolTip( QStringLiteral( "更多" ) );
   title_menu->setAccessibleName( QStringLiteral( "更多" ) );
-  connect( title_menu, &QToolButton::clicked, this, [this, title_menu]() {
-    if( mp_modernMoreButton && mp_modernMoreButton->menu() )
-      mp_modernMoreButton->menu()->popup( title_menu->mapToGlobal( QPoint( 0, title_menu->height() ) ) );
-  } );
+  title_menu->setPopupMode( QToolButton::InstantPopup );
+  title_menu->setStyleSheet( QStringLiteral( "QToolButton::menu-indicator{image:none;}" ) );
   title_layout->addWidget( title_menu );
 
   mp_modernMinimizeButton = new QToolButton( mp_modernTitleBar );
   mp_modernMinimizeButton->setObjectName( "ShadowWindowButton" );
-  mp_modernMinimizeButton->setIcon( style()->standardIcon( QStyle::SP_TitleBarMinButton ) );
+  mp_modernMinimizeButton->setIcon( ShadowStyle::windowControlIcon(QStringLiteral("minimize")) );
   mp_modernMinimizeButton->setToolTip( QStringLiteral( "最小化" ) );
   mp_modernMinimizeButton->setAccessibleName( QStringLiteral( "最小化窗口" ) );
   mp_modernMinimizeButton->setFocusPolicy( Qt::NoFocus );
@@ -1883,7 +1889,7 @@ void GuiMain::createModernShell()
 
   mp_modernMaximizeButton = new QToolButton( mp_modernTitleBar );
   mp_modernMaximizeButton->setObjectName( "ShadowWindowButton" );
-  mp_modernMaximizeButton->setIcon( style()->standardIcon( QStyle::SP_TitleBarMaxButton ) );
+  mp_modernMaximizeButton->setIcon( ShadowStyle::windowControlIcon(QStringLiteral("maximize")) );
   mp_modernMaximizeButton->setToolTip( QStringLiteral( "最大化" ) );
   mp_modernMaximizeButton->setAccessibleName( QStringLiteral( "最大化或还原窗口" ) );
   mp_modernMaximizeButton->setFocusPolicy( Qt::NoFocus );
@@ -1894,7 +1900,7 @@ void GuiMain::createModernShell()
 
   mp_modernCloseButton = new QToolButton( mp_modernTitleBar );
   mp_modernCloseButton->setObjectName( "ShadowCloseButton" );
-  mp_modernCloseButton->setIcon( style()->standardIcon( QStyle::SP_TitleBarCloseButton ) );
+  mp_modernCloseButton->setIcon( ShadowStyle::windowControlIcon(QStringLiteral("close")) );
   mp_modernCloseButton->setToolTip( QStringLiteral( "关闭" ) );
   mp_modernCloseButton->setAccessibleName( QStringLiteral( "关闭窗口" ) );
   mp_modernCloseButton->setFocusPolicy( Qt::NoFocus );
@@ -1943,16 +1949,8 @@ void GuiMain::createModernShell()
   navigation_layout->addWidget( mp_modernContactsButton );
   navigation_layout->addStretch( 1 );
 
-  mp_modernMoreButton = new QToolButton( mp_modernNavigationRail );
-  mp_modernMoreButton->setObjectName( "ShadowNavButton" );
-  mp_modernMoreButton->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
-  mp_modernMoreButton->setText( QStringLiteral( "更多" ) );
-  mp_modernMoreButton->setIcon( ShadowStyle::navigationIcon( QStringLiteral( "dots-three-circle" ) ) );
-  mp_modernMoreButton->setIconSize( QSize( 22, 22 ) );
-  mp_modernMoreButton->setToolButtonStyle( Qt::ToolButtonTextUnderIcon );
-  mp_modernMoreButton->setPopupMode( QToolButton::InstantPopup );
-  mp_modernMoreButton->setAccessibleName( QStringLiteral( "更多工具" ) );
-  QMenu* more_menu = new QMenu( mp_modernMoreButton );
+  QMenu* more_menu = new QMenu( title_menu );
+  more_menu->setObjectName( QStringLiteral( "ShadowMainMenu" ) );
   more_menu->setTitle( QStringLiteral( "更多工具" ) );
   more_menu->addAction( ShadowStyle::actionIcon( QStringLiteral( "gear-six" ) ), QStringLiteral( "设置" ), this, SLOT( showShadowSettings() ) );
   more_menu->addAction( ShadowStyle::actionIcon( QStringLiteral( "folder-open" ) ), QStringLiteral( "打开接收文件夹" ), this, SLOT( openDownloadFolder() ) );
@@ -1999,13 +1997,15 @@ void GuiMain::createModernShell()
     else QMessageBox::information( this, QStringLiteral( "团队恢复配置" ), QStringLiteral( "配置只包含加盐密码校验值。将它随安装包部署到程序目录，所有新电脑即可使用同一个恢复密码。" ) );
   } );
   more_menu->addAction( QStringLiteral( "退出账号 / 切换账号…" ), this, [this]() {
-    if( QMessageBox::question( this, QStringLiteral( "退出账号" ), QStringLiteral( "退出将中断当前收发，未完成文件下次需重新传输。\n退出后将显示登录页，是否继续？" ) ) != QMessageBox::Yes ) return;
+    if(!ShadowDialogStyle::confirm(this,QStringLiteral("退出账号"),
+      QStringLiteral("退出将中断当前收发，未完成文件下次需重新传输。\n退出后将显示登录页，是否继续？"),
+      QStringLiteral("退出账号")))return;
     ShadowLocalAccounts().logout();
     qApp->setProperty( "shadowRestartForLogin", true );
     forceShutdown();
   } );
   more_menu->addSeparator();
-  mp_modernMoreButton->setMenu( more_menu );
+  title_menu->setMenu( more_menu );
   mp_actViewFileTransfer->disconnect();
   mp_actViewFileTransfer->setCheckable( false );
   mp_actViewFileTransfer->setText( QStringLiteral( "文件传输" ) );
@@ -2024,7 +2024,6 @@ void GuiMain::createModernShell()
   mp_menuTrayIcon->addSeparator();
   mp_menuTrayIcon->addAction( mp_actAbout );
   mp_menuTrayIcon->addAction( mp_actQuit );
-  navigation_layout->addWidget( mp_modernMoreButton );
 
   mp_modernListPanel = new QWidget( mp_modernRoot );
   mp_modernListPanel->setObjectName( "ShadowListPanel" );
@@ -2163,27 +2162,18 @@ void GuiMain::createModernShell()
   placeholder_icon->setAlignment( Qt::AlignCenter );
   placeholder_icon->setPixmap( QPixmap( QStringLiteral( ":/images/shadowchat/shadowchat-mark-source.png" ) )
                                .scaled( 94, 94, Qt::KeepAspectRatio, Qt::SmoothTransformation ) );
-  QLabel* placeholder_title = new QLabel( QStringLiteral( "局域网里的沟通，从这里开始" ), welcome_card );
-  placeholder_title->setObjectName( "ShadowPlaceholderTitle" );
-  placeholder_title->setAlignment( Qt::AlignCenter );
   QLabel* placeholder_hint = new QLabel( QStringLiteral( "从通讯录找到同事，或搜索一个已有会话" ), welcome_card );
   placeholder_hint->setObjectName( "ShadowPlaceholderHint" );
   placeholder_hint->setAlignment( Qt::AlignCenter );
-  QLabel* privacy_pill = new QLabel( QStringLiteral( "聊天和文件在局域网内直连" ), welcome_card );
-  privacy_pill->setObjectName( "ShadowPrivacyPill" );
-  privacy_pill->setAlignment( Qt::AlignCenter );
-  QPushButton* open_directory = new QPushButton( QStringLiteral( "打开通讯录" ), welcome_card );
+  QPushButton* open_directory = new QPushButton( QStringLiteral( "前往" ), welcome_card );
   open_directory->setObjectName( "ShadowPrimaryButton" );
   open_directory->setAccessibleName( QStringLiteral( "打开通讯录" ) );
   connect( open_directory, SIGNAL( clicked() ), this, SLOT( showModernContacts() ) );
 
   welcome_layout->addWidget( placeholder_icon );
   welcome_layout->addSpacing( 8 );
-  welcome_layout->addWidget( placeholder_title );
   welcome_layout->addWidget( placeholder_hint );
   welcome_layout->addSpacing( 12 );
-  welcome_layout->addWidget( privacy_pill, 0, Qt::AlignHCenter );
-  welcome_layout->addSpacing( 6 );
   welcome_layout->addWidget( open_directory, 0, Qt::AlignHCenter );
   placeholder_layout->addWidget( welcome_card );
 
@@ -2244,7 +2234,15 @@ void GuiMain::createModernShell()
 
   mp_modernConversationStack->addWidget( mp_modernChatPlaceholder );
   mp_modernConversationStack->addWidget( mp_modernChatPage );
-  conversation_layout->addWidget( mp_modernConversationStack );
+  mp_modernHistorySplitter = new QSplitter(Qt::Horizontal,mp_modernConversationPanel);
+  mp_modernHistorySplitter->setObjectName(QStringLiteral("ShadowHistorySplitter"));
+  mp_modernHistorySplitter->setChildrenCollapsible(false);
+  mp_modernHistorySplitter->setHandleWidth(1);
+  mp_modernConversationStack->setMinimumWidth(320);
+  mp_modernConversationStack->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Expanding);
+  mp_modernHistorySplitter->addWidget(mp_modernConversationStack);
+  mp_modernHistorySplitter->setStretchFactor(0,1);
+  conversation_layout->addWidget( mp_modernHistorySplitter );
 
   mp_modernContentSplitter = new QSplitter( Qt::Horizontal, mp_modernRoot );
   mp_modernContentSplitter->setObjectName( "ShadowContentSplitter" );
@@ -2306,9 +2304,7 @@ void GuiMain::createModernShell()
       if( archived )
       {
         showSavedChatSelected( chat_name );
-        for( QWidget* widget : qApp->allWidgets() )
-          if( GuiSavedChat* history = qobject_cast<GuiSavedChat*>( widget ) )
-            if( history->savedChatName() == chat_name ) history->setSearchText( query );
+        if(mp_modernHistory)mp_modernHistory->setSearchText(query);
         return;
       }
       showModernMessages();
@@ -2336,8 +2332,7 @@ void GuiMain::createModernShell()
   mp_dockFileTransfers->hide();
   mp_modernConversationStack->setCurrentWidget( mp_modernChatPlaceholder );
   setTabOrder( mp_modernMessagesButton, mp_modernContactsButton );
-  setTabOrder( mp_modernContactsButton, mp_modernMoreButton );
-  setTabOrder( mp_modernMoreButton, mp_modernSearch );
+  setTabOrder( mp_modernContactsButton, mp_modernSearch );
   setTabOrder( mp_modernSearch, title_profile );
   setTabOrder( title_profile, title_menu );
   setTabOrder( title_menu, mp_tabMain );
@@ -2346,6 +2341,7 @@ void GuiMain::createModernShell()
   updateModernNetworkState();
   updateModernListState();
   updateModernResponsiveLayout();
+  new ShadowWindowResize( this );
 }
 
 void GuiMain::applyModernStyle()
@@ -2370,7 +2366,8 @@ void GuiMain::updateModernResponsiveLayout()
   if( !mp_modernContentSplitter || !mp_modernListPanel || !mp_modernConversationPanel )
     return;
 
-  const bool compact = width() < 900;
+  const bool historyOpen = mp_modernHistory && !mp_modernHistory->isHidden();
+  const bool compact = width() < (historyOpen ? 1100 : 900);
   if( mp_modernNavigationRail )
     mp_modernNavigationRail->setFixedWidth( compact ? 68 : 80 );
 
@@ -2386,7 +2383,7 @@ void GuiMain::updateModernResponsiveLayout()
 
   mp_modernContentSplitter->setHandleWidth( 0 );
   const bool chat_is_open = mp_modernConversationStack &&
-                            mp_modernConversationStack->currentWidget() == mp_modernChatPage &&
+                            (historyOpen || mp_modernConversationStack->currentWidget() == mp_modernChatPage) &&
                             mp_modernConversationPanel->isVisible();
   mp_modernListPanel->setVisible( !chat_is_open );
   mp_modernConversationPanel->setVisible( chat_is_open );
@@ -2403,9 +2400,15 @@ void GuiMain::updateModernWindowCorners()
     clearMask();
     return;
   }
-  QPainterPath outline;
-  outline.addRoundedRect( QRectF( rect() ), 12, 12 );
-  setMask( QRegion( outline.toFillPolygon().toPolygon() ) );
+  setMask( ShadowWindowShape::roundedMask( size() ) );
+}
+
+void GuiMain::applyStartupWindowSize()
+{
+  const QRect available = screen() ? screen()->availableGeometry() : QApplication::desktop()->availableGeometry();
+  const QSize preferred = preferredMainWindowSize( available );
+  setWindowState( windowState() & ~(Qt::WindowMaximized | Qt::WindowFullScreen) );
+  resize( qMin( width(), preferred.width() ), qMin( height(), preferred.height() ) );
 }
 
 void GuiMain::showModernListPanel()
@@ -2646,7 +2649,14 @@ void GuiMain::updateModernNetworkState()
     return;
 
   QString state;
-  if( !NetworkManager::instance().isMainInterfaceUp() )
+  if( beeCore->devPreviewIsolated() )
+  {
+    const bool ready = ShadowDevPreview::testPeerReady();
+    state = ready ? QStringLiteral( "connected" ) : QStringLiteral( "offline" );
+    mp_modernNetworkText->setText( ready ? QStringLiteral( "本机收发测试 · 对端就绪" ) : QStringLiteral( "本机测试连接已停止" ) );
+    mp_modernNetworkAction->hide();
+  }
+  else if( !NetworkManager::instance().isMainInterfaceUp() )
   {
     state = QStringLiteral( "offline" );
     mp_modernNetworkText->setText( QStringLiteral( "未检测到可用网络，请检查网线或 Wi-Fi" ) );
@@ -2854,7 +2864,6 @@ void GuiMain::createMainWidgets()
   mp_userList->setMainToolTip( QString( "%1\n(%2)" ).arg( mp_tabMain->tabToolTip( tab_index ), tooltip_right_button ) );
 
   mp_chatList = new GuiChatList( this );
-  connect( mp_chatList, SIGNAL( viewFileTransfersRequest() ), this, SLOT( showModernTransfers() ) );
   tab_index = mp_tabMain->addTab( mp_chatList, IconManager::instance().icon( "chat-list.png" ), "" );
   mp_tabMain->setTabToolTip( tab_index, tr( "Chats" ) );
   mp_chatList->setMainToolTip( QString( "%1\n(%2)" ).arg( mp_tabMain->tabToolTip( tab_index ), tooltip_right_button ) );
@@ -3686,6 +3695,13 @@ void GuiMain::sendMessage( VNumber chat_id, const QString& msg, bool is_source_c
       origin->setMessageSendResult( msg, false, blocked + QStringLiteral( " 输入内容已保留。" ) );
     return;
   }
+  if( beeCore->devPreviewIsolated() )
+  {
+    QString feedback;
+    const bool accepted = ShadowDevPreview::sendTestText( chat_id, msg, is_source_code, &feedback );
+    if( origin ) origin->setMessageSendResult( msg, accepted, feedback );
+    return;
+  }
   const int pending_before = MessageManager::instance().countMessagesToSendInChatId( chat_id );
   const int submitted = beeCore->sendChatMessage( chat_id, msg, false, false, is_source_code );
   const bool queued = MessageManager::instance().countMessagesToSendInChatId( chat_id ) > pending_before;
@@ -3701,8 +3717,8 @@ void GuiMain::sendMessage( VNumber chat_id, const QString& msg, bool is_source_c
 
 QString GuiMain::sendBlockReason( const Chat& chat, bool files ) const
 {
-  if( beeCore->devPreviewIsolated() )
-    return QStringLiteral( "未发送：当前为本机预览，已禁用真实传输。" );
+  if( beeCore->devPreviewIsolated() && !ShadowDevPreview::canTestChat( chat ) )
+    return QStringLiteral( "未发送：请选择标有“合成”的本机测试会话。" );
   if( !chat.isValid() )
     return QStringLiteral( "未发送：当前会话不可用，请重新打开会话。" );
   if( Settings::instance().disableSendMessage() )
@@ -3853,6 +3869,8 @@ void GuiMain::onNewChatMessage( const Chat& c, const ChatMessage& cm )
 
   if( fl_chat && !floating_chat_created )
     fl_chat->showChatMessage( c, cm );
+  if(mp_modernHistory&&!mp_modernHistory->isHidden()&&mp_modernHistory->savedChatName()==c.name())
+    mp_modernHistory->showSavedChat(c.name());
 
   if( fl_chat && !floating_chat_created && fl_chat->isActiveWindow() )
   {
@@ -4040,6 +4058,13 @@ void GuiMain::sendFilesFromChat( VNumber chat_id, const QStringList& file_path_l
   if( !caption.isEmpty() )
     sendMessage( chat_id, caption, false );
 
+  if( beeCore->devPreviewIsolated() )
+  {
+    QString feedback;
+    const bool accepted = ShadowDevPreview::sendTestFiles( chat_id, file_path_list, &feedback );
+    if( origin ) origin->setFileSendResult( accepted, feedback );
+    return;
+  }
   const int submitted = beeCore->sendFilesFromChat( c.id(), file_path_list );
   if( origin )
     origin->setFileSendResult( submitted > 0, submitted > 0
@@ -4407,6 +4432,9 @@ void GuiMain::showChat( VNumber chat_id )
   if( fl_chat != mp_embeddedChat )
     fl_chat->showUp();
   fl_chat->setFocusInChat();
+  if(mp_modernHistory&&!mp_modernHistory->isHidden()&&mp_modernHistory->savedChatName()!=c.name())
+    mp_modernHistory->showSavedChat(c.name());
+  updateModernResponsiveLayout();
 }
 
 void GuiMain::changeVCard()
@@ -4551,7 +4579,6 @@ bool GuiMain::showWizard()
   gw.setModal( true );
   gw.loadSettings();
   gw.show();
-  gw.setFixedSize( gw.size() );
   if( gw.exec() == QDialog::Accepted )
   {
     if( !beeCore->changeLocalUser( gw.userName() ) )
@@ -4567,7 +4594,6 @@ bool GuiMain::showWizard()
     if( !gw.avatar().isNull() )
       profile.setPhoto( gw.avatar() );
     beeCore->setLocalUserVCard( Settings::instance().localUser().color(), profile );
-    Settings::instance().setCheckNewVersionAtStartup( gw.checkForUpdates() );
     Settings::instance().save();
     return true;
   }
@@ -4974,24 +5000,32 @@ void GuiMain::showSavedChatSelected( const QString& chat_name )
 {
   if( chat_name.isEmpty() )
     return;
+  if(mp_modernSearchPanel)mp_modernSearchPanel->dismiss();
 
-  foreach( QWidget* w, qApp->allWidgets() )
+  const Chat chat=ChatManager::instance().findChatByName(chat_name);
+  showModernMessages();
+  if(chat.isValid())
+    showChat(chat.id());
+  else
   {
-    GuiSavedChat* gsv = qobject_cast<GuiSavedChat*>( w );
-    if( gsv && gsv->savedChatName() == chat_name )
-    {
-      gsv->raise();
-      return;
-    }
+    mp_modernConversationStack->setCurrentWidget(mp_modernChatPlaceholder);
+    mp_modernConversationPanel->show();
   }
-
-  GuiSavedChat* saved_chat = new GuiSavedChat( this );
-  saved_chat->setAttribute( Qt::WA_DeleteOnClose, true );
-  saved_chat->resize( qMin( QApplication::desktop()->availableGeometry().width()-80, 1000 ), qMin( QApplication::desktop()->availableGeometry().height()-80, 740 ) );
-  connect( saved_chat, SIGNAL( deleteSavedChatRequest( const QString& ) ), this, SLOT( removeSavedChat( const QString& ) ) );
-  connect( saved_chat, SIGNAL( openUrl( const QUrl& ) ), this, SLOT( openUrl( const QUrl& ) ) );
-  saved_chat->showSavedChat( chat_name );
-  saved_chat->show();
+  if(!mp_modernHistory)
+  {
+    mp_modernHistory=new GuiSavedChat(mp_modernHistorySplitter,true);
+    mp_modernHistory->installEventFilter(this);
+    mp_modernHistorySplitter->addWidget(mp_modernHistory);
+    mp_modernHistorySplitter->setStretchFactor(1,0);
+    connect(mp_modernHistory,&GuiSavedChat::deleteSavedChatRequest,this,&GuiMain::removeSavedChat);
+    connect(mp_modernHistory,&GuiSavedChat::openUrl,this,&GuiMain::openUrl);
+    connect(mp_modernHistory,&QObject::destroyed,this,[this]() {mp_modernHistory=Q_NULLPTR;});
+  }
+  mp_modernHistory->showSavedChat(chat_name);
+  mp_modernHistory->show();
+  updateModernResponsiveLayout();
+  mp_modernHistorySplitter->setSizes(QList<int>()<<qMax(320,mp_modernHistorySplitter->width()-361)<<360);
+  mp_modernHistory->findChild<QLineEdit*>("GuiLineEditFilterHistory")->setFocus();
 }
 
 void GuiMain::removeSavedChat( const QString& chat_name )
@@ -5216,6 +5250,7 @@ void GuiMain::onChatChanged( const Chat& c )
 
 void GuiMain::onChatRemoved( const Chat& c )
 {
+  if(mp_modernHistory&&mp_modernHistory->savedChatName()==c.name())mp_modernHistory->close();
   showMessage( tr( "%1 removed" ).arg( c.name() ), 2000 );
   GuiFloatingChat* fl_chat = floatingChat( c.id() );
   if( fl_chat )
@@ -6182,9 +6217,7 @@ void GuiMain::resetGeometryAndState()
   if( mp_dockFileTransfers->isVisible() )
     mp_dockFileTransfers->hide();
   const QRect available_geometry = QApplication::desktop()->availableGeometry();
-  const int target_width = qMin( 1280, qMax( 980, available_geometry.width() - 140 ) );
-  const int target_height = qMin( 820, qMax( 640, available_geometry.height() - 140 ) );
-  resize( target_width, target_height );
+  resize( preferredMainWindowSize( available_geometry ) );
 
 #ifdef Q_OS_WIN
   move( available_geometry.x() + (available_geometry.width() - frameGeometry().width()) / 2,

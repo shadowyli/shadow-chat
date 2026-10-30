@@ -285,6 +285,7 @@ private:
   void applyModernStyle();
   void updateModernResponsiveLayout();
   void updateModernWindowCorners();
+  void applyStartupWindowSize();
   void updateModernNavigation();
   void updateModernNetworkState();
   void updateModernListState();
@@ -341,6 +342,8 @@ private:
   QStackedWidget* mp_modernWorkspace;
   ShadowDirectoryPage* mp_modernDirectoryPage;
   QSplitter* mp_modernContentSplitter;
+  QSplitter* mp_modernHistorySplitter;
+  GuiSavedChat* mp_modernHistory;
   QLineEdit* mp_modernSearch;
   ShadowSearchPanel* mp_modernSearchPanel;
   QFrame* mp_modernNetworkStrip;
@@ -360,7 +363,6 @@ private:
   QToolButton* mp_modernContactsButton;
   QToolButton* mp_modernPeopleButton;
   QToolButton* mp_modernGroupsButton;
-  QToolButton* mp_modernMoreButton;
   QToolButton* mp_modernBackButton;
   QToolButton* mp_modernMinimizeButton;
   QToolButton* mp_modernMaximizeButton;

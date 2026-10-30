@@ -15,10 +15,15 @@
 #include "Message.h"
 #include "Protocol.h"
 #include "Updater.h"
+#include "ShadowPreviewTransport.h"
+#include <QBuffer>
+#include <QImageReader>
+#include <QPointer>
 #include <QtWidgets>
 
 namespace {
 const char* markerText = "shadow-native-preview-synthetic-v1";
+QPointer<ShadowDevPreview> currentPreview;
 QString option( const QStringList& arguments, const QString& name )
 {
   const int index = arguments.indexOf( name );
@@ -30,6 +35,196 @@ bool writeJson( const QString& filename, const QJsonObject& object )
   const QByteArray data = QJsonDocument( object ).toJson();
   return file.open( QIODevice::WriteOnly ) && file.write( data ) == data.size() && file.commit();
 }
+
+void appendTestMessage( Core* core, quint64 chatId, const ChatMessage& message )
+{
+  Chat chat = ChatManager::instance().chat( chatId );
+  chat.addMessage( message );
+  chat.setLastMessageTimestamp( message.timestamp() );
+  if( !message.isFromLocalUser() && !message.isFromSystem() ) chat.addUnreadMessage();
+  ChatManager::instance().setChat( chat );
+  emit core->chatChanged( chat );
+  emit core->newChatMessage( chat, message );
+}
+
+VNumber testSender( const Chat& chat )
+{
+  for( VNumber userId : chat.usersId() )
+    if( userId != ID_LOCAL_USER ) return userId;
+  return ID_INVALID;
+}
+}
+
+ShadowDevPreview* ShadowDevPreview::testSession( quint64 chatId, QString* error )
+{
+  ShadowDevPreview* preview = currentPreview.data();
+  if( !active() || !preview || !preview->m_core->devPreviewIsolated() || !preview->m_testTransport )
+  {
+    *error = QStringLiteral( "本机测试对端未启用，请重新启动原生预览。" );
+    return nullptr;
+  }
+  const Chat chat = ChatManager::instance().chat( chatId );
+  if( !chat.isValid() || !chat.privateId().startsWith( "native-preview-chat-" ) ||
+      !chat.hasUser( ID_LOCAL_USER ) || testSender( chat ) == ID_INVALID )
+  {
+    *error = QStringLiteral( "请选择标有“合成”的本机测试会话。" );
+    return nullptr;
+  }
+  for( VNumber userId : chat.usersId() )
+    if( userId != ID_LOCAL_USER &&
+        !UserManager::instance().findUser( userId ).hash().startsWith( "native-preview-fixture-" ) )
+    {
+      *error = QStringLiteral( "当前接收方不属于本机测试会话。" );
+      return nullptr;
+    }
+  const QString folder = QFileInfo( Settings::instance().dataFolder() ).canonicalFilePath();
+  if( folder.isEmpty() || !folder.startsWith( preview->m_profileRoot + "/", Qt::CaseInsensitive ) )
+  {
+    *error = QStringLiteral( "本机测试资料目录不匹配，请重新启动预览。" );
+    return nullptr;
+  }
+  return preview;
+}
+
+bool ShadowDevPreview::canTestChat( const Chat& chat )
+{
+  QString error;
+  return testSession( chat.id(), &error ) != nullptr;
+}
+
+bool ShadowDevPreview::testPeerReady()
+{
+  return active() && currentPreview && currentPreview->m_core->devPreviewIsolated() && currentPreview->m_core->isConnected() &&
+    currentPreview->m_testTransport && currentPreview->m_testTransport->ready();
+}
+
+bool ShadowDevPreview::sendTestText( quint64 chatId, const QString& message, bool sourceCode, QString* feedback )
+{
+  ShadowDevPreview* preview = testSession( chatId, feedback );
+  if( !preview ) return false;
+  if( !preview->m_core->isConnected() || Settings::instance().disableSendMessage() )
+  {
+    *feedback = QStringLiteral( "未发送：本机测试连接已停止或发送已禁用，输入内容已保留。" );
+    return false;
+  }
+  const Chat chat = ChatManager::instance().chat( chatId );
+  const QJsonObject request = { { "kind", "text" }, { "chat", chat.privateId() }, { "text", message } };
+  QByteArray received;
+  if( !preview->m_testTransport->exchange( QJsonDocument( request ).toJson( QJsonDocument::Compact ),
+      &received, feedback ) ) return false;
+  const QJsonObject delivered = QJsonDocument::fromJson( received ).object();
+  QString content = delivered.value( "text" ).toString();
+  if( !sourceCode && !Settings::instance().chatUseHtmlTags() ) content = content.toHtmlEscaped();
+  Message outgoing = Protocol::instance().chatMessage( chat, content );
+  if( sourceCode ) outgoing.setSourceCode();
+  appendTestMessage( preview->m_core, chatId, ChatMessage( ID_LOCAL_USER, outgoing, ChatMessage::Chat, false ) );
+  Message reply = Protocol::instance().chatMessage( chat,
+    QStringLiteral( "本机测试对端已收到：\n%1" ).arg( delivered.value( "text" ).toString().toHtmlEscaped() ) );
+  appendTestMessage( preview->m_core, chatId, ChatMessage( testSender( chat ), reply, ChatMessage::Chat, false ) );
+  *feedback = QStringLiteral( "本机测试对端已收到消息。" );
+  return true;
+}
+
+bool ShadowDevPreview::receiveTestData( quint64 chatId, const QByteArray& data, const QString& name,
+  const QString& kind, QString* receivedPath, QString* feedback )
+{
+  if( !m_core->isConnected() || Settings::instance().disableSendMessage() ||
+      !Settings::instance().enableFileTransfer() )
+  {
+    *feedback = QStringLiteral( "未发送：本机测试连接或文件传输已关闭。" );
+    return false;
+  }
+  if( data.size() > 8 * 1024 * 1024 )
+  {
+    *feedback = QStringLiteral( "未发送：本机测试单个文件最大为 8 MB。" );
+    return false;
+  }
+  const Chat chat = ChatManager::instance().chat( chatId );
+  const QJsonObject request = { { "kind", kind }, { "chat", chat.privateId() },
+    { "name", name }, { "data", QString::fromLatin1( data.toBase64() ) } };
+  QByteArray received;
+  if( !m_testTransport->exchange( QJsonDocument( request ).toJson( QJsonDocument::Compact ),
+      &received, feedback ) ) return false;
+  const QJsonObject delivered = QJsonDocument::fromJson( received ).object();
+  const QByteArray bytes = QByteArray::fromBase64( delivered.value( "data" ).toString().toLatin1() );
+  const QString account = QFileInfo( Settings::instance().dataFolder() ).canonicalFilePath();
+  const QString folder = account + "/test-received";
+  if( !QDir().mkpath( folder ) ||
+      !QFileInfo( folder ).canonicalFilePath().startsWith( account + "/", Qt::CaseInsensitive ) )
+  {
+    *feedback = QStringLiteral( "本机测试对端已收到，但无法保存接收文件，请检查目录权限。" );
+    return false;
+  }
+  QString safeName = QFileInfo( delivered.value( "name" ).toString() ).fileName();
+  safeName.replace( QRegularExpression( "[<>:\"/\\\\|?*\\x00-\\x1f]" ), "_" );
+  if( safeName.isEmpty() ) safeName = "test-file";
+  safeName = safeName.right( 120 );
+  const QString path = folder + "/" + QUuid::createUuid().toString( QUuid::WithoutBraces ) + "-" + safeName;
+  QSaveFile file( path );
+  if( !file.open( QIODevice::WriteOnly ) || file.write( bytes ) != bytes.size() || !file.commit() )
+  {
+    *feedback = QStringLiteral( "本机测试接收文件保存失败，请检查磁盘空间后重试。" );
+    return false;
+  }
+  const QString url = QUrl::fromLocalFile( path ).toString().toHtmlEscaped();
+  QImageReader reader( path );
+  const QSize imageSize = reader.size();
+  const bool image = imageSize.isValid() && qint64( imageSize.width() ) * imageSize.height() <= 30000000;
+  QString body = image
+    ? QStringLiteral( "<a href=\"%1\"><img src=\"%1\" width=\"%2\"></a>" ).arg( url ).arg( qMin( 360, imageSize.width() ) )
+    : QStringLiteral( "本机测试文件：<a href=\"%1\">%2</a> · %3 字节" )
+        .arg( url, safeName.toHtmlEscaped() ).arg( bytes.size() );
+  if( image )
+    body.prepend( QStringLiteral( "<!--shadow-sender:%1-->" )
+      .arg( QString::fromLatin1( Settings::instance().localUser().name().toUtf8().toBase64() ) ) );
+  appendTestMessage( m_core, chatId, ChatMessage( ID_SYSTEM_MESSAGE, Protocol::instance().systemMessage( body ),
+    image ? ChatMessage::ImagePreview : ChatMessage::FileTransfer, false ) );
+  const QString reply = image ? QStringLiteral( "本机测试对端已收到图片（%1 × %2）。" ).arg( imageSize.width() ).arg( imageSize.height() )
+    : QStringLiteral( "本机测试对端已收到文件：%1（%2 字节）。" ).arg( safeName ).arg( bytes.size() );
+  appendTestMessage( m_core, chatId, ChatMessage( testSender( chat ),
+    Protocol::instance().chatMessage( chat, reply.toHtmlEscaped() ), ChatMessage::Chat, false ) );
+  setProperty( "lastTestReceivedFile", path );
+  *receivedPath = path;
+  *feedback = image ? QStringLiteral( "本机测试对端已收到图片。" ) : QStringLiteral( "本机测试对端已收到文件。" );
+  return true;
+}
+
+bool ShadowDevPreview::sendTestImage( quint64 chatId, const QImage& image, QString* feedback )
+{
+  ShadowDevPreview* preview = testSession( chatId, feedback );
+  if( !preview ) return false;
+  QByteArray bytes;
+  QBuffer buffer( &bytes );
+  if( image.isNull() || !buffer.open( QIODevice::WriteOnly ) || !image.save( &buffer, "PNG" ) )
+  {
+    *feedback = QStringLiteral( "未发送：无法读取或编码图片。" );
+    return false;
+  }
+  QString path;
+  return preview->receiveTestData( chatId, bytes, QStringLiteral( "截图.png" ), "image", &path, feedback );
+}
+
+bool ShadowDevPreview::sendTestFiles( quint64 chatId, const QStringList& paths, QString* feedback )
+{
+  ShadowDevPreview* preview = testSession( chatId, feedback );
+  if( !preview ) return false;
+  if( paths.isEmpty() ) { *feedback = QStringLiteral( "未选择文件。" ); return false; }
+  for( const QString& path : paths )
+  {
+    const QFileInfo source( path );
+    if( !source.isFile() || source.size() > 8 * 1024 * 1024 )
+    {
+      *feedback = QStringLiteral( "未发送：本机测试请选择不超过 8 MB 的文件。" );
+      return false;
+    }
+    QFile file( path );
+    if( !file.open( QIODevice::ReadOnly ) ) { *feedback = QStringLiteral( "未发送：无法读取原文件。" ); return false; }
+    const QByteArray bytes = file.read( 8 * 1024 * 1024 + 1 );
+    if( file.error() != QFileDevice::NoError ) { *feedback = QStringLiteral( "未发送：原文件读取失败。" ); return false; }
+    QString received;
+    if( !preview->receiveTestData( chatId, bytes, source.fileName(), "file", &received, feedback ) ) return false;
+  }
+  return true;
 }
 
 bool ShadowDevPreview::active()
@@ -146,6 +341,7 @@ void ShadowDevPreview::prepareSettings()
   settings.setAskChangeUserAtStartup( false );
   settings.setBeepOnNewMessageArrived( false );
   settings.setHideEmptyChatsInList( false );
+  settings.setEnableFileTransfer( true );
   settings.setDelayConnectionAtStartup( 0 );
   const QString output = QFileInfo( qApp->property( "shadowAccountRoot" ).toString() ).dir().absolutePath();
   QDir().mkpath( output + "/logs" );
@@ -236,13 +432,18 @@ bool ShadowDevPreview::validateLayout( const QByteArray& data, QJsonObject* valu
 }
 
 ShadowDevPreview::ShadowDevPreview( GuiMain* window, Core* core )
-  : QObject( window ), m_window( window ), m_revision( 0 ), m_started( false ), m_stopping( false )
+  : QObject( window ), m_window( window ), m_core( core ), m_revision( 0 ), m_started( false ), m_stopping( false )
 {
   setObjectName( "ShadowDevPreview" );
   m_config = qApp->property( "shadowDevConfig" ).toString();
   m_profileRoot = QFileInfo( qApp->property( "shadowAccountRoot" ).toString() ).canonicalFilePath();
   m_output = QFileInfo( m_profileRoot ).dir().absolutePath();
   m_instance = qApp->property( "shadowDevInstance" ).toString();
+  if( active() && core->devPreviewIsolated() )
+  {
+    m_testTransport = new ShadowPreviewTransport( this );
+    currentPreview = this;
+  }
   QDir().mkpath( m_output + "/logs" );
   QDir().mkpath( m_output + "/control" );
   m_baselineStyle = window->styleSheet();
@@ -374,6 +575,9 @@ void ShadowDevPreview::restoreSession()
   QSettings session( m_profileRoot + "/preview-window.ini", QSettings::IniFormat );
   if( session.value( "layout" ).toByteArray() == m_layoutData )
     m_window->restoreGeometry( session.value( "geometry" ).toByteArray() );
+  m_window->setWindowState( m_window->windowState() & ~(Qt::WindowMaximized | Qt::WindowFullScreen) );
+  m_window->resize( qMin( m_window->width(), m_layout.value( "windowWidth" ).toInt( m_baselineGeometry.width() ) ),
+    qMin( m_window->height(), m_layout.value( "windowHeight" ).toInt( m_baselineGeometry.height() ) ) );
   const VNumber chat = session.value( "chat", "88001" ).toString().toULongLong();
   if( ChatManager::instance().chat( chat ).isValid() )
     QMetaObject::invokeMethod( m_window, "showChat", Qt::DirectConnection, Q_ARG( VNumber, chat ) );
@@ -391,7 +595,7 @@ void ShadowDevPreview::pollControl()
 {
   if( QLabel* network = m_window->findChild<QLabel*>( "ShadowNetworkText" ) )
   {
-    const QString text = QString::fromUtf8( "本机预览 · 不连接办公网络" );
+    const QString text = testPeerReady() ? QStringLiteral( "本机收发测试 · 对端就绪" ) : QStringLiteral( "本机测试连接已停止" );
     if( network->text() != text ) network->setText( text );
   }
   if( m_stopping ) return;
@@ -411,7 +615,7 @@ void ShadowDevPreview::pollControl()
 void ShadowDevPreview::report( const QString& event, const QString& diagnostic )
 {
   if( QLabel* network = m_window->findChild<QLabel*>( "ShadowNetworkText" ) )
-    network->setText( QString::fromUtf8( "本机预览 · 不连接办公网络" ) );
+    network->setText( testPeerReady() ? QStringLiteral( "本机收发测试 · 对端就绪" ) : QStringLiteral( "本机测试连接已停止" ) );
   QJsonObject status;
   status["event"] = event;
   status["pid"] = static_cast<double>( QCoreApplication::applicationPid() );
@@ -420,6 +624,12 @@ void ShadowDevPreview::report( const QString& event, const QString& diagnostic )
   status["revision"] = m_revision;
   status["diagnostic"] = diagnostic;
   status["network"] = "loopback-only; discovery/Hive/mDNS/file-server disabled";
+  status["testPeerReady"] = testPeerReady();
+  if( m_testTransport )
+  {
+    status["testPeerPort"] = m_testTransport->port();
+    status["testPeerReceivedMessages"] = m_testTransport->property( "receivedMessages" ).toInt();
+  }
   status["qssValidation"] = "size/NUL/balanced braces-comments-quotes only; no general Qt QSS parser";
   status["width"] = m_window->width();
   status["height"] = m_window->height();
@@ -587,7 +797,9 @@ void ShadowDevPreview::seedFixtures( Core* core )
       {
         if( messageIndex >= 2 )
         {
-          chat.addMessage( ChatMessage( ID_SYSTEM_MESSAGE, Protocol::instance().systemMessage( messages.at( messageIndex ) ),
+          const QString senderHint = QStringLiteral( "<!--shadow-sender:%1-->" )
+            .arg( QString::fromLatin1( user.name().toUtf8().toBase64() ) );
+          chat.addMessage( ChatMessage( ID_SYSTEM_MESSAGE, Protocol::instance().systemMessage( senderHint + messages.at( messageIndex ) ),
             messageIndex == 3 ? ChatMessage::ImagePreview : ChatMessage::FileTransfer, false ) );
         }
         else

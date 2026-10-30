@@ -27,6 +27,7 @@
 #include "GuiChatItem.h"
 #include "ui_GuiChatList.h"
 
+class QScrollArea;
 
 class GuiChatList : public QWidget, private Ui::GuiChatListWidget
 {
@@ -50,7 +51,6 @@ signals:
   void createNewChatRequest();
   void createNewMessageRequest();
   void hideEmptyChatsRequest();
-  void viewFileTransfersRequest();
 
 public slots:
   void updateChat( const Chat& );
@@ -85,6 +85,7 @@ private:
   QString m_filter;
   VNumber m_activeChat;
   QWidget* mp_quickArea;
+  QScrollArea* mp_quickScroll;
   QGridLayout* mp_quickGrid;
   QToolButton* mp_quickToggle;
   QTabBar* mp_filters;

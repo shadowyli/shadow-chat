@@ -1,9 +1,13 @@
-QT += core gui widgets network testlib
+QT += core gui widgets network xml multimedia printsupport testlib
 CONFIG += console c++11 release
 CONFIG -= app_bundle debug_and_release
 TEMPLATE = app
 TARGET = update_gate_test
-INCLUDEPATH += ../src/utils ../src/desktop
-SOURCES += update_gate_test.cpp ../src/utils/Updater.cpp ../src/desktop/ShadowUpdateController.cpp
-HEADERS += ../src/utils/Updater.h ../src/desktop/ShadowUpdateController.h
+INCLUDEPATH += ../src/core ../src/utils ../src/desktop ../src/ecdh ../src/sharedesktop ../src/voicechat ../src/gui ../src/qxt ../src/override ../src
+SOURCES += update_gate_test.cpp
+DEFINES += SHADOWCHAT_SAFE_BUILD MAKE_BEEBEEP_PORTABLE BEEBEEP_USE_VOICE_CHAT BEEBEEP_USE_HUNSPELL HUNSPELL_STATIC BEEBEEP_USE_QXT BEEBEEP_USE_SHAREDESKTOP
+objects = $$files(../src/release/*.obj)
+objects -= ../src/release/Main.obj
+PRE_TARGETDEPS += $$objects
+LIBS += $$objects user32.lib wtsapi32.lib shell32.lib
 win32-msvc*: QMAKE_CXXFLAGS += /utf-8
