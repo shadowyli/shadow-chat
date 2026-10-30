@@ -341,8 +341,6 @@ void GuiUserList::showUserMenu( const QPoint& p )
   QTreeWidgetItem* item = mp_twUsers->itemAt( p );
   if( !item )
   {
-    if( mp_menuUsers )
-      mp_menuUsers->exec( QCursor::pos() );
     return;
   }
 
@@ -408,19 +406,6 @@ void GuiUserList::showMenuSettings()
 {
   if( mp_menuSettings )
     mp_menuSettings->exec( QCursor::pos() );
-}
-
-void GuiUserList::onTickEvent( int ticks )
-{
-  GuiUserItem* item;
-  QTreeWidgetItemIterator it( mp_twUsers );
-  while( *it )
-  {
-    item = dynamic_cast<GuiUserItem*>( *it );
-    if( item )
-      item->onTickEvent( ticks );
-    ++it;
-  }
 }
 
 void GuiUserList::updateChat( const Chat& c )

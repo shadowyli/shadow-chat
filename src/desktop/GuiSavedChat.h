@@ -35,6 +35,7 @@ class GuiSavedChat : public QMainWindow
 public:
   explicit GuiSavedChat( QWidget *parent = Q_NULLPTR );
   inline const QString& savedChatName() const;
+  void setSearchText( const QString& text );
 
 signals:
   void openUrl( const QUrl& );

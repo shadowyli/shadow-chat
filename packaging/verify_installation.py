@@ -8,6 +8,8 @@ parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('installer',nargs='?',type=Path)
 parser.add_argument('--receipt',type=Path,default=root/'dist/local/release-build.json')
 parser.add_argument('--previous-installer',type=Path,default=root/'dist/影聊-1.1.1-test-x86-安装包.exe')
+parser.add_argument('--previous-receipt',type=Path,default=root/'dist/release-build.json')
+parser.add_argument('--recovery-dir',type=Path,default=root/'delivery-private')
 args=parser.parse_args()
 metadata=json.loads(args.receipt.read_text(encoding='utf-8'))
 installer=Path(metadata['installer'])
@@ -58,8 +60,8 @@ try:
  if previous.is_file():
   prior=subprocess.run([str(previous),'/S','/D='+str(install)],timeout=120)
   if prior.returncode:raise SystemExit('Previous-version installation failed')
-  previous_receipt=json.loads((root/'dist/release-build.json').read_text(encoding='utf-8'))
-  if previous_receipt['version']!='1.1.1' or hash_file(previous)!=previous_receipt['sha256']:raise SystemExit('Previous installer is not the recorded published 1.1.1')
+  previous_receipt=json.loads(args.previous_receipt.read_text(encoding='utf-8'))
+  if hash_file(previous)!=previous_receipt['sha256']:raise SystemExit('Previous installer does not match its recorded published receipt')
   if hash_file(install/'ShadowChat.exe')!=previous_receipt['sourceExecutableSha256']:raise SystemExit('Previous-version payload mismatch')
   previous_installed=True
  for attempt in range(2):
@@ -77,7 +79,7 @@ try:
   if before!=after:raise SystemExit('External profile changed during install')
   if not (install/'shadowchat-recovery.ini').is_file():raise SystemExit('Shared recovery hash seed missing')
   config=configparser.ConfigParser();config.read(install/'shadowchat-recovery.ini',encoding='ascii')
-  owner_key=(root/'delivery-private'/'负责人恢复密码.txt').read_text(encoding='utf-8').splitlines()[2]
+  owner_key=(args.recovery_dir/'负责人恢复密码.txt').read_text(encoding='utf-8').splitlines()[2]
   expected=hashlib.pbkdf2_hmac('sha256',owner_key.encode(),bytes.fromhex(config['General']['salt']),100000,32).hex()
   if expected!=config['General']['password']:raise SystemExit('Recovery configuration does not match owner key')
  kernel=ctypes.WinDLL('kernel32',use_last_error=True)

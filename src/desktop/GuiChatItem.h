@@ -32,7 +32,8 @@ class GuiChatItem : public QTreeWidgetItem
 {
 
 public:
-  enum ChatDataType { ChatId = Qt::UserRole+2, ChatName, ChatIsGroup, ChatUnreadMessages, ChatMessages, ChatLastMessageTimestamp, ChatOnlineUsers, ChatPinned, ChatMuted };
+  enum ChatDataType { ChatId = Qt::UserRole+2, ChatName, ChatIsGroup, ChatUnreadMessages, ChatMessages, ChatLastMessageTimestamp, ChatOnlineUsers, ChatPinned, ChatMuted,
+    ChatPreview, ChatMentioned, ChatPending, ChatQueued, ChatActive };
 
   GuiChatItem( QTreeWidget* );
 
@@ -49,7 +50,6 @@ public:
 
   bool updateItem( const Chat& );
 
-  void onTickEvent( int );
 
   static QString defaultChatName();
 

@@ -1,71 +1,50 @@
 # 影聊（ShadowChat）
 
-影聊是面向公司局域网办公的轻量聊天工具，基于 BeeBEEP r1557 改造。它保留局域网直连、文件传输和无需注册的使用方式，重点改善日常聊天的易用性、界面清晰度与数据边界。
+影聊是由 **shadowyli** 个人维护的开源局域网通讯工具，提供私聊、群聊、图片与文件传输、
+本地聊天记录和账号资料管理。
 
-## 下载
+## 下载与版本
 
-当前开发版本为 Windows 10/11 x86 测试版 1.1.2，通过 FlowX「工具站」
-`/tools/shadowchat` 分发。本地交付、dev 验收与 main 发布分别记录；
-本地准备或 GitHub prerelease 不代表公司服务器已经部署。
+当前测试版本：**1.1.3**，支持 Windows 10/11（x86 应用）。
+安装包、源码、版本说明和校验信息统一在本仓库的 **Releases** 发布。
+其他网站可以提供下载镜像，版本记录以本仓库已发布的 Release 为准。
 
-每个交付版本同时归档源码和安装包，规则见 [逐版本发布规范](docs/VERSION-RELEASE-POLICY.md)。
-本轮版本说明见 [1.1.2 测试版](docs/releases/1.1.2-test.md)。
+本次安装包为 `local / test` 构建，更新源指向本机测试服务。
+公开发布构建从本仓库 Releases 查询对应通道的版本。
+每个版本保留对应源码、安装包、发布说明、SHA-256 和构建信息。
+本轮更新见 [1.1.3 版本说明](docs/releases/1.1.3-test.md)。
 
-安装后可从开始菜单或桌面启动“影聊”。覆盖安装与卸载默认保留独立账号目录中的数据。完整目标和验收范围见 [首版验收清单](docs/RELEASE-ACCEPTANCE.md)，测试步骤见 [本地测试指南](docs/LOCAL-TEST-GUIDE.md)。
+## 功能
 
-## 主要改进
+- 局域网私聊、群聊，支持图片、文件和文件夹传输。
+- 圆角聊天气泡、通讯录分类、全局搜索、常用会话和静态未读提醒。
+- 本地账号与数据隔离，聊天记录分类检索、导出及迁移。
+- 个人资料、头像、签名、电话号码及工作状态管理。
+- 截图预览、消息发送反馈、离线消息与待发送队列。
+- 建议更新：只有发现更高版本才提醒，每天最多一次；最新版不自动弹窗。
+- 更新服务不可用不影响启动、登录、聊天和文件传输。
 
-- 深色导航栏、现代化标题栏和更清晰的“消息 / 联系人 / 群组”结构。
-- 多张图片拖入后先进入预览，一次发送为一个图片合集，不再逐张刷屏。
-- 超长消息默认折叠，点击后展开全文。
-- 首次启动向导，设置昵称和头像；无需联网注册或邮箱验证。
-- 本地邮箱账号、密码登录与退出、默认自动登录，各账号数据隔离；邮箱无需验证，不提供中央账号管理。
-- 负责人保管统一恢复密码；分发包仅包含加盐哈希，不包含明文恢复密码。
-- 私聊、项目群、群主权限、@、引用、截图、粘贴和拖拽；离线文字与素材队列在本机保存。
-- 历史记录按消息、文件、图片和视频、链接分类；工作区备份可选包含附件。
-- 工作区导出 / 导入，用于换电脑迁移聊天偏好和本地设置。
-- 1.1.2 取消强更，版本服务失败不影响启动或收发。只有更高同通道版本才自动提醒，
-  每天最多一次；当前最新版不自动弹窗。手动检查可随时进行，旧 1.1.1 用户手动升级。
-- 保留局域网聊天与文件传输能力，默认关闭桌面共享、语音、插件和统计上报。
+## 安装与升级
 
-## 安全边界
+从 Releases 下载适合的安装包；先退出托盘中的影聊，再运行安装程序。
+覆盖安装保留安装目录外的账号、聊天记录和接收文件，重要资料请提前备份。
+本地账号不提供云端历史同步或邮箱所有权验证。
 
-影聊的目标是帮助公司管理好“这一个工具”的数据边界，而不是绕过企业网络策略：
+## 构建
 
-- 核心聊天和文件传输在局域网内完成，不提供云端中转或外部文件 relay。
-- 安全构建关闭第三方插件、遥测、桌面共享、语音和外部程序启动。
-- ShareBox、自动下载和网络消息路径会做相对路径、目录 containment、大小和完整性校验。
-- 更新只读取构建环境固定的版本清单：local 为本机测试源，dev 为预发源，
-  main 为正式源。不上传聊天内容、文件或用户信息，不自动安装；清单不能任意更换更新源。
-
-请注意：局域网本身仍应使用公司的网络隔离、终端防护和访问控制策略；影聊不能限制用户使用其他软件传输文件。
-
-## 从源码构建
-
-构建环境：Windows、Visual Studio 2022（x86 工具链）、Qt 5.15.2 MSVC2019 x86、NSIS 3.12。
-
-在 x86 Visual Studio Developer Command Prompt 中，将 Qt 的 `bin` 目录加入 PATH，然后运行：
+构建工具：Windows、Visual Studio 2022 x86 工具链、Qt 5.15.2 MSVC2019 x86、
+Python 3 和 NSIS 3.12。配置相应工具后运行：
 
 ```bat
-scripts\build-windows.cmd
-scripts\test-windows.cmd
-python packaging\prepare_recovery.py
-python packaging\build_installer.py
+scripts\release-windows.cmd build --environment local
+scripts\release-windows.cmd test --environment local
+python packaging\build_installer.py --environment local
 ```
 
-安装包输出路径和环境以 `dist\release-build.json` 为准，该回执记录版本、通道、
-构建环境和 SHA-256。构建入口与环境参数见本轮构建报告。
-可在已配置 Qt PATH 的 x86 VS 开发者命令提示符运行 `scripts\build-windows.cmd`
-和 `scripts\test-windows.cmd`；后者覆盖更新提醒、账号、队列、历史、头像与备份等核心回归。发布前建议运行：
+私密恢复资料与本机构建目录不得提交到 Git。构建回执记录实际版本、
+源码身份、程序摘要和验证结果，详见 [发布规则](docs/VERSION-RELEASE-POLICY.md)。
 
-```powershell
-.\tests\release\workspace_archive_test.exe
-```
+## 许可证
 
-负责人恢复密码保存在被 Git 忽略的 `delivery-private` 目录。只向安装包复制 `shadowchat-recovery.ini` 哈希配置，明文负责人文件绝不能上传至网站。
-
-## 许可证与致谢
-
-本项目遵循 GPLv3，原始项目和第三方组件版权归各自作者所有。详见 [LICENSE.txt](LICENSE.txt) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-
-界面参考 WeFlow 的通用布局思路，采用独立 Qt 实现，未分发其源码或素材。参考版本和许可证边界见 [界面参考说明](docs/UI-REFERENCE.md)。
+项目遵循 GPLv3。原有版权声明、许可证及实际使用的组件许可随源码和安装包保留，
+详见 [LICENSE.txt](LICENSE.txt) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

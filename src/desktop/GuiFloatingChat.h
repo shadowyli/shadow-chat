@@ -53,7 +53,6 @@ public:
   void loadSavedMessages();
   void setEmbeddedMode( bool );
 
-  void onTickEvent( int );
 
   inline void setSaveGeometryDisabled( bool );
 

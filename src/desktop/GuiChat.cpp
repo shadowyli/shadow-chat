@@ -32,6 +32,7 @@
 #include "HistoryRecord.h"
 #include "ShadowImageViewer.h"
 #include "ShadowRegionCapture.h"
+#include "ShadowScreenshotPreview.h"
 #include "ShadowImageAlbum.h"
 #include "GuiStickerPicker.h"
 #include "ShadowStickerStore.h"
@@ -84,7 +85,8 @@ GuiChat::GuiChat( QWidget *parent )
   widget_sizes.append( 80 );
   mp_splitter->setSizes( widget_sizes );
   mp_modernAttachButton = Q_NULLPTR;
-  mp_modernComposerHint = Q_NULLPTR;
+  mp_sendFeedback = Q_NULLPTR;
+  m_fileSendAccepted = false;
   m_modernMode = false;
 
   mp_teMessage->setFocusPolicy( Qt::StrongFocus );
@@ -208,8 +210,21 @@ void GuiChat::setModernMode( bool enabled )
     return;
 
   m_modernMode = true;
+  if( layout() )
+    layout()->setContentsMargins( 0, 0, 0, 0 );
   mp_frameChat->setObjectName( "ShadowTranscriptFrame" );
   mp_frameMessage->setObjectName( "ShadowComposer" );
+  mp_frameMessage->setStyleSheet( QStringLiteral(
+    "QFrame#ShadowComposer { background:#FFFFFF; border:1px solid #E2E6EA; border-radius:12px; margin:0; }" ) );
+  QWidget* composerContainer = new QWidget( mp_splitter );
+  composerContainer->setObjectName( "ShadowComposerContainer" );
+  QVBoxLayout* composerContainerLayout = new QVBoxLayout( composerContainer );
+  composerContainerLayout->setContentsMargins( 16, 8, 16, 16 );
+  composerContainerLayout->setSpacing( 0 );
+  composerContainerLayout->addWidget( mp_frameMessage );
+  composerContainer->setMinimumHeight( 174 );
+  composerContainer->setMaximumHeight( 260 );
+  mp_splitter->addWidget( composerContainer );
   mp_splitter->setHandleWidth( 1 );
   mp_splitter->setContentsMargins( 0, 0, 0, 0 );
 
@@ -233,8 +248,7 @@ void GuiChat::setModernMode( bool enabled )
     mp_modernAttachButton->setObjectName( "ShadowComposerAction" );
     mp_modernAttachButton->setText( QStringLiteral( "图片 / 文件" ) );
     mp_modernAttachButton->setIcon( ShadowStyle::actionIcon( QStringLiteral( "paperclip" ) ) );
-    mp_modernAttachButton->setIconSize( QSize( 18, 18 ) );
-    mp_modernAttachButton->setToolButtonStyle( Qt::ToolButtonTextBesideIcon );
+    mp_modernAttachButton->setToolButtonStyle( Qt::ToolButtonIconOnly );
     mp_modernAttachButton->setToolTip( QStringLiteral( "选择一个或多个文件；也可把图片拖到聊天窗口" ) );
     mp_modernAttachButton->setAccessibleName( QStringLiteral( "发送图片或文件" ) );
     connect( mp_modernAttachButton, SIGNAL( clicked() ), this, SLOT( sendFile() ) );
@@ -243,7 +257,9 @@ void GuiChat::setModernMode( bool enabled )
     QToolButton* historyButton = new QToolButton(mp_frameMessage);
     historyButton->setObjectName("ShadowComposerAction");
     historyButton->setText(QStringLiteral("聊天记录"));
+    historyButton->setIcon( ShadowStyle::actionIcon( QStringLiteral( "archive" ) ) );
     historyButton->setToolTip(QStringLiteral("按消息、文件、图片和视频、链接查找历史"));
+    historyButton->setAccessibleName( QStringLiteral( "聊天记录" ) );
     connect(historyButton,&QToolButton::clicked,this,[this]() { emit openSavedChatRequest(m_chatId); });
     composer_layout->addWidget(historyButton,1,1);
 
@@ -254,18 +270,38 @@ void GuiChat::setModernMode( bool enabled )
     QToolButton* screenshotButton=new QToolButton(mp_frameMessage);
     screenshotButton->setObjectName("ShadowComposerAction");
     screenshotButton->setText(QStringLiteral("截图"));screenshotButton->setToolTip(QStringLiteral("框选截图并发送（Ctrl+Alt+A）"));
+    screenshotButton->setAccessibleName( QStringLiteral( "截图" ) );
+    screenshotButton->setIcon( ShadowStyle::actionIcon( QStringLiteral( "images-square" ) ) );
     connect(screenshotButton,SIGNAL(clicked()),this,SLOT(captureRegionScreenshot()));quickActions->addWidget(screenshotButton);
-    QToolButton* mentionButton=new QToolButton(mp_frameMessage);mentionButton->setText(QStringLiteral("@ 同事"));
+    QToolButton* mentionButton=new QToolButton(mp_frameMessage);mentionButton->setText(QStringLiteral("@"));
+    mentionButton->setToolTip( QStringLiteral( "提及同事" ) );
+    mentionButton->setAccessibleName( QStringLiteral( "提及同事" ) );
+    mentionButton->setIcon( ShadowStyle::actionIcon( QStringLiteral( "at" ) ) );
     mentionButton->setObjectName("ShadowComposerAction");
     connect(mentionButton,SIGNAL(clicked()),this,SLOT(mentionChatMember()));quickActions->addWidget(mentionButton);quickActions->addStretch();
-    composer_layout->addLayout(quickActions,1,0,1,2);
+    quickActions->setSpacing( 4 );
+    for( QToolButton* action : QList<QToolButton*>() << mp_modernAttachButton << historyButton <<
+         stickerButton << screenshotButton << mentionButton )
+    {
+      action->setIconSize( QSize( 24, 24 ) );
+      action->setFixedSize( 40, 40 );
+      action->setToolButtonStyle( Qt::ToolButtonIconOnly );
+    }
+    composer_layout->addLayout(quickActions,2,0,1,2);
     QShortcut* screenshotShortcut=new QShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+A")),this);
     connect(screenshotShortcut,SIGNAL(activated()),this,SLOT(captureRegionScreenshot()));
 
-    mp_modernComposerHint = new QLabel( mp_frameMessage );
-    mp_modernComposerHint->setObjectName( "ShadowComposerHint" );
-    composer_layout->addWidget( mp_modernComposerHint, 1, 2 );
     composer_layout->setColumnStretch( 2, 1 );
+    mp_sendFeedback = new QLabel( mp_frameMessage );
+    mp_sendFeedback->setObjectName( QStringLiteral( "ShadowSendFeedback" ) );
+    mp_sendFeedback->setTextFormat( Qt::PlainText );
+    mp_sendFeedback->setWordWrap( true );
+    mp_sendFeedback->setTextInteractionFlags( Qt::TextSelectableByMouse );
+    mp_sendFeedback->setStyleSheet( QStringLiteral(
+      "QLabel#ShadowSendFeedback { color:#52647F;background:#F3F6FB;border-radius:6px;padding:8px;font-size:12px; }"
+      "QLabel#ShadowSendFeedback[failed=true] { color:#B42318;background:#FFF3F1; }" ) );
+    mp_sendFeedback->hide();
+    composer_layout->addWidget( mp_sendFeedback, 1, 0, 1, 4 );
 
     mp_pbSend->setObjectName( "ShadowSendButton" );
     mp_pbSend->setText( QStringLiteral( "发送" ) );
@@ -279,7 +315,7 @@ void GuiChat::setModernMode( bool enabled )
       "QPushButton:hover { background: #1D4ED8; border-color: #1D4ED8; }"
       "QPushButton:disabled { color: #8A94A3; background: #E7EBF0; border-color: #E7EBF0; }"
       "QPushButton:focus { border: 2px solid #8CB4FF; padding: 5px 15px; }" ) );
-    composer_layout->addWidget( mp_pbSend, 1, 3 );
+    composer_layout->addWidget( mp_pbSend, 2, 3 );
   }
 
   mp_pbRecordVoiceMessage->hide();
@@ -620,13 +656,54 @@ void GuiChat::setLastMessageTimestamp( const QDateTime& dt )
 void GuiChat::sendMessage()
 {
   if( Settings::instance().disableSendMessage() )
+  {
+    showSendFeedback( QStringLiteral( "未发送：当前设置禁止发送消息，输入内容已保留。" ), true );
     return;
+  }
   QString msg = mp_teMessage->message();
   if( msg.isEmpty() )
+  {
+    showSendFeedback( QStringLiteral( "请先输入消息。" ), true );
     return;
-  mp_teMessage->addMessageToHistory();
+  }
+  if( !m_pendingMessage.isEmpty() )
+    return;
+  m_pendingMessage = msg;
   emit newMessage( m_chatId, msg, false );
-  mp_teMessage->clearMessage();
+  if( m_pendingMessage == msg )
+    setMessageSendResult( msg, false, QStringLiteral( "未发送：发送模块未响应，输入内容已保留，请重试。" ) );
+}
+
+void GuiChat::showSendFeedback( const QString& feedback, bool failed )
+{
+  if( mp_sendFeedback )
+  {
+    mp_sendFeedback->setProperty( "failed", failed );
+    mp_sendFeedback->setText( feedback );
+    mp_sendFeedback->style()->unpolish( mp_sendFeedback );
+    mp_sendFeedback->style()->polish( mp_sendFeedback );
+    mp_sendFeedback->show();
+  }
+  else if( failed )
+    QMessageBox::warning( this, QStringLiteral( "未发送" ), feedback );
+}
+
+void GuiChat::setMessageSendResult( const QString& message, bool accepted, const QString& feedback )
+{
+  showSendFeedback( feedback, !accepted );
+  if( m_pendingMessage != message )
+    return;
+  m_pendingMessage.clear();
+  if( !accepted )
+  {
+    ensureFocusInChat();
+    return;
+  }
+  if( mp_teMessage->message() == message )
+  {
+    mp_teMessage->addMessageToHistory();
+    mp_teMessage->clearMessage();
+  }
   if( mp_cbSendAndClose->isChecked() )
   {
     if( Settings::instance().chatOnSendingMessage() == Settings::CloseChatOnSendingMessage )
@@ -638,9 +715,34 @@ void GuiChat::sendMessage()
     ensureFocusInChat();
 }
 
+void GuiChat::setFileSendResult( bool accepted, const QString& feedback )
+{
+  m_fileSendAccepted = accepted;
+  m_fileSendFeedback = feedback;
+  showSendFeedback( feedback, !accepted );
+}
+
+void GuiChat::previewScreenshot( const QPixmap& screenshot )
+{
+  if( screenshot.isNull() )
+    return;
+  ShadowScreenshotPreview preview( screenshot, this );
+  connect( &preview, &ShadowScreenshotPreview::sendRequested, this, [this, screenshot, &preview]() {
+    if( submitImage( screenshot.toImage() ) )
+      preview.accept();
+    else
+      preview.showSendError( m_fileSendFeedback + QStringLiteral( " 截图仍保留，可重试或取消。" ) );
+  } );
+  preview.exec();
+}
+
 void GuiChat::captureRegionScreenshot()
 {
-  if(Settings::instance().disableSendMessage())return;
+  if( Settings::instance().disableSendMessage() )
+  {
+    showSendFeedback( QStringLiteral( "未发送：当前设置禁止发送消息。" ), true );
+    return;
+  }
   QPointer<QWidget> host=window();if(host)host->hide();
   QTimer::singleShot(250,this,[this,host](){
     ShadowRegionCapture capture;
@@ -648,8 +750,7 @@ void GuiChat::captureRegionScreenshot()
     const QPixmap screenshot=accepted?capture.selectedImage():QPixmap();capture.hide();
     if(host){host->show();host->raise();host->activateWindow();}
     if(screenshot.isNull())return;
-    if(QMessageBox::question(this,Settings::instance().programName(),QStringLiteral("发送这张截图？"),QMessageBox::Yes|QMessageBox::Cancel,QMessageBox::Yes)!=QMessageBox::Yes)return;
-    QMimeData data;data.setImageData(screenshot.toImage());checkAndSendImage(&data);
+    previewScreenshot( screenshot );
   });
 }
 
@@ -716,6 +817,9 @@ QString GuiChat::chatMessageToText( const ChatMessage& cm )
 
   if( m_modernMode && !cm.isFromSystem() && !cm.isFileTransfer() && !cm.isImagePreview() )
     return modernChatMessageToText( cm );
+  if( m_modernMode && cm.isFromSystem() )
+    return QStringLiteral( "<p style=\"margin-top:8px;margin-bottom:12px\"><font color=\"#8A95A3\" style=\"font-size:11px\">%1</font></p>" )
+      .arg( cm.message() );
 
   if( !cm.isFromSystem() )
   {
@@ -784,7 +888,7 @@ void GuiChat::setChatStylesheet( QTextDocument* text_document )
   {
     text_document->setDefaultFont(ShadowStyle::applicationFont());
     default_chat_css.append( QStringLiteral(
-      " body, p, td, span { font-family: 'Microsoft YaHei UI'; font-size: 13px; }"
+      " body, p, td, span { font-family: 'Microsoft YaHei UI'; font-size: 14px; }"
       " .shadow-image-album { color: #243044; }"
       " a { color: #2457B8; text-decoration: none; }" ) );
   }
@@ -824,34 +928,33 @@ QString GuiChat::modernChatMessageToText( const ChatMessage& cm )
   }
 
   const QString alignment = from_local_user ? QStringLiteral( "right" ) : QStringLiteral( "left" );
-  const QString bubble_color = from_local_user ? QStringLiteral( "#DDEBFF" ) : QStringLiteral( "#FFFFFF" );
+  const QString bubble_color = from_local_user ? QStringLiteral( "#DDEBFF" ) : QStringLiteral( "#F0F2F4" );
   const QString timestamp = cm.timestamp().isValid() ? cm.timestamp().toString( QStringLiteral( "HH:mm" ) ) : QString();
   QString avatarHtml;
   if(user.isValid()) {
     const QString avatarUrl=avatarUrlForUser(user);
-    if(!avatarUrl.isEmpty())avatarHtml=QString("<img src=\"%1\" width=\"30\" height=\"30\">&nbsp;&nbsp;").arg(avatarUrl.toHtmlEscaped());
+    if(!avatarUrl.isEmpty())avatarHtml=QString("<img src=\"%1\" width=\"32\" height=\"32\">").arg(avatarUrl.toHtmlEscaped());
   }
   QFont bubbleFont = ShadowStyle::applicationFont();
-  bubbleFont.setPixelSize( 13 );
+  bubbleFont.setPixelSize( 14 );
   const QFontMetrics metrics( bubbleFont );
   const int viewportWidth = qMax( 240, mp_teChat->viewport()->width() );
-  const int maximumWidth = qMax( 112, int( viewportWidth * .72 ) - 42 );
+  const int maximumWidth = qMax( 96, qMin( 560, int( viewportWidth * .7 ) - 82 ) );
   int textWidth = 0;
   foreach( const QString& line, plain_text.left( 700 ).split( QLatin1Char( '\n' ) ) )
     textWidth = qMax( textWidth, metrics.horizontalAdvance( line ) );
-  const int bubbleWidth = qBound( 112, textWidth + 24, maximumWidth );
-  const QString heading = QStringLiteral( "<font color=\"#6B7686\" style=\"font-size:11px\">%1&nbsp;&nbsp;%2</font>" )
-    .arg( user_name.toHtmlEscaped(), timestamp );
-  const QString avatarCell = QStringLiteral( "<td width=\"38\" valign=\"top\" rowspan=\"2\">%1</td>" ).arg( avatarHtml );
-  const QString firstRow = from_local_user
-    ? QStringLiteral( "<td align=\"right\">%1</td>%2" ).arg( heading, avatarCell )
-    : avatarCell + QStringLiteral( "<td>%1</td>" ).arg( heading );
-  return QStringLiteral(
-    "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin-top:8px;margin-bottom:8px\"><tr><td align=\"%1\">"
-    "<table align=\"%1\" width=\"%2\" cellspacing=\"0\" cellpadding=\"0\"><tr>%3</tr>"
-    "<tr><td><table width=\"100%\" cellspacing=\"0\" cellpadding=\"10\" bgcolor=\"%4\"><tr><td>%5</td></tr></table></td></tr>"
-    "</table></td></tr></table>" )
-    .arg( alignment, QString::number( bubbleWidth + 38 ), firstRow, bubble_color, message_body );
+  const int bubbleWidth = qBound( 72, textWidth + 24, maximumWidth );
+  const QString heading = from_local_user ? QString()
+    : QStringLiteral( "<font color=\"#88929F\" style=\"font-size:11px\">%1</font><br>" ).arg( user_name.toHtmlEscaped() );
+  const QString bubble = QStringLiteral(
+    "<td width=\"%1\">%2<table width=\"%1\" cellspacing=\"0\" cellpadding=\"10\" bgcolor=\"%3\"><tr><td>%4</td></tr></table></td>" )
+    .arg( QString::number( bubbleWidth ), heading, bubble_color, message_body );
+  const QString avatarCell = QStringLiteral( "<td width=\"38\" valign=\"top\" align=\"center\">%1</td>" ).arg( avatarHtml );
+  const QString timeCell = QStringLiteral( "<td width=\"44\" valign=\"bottom\" align=\"center\"><font color=\"#9BA4AE\" style=\"font-size:10px\">%1</font></td>" )
+    .arg( timestamp );
+  const QString cells = from_local_user ? timeCell + bubble + avatarCell : avatarCell + bubble + timeCell;
+  return QStringLiteral( "<table align=\"%1\" width=\"%2\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin-top:8px;margin-bottom:16px\"><tr>%3</tr></table>" )
+    .arg( alignment, QString::number( bubbleWidth + 82 ), cells );
 }
 
 QString GuiChat::avatarUrlForUser( const User& user )
@@ -860,12 +963,12 @@ QString GuiChat::avatarUrlForUser( const User& user )
   // VCard stores a content digest; numeric IDs and QPixmap cacheKeys alone can be reused.
   const QString avatarName=Settings::instance().useUserFullName() && user.vCard().hasFullName()
     ? user.vCard().fullName(Settings::instance().useUserFirstNameFirstInFullName()) : user.name();
-  const QString revision=QString("avatar-v3|%1|%2|%3|%4|%5").arg(user.hash(),avatarName,user.color(),QString::fromLatin1(user.vCard().photoHash().toHex())).arg(user.status());
+  const QString revision=QString("avatar-v4|%1|%2|%3|%4|%5").arg(user.hash(),avatarName,user.color(),QString::fromLatin1(user.vCard().photoHash().toHex())).arg(user.status());
   const QString digest=QString::fromLatin1(QCryptographicHash::hash(revision.toUtf8(),QCryptographicHash::Sha256).toHex());
   const QString path=QDir(Settings::instance().cacheFolder()).filePath(QString("chat-avatar-%1-%2.png").arg(user.id()).arg(digest));
   if(!QFileInfo::exists(path)) {
     QDir().mkpath(Settings::instance().cacheFolder());
-    if(!Bee::avatarForUser(user,QSize(30,30),true).save(path,"PNG"))return QString();
+    if(!ShadowStyle::avatarPixmap(Bee::avatarForUser(user,QSize(32,32),true),QSize(32,32)).save(path,"PNG"))return QString();
   }
   const QString url=QUrl::fromLocalFile(path).toString();
   m_avatarUrls.insert(user.id(),url);
@@ -1161,6 +1264,8 @@ bool GuiChat::appendChatMessage( const Chat& c, const ChatMessage& cm )
     QTextCursor cursor( mp_teChat->textCursor() );
     cursor.movePosition( QTextCursor::End );
     cursor.insertHtml( text_message );
+    if( m_modernMode )
+      mp_teChat->normalizeBubbles();
     mp_teChat->setUpdatesEnabled( updates_enabled );
 #ifdef BEEBEEP_DEBUG
     qDebug() << "Elapsed time to insert HTML text in chat:" << time_to_insert.elapsed() << "ms";
@@ -1202,10 +1307,10 @@ void GuiChat::updateChatColors()
   {
     mp_teMessage->setTextColor( QColor( "#172033" ) );
     mp_teMessage->setStyleSheet( QStringLiteral(
-      "#GuiMessageEdit { background: #FFFFFF; color: #172033; border: 1px solid #DCE3EC; border-radius: 10px; padding: 9px 10px; selection-background-color: #CFE0FF; }"
-      "#GuiMessageEdit:focus { border: 2px solid #2563EB; padding: 8px 9px; }" ) );
+      "#GuiMessageEdit { background: transparent; color: #172033; border: 0; padding: 4px; selection-background-color: #CFE0FF; }"
+      "#GuiMessageEdit:focus { border: 0; }" ) );
     mp_teChat->setStyleSheet( QStringLiteral(
-      "#GuiChatViewer { background: #F5F7FB; color: #243044; border: 0; padding: 18px 22px; selection-background-color: #CFE0FF; }" ) );
+      "#GuiChatViewer { background: #FFFFFF; color: #243044; border: 0; padding: 18px 22px; selection-background-color: #CFE0FF; }" ) );
     return;
   }
 
@@ -1361,13 +1466,41 @@ void GuiChat::dragLeaveEvent( QDragLeaveEvent *event )
 
 void GuiChat::checkAndSendImage( const QMimeData* source )
 {
-  if( !source->hasImage() )
+  if( !source || !source->hasImage() )
     return;
+  const QVariant data = source->imageData();
+  QImage image = qvariant_cast<QImage>( data );
+  if( image.isNull() )
+    image = qvariant_cast<QPixmap>( data ).toImage();
+  submitImage( image );
+}
 
+bool GuiChat::submitImage( const QImage& image )
+{
+  m_fileSendAccepted = false;
+  m_fileSendFeedback.clear();
+  const Chat chat = ChatManager::instance().chat( m_chatId );
+  QString error;
+  if( image.isNull() )
+    error = QStringLiteral( "未发送：无法读取图片，请重新截图。" );
+  else if( Settings::instance().disableSendMessage() )
+    error = QStringLiteral( "未发送：当前设置禁止发送消息。" );
+  else if( !chat.isValid() || !chat.hasUser( Settings::instance().localUser().id() ) )
+    error = QStringLiteral( "未发送：当前会话不可用，请重新打开会话。" );
+  else if( beeCore->devPreviewIsolated() )
+    error = QStringLiteral( "未发送：当前为本机预览，已禁用真实传输。" );
+  else if( !Settings::instance().enableFileTransfer() )
+    error = QStringLiteral( "未发送：文件传输已关闭，请启用后重试。" );
+  if( !error.isEmpty() )
+  {
+    setFileSendResult( false, error );
+    return false;
+  }
   QString image_format = "png";
   const QString imageFolder=QDir(Settings::instance().downloadDirectory()).filePath(QStringLiteral("发送图片"));
   if(!QDir().mkpath(imageFolder)) {
-    QMessageBox::warning(this,Settings::instance().programName(),QStringLiteral("无法保存粘贴图片，请检查文件接收目录的可写权限与磁盘空间。"));return;
+    setFileSendResult( false, QStringLiteral( "未发送：无法保存图片，请检查接收文件夹的写入权限和磁盘空间。" ) );
+    return false;
   }
   QString image_initial_path = imageFolder +
                                     QString( "/beeimgtmp-%1." ).arg( Bee::dateTimeStringSuffix( QDateTime::currentDateTime() ) )
@@ -1375,19 +1508,19 @@ void GuiChat::checkAndSendImage( const QMimeData* source )
   QString file_path = Bee::uniqueFilePath( image_initial_path, false );
   qDebug() << "Sending the dropped image as a file:" << file_path;
 
-  QImage image = qvariant_cast<QImage>( source->imageData() );
-
   if( !image.save( file_path, image_format.toLatin1() ) )
   {
-    QMessageBox::warning( this, Settings::instance().programName(),
-      tr( "Unable to save temporary file: %1" ).arg( file_path ) );
-    return;
+    setFileSendResult( false, QStringLiteral( "未发送：无法保存图片，请检查磁盘空间和文件夹权限。" ) );
+    return false;
   }
 
   // These are the only originals for clipboard/screenshot images. Retain them
   // in the account workspace for offline delivery, history and backup migration.
 
   emit sendFileFromChatRequest( m_chatId, file_path );
+  if( m_fileSendFeedback.isEmpty() )
+    setFileSendResult( false, QStringLiteral( "未发送：图片未被发送模块接收，请重试。" ) );
+  return m_fileSendAccepted;
 }
 
 
@@ -1612,14 +1745,10 @@ void GuiChat::updateUseReturnKeyToSendMessageToolTip()
   if( Settings::instance().useReturnToSendMessage() )
   {
     mp_actUseReturnToSendMessage->setToolTip( tr( "Use key Return to send message" ) );
-    if( mp_modernComposerHint )
-      mp_modernComposerHint->setText( QStringLiteral( "Enter 发送 · Shift+Enter 换行" ) );
   }
   else
   {
     mp_actUseReturnToSendMessage->setToolTip( tr( "Use key Return to make a carriage return" ) );
-    if( mp_modernComposerHint )
-      mp_modernComposerHint->setText( QStringLiteral( "Ctrl+Enter 发送 · Enter 换行" ) );
   }
 }
 
@@ -1892,19 +2021,6 @@ void GuiChat::enableScreenshotAction()
   mp_actScreenshot->setEnabled( beeCore->isConnected() );
 }
 
-void GuiChat::onTickEvent( int ticks )
-{
-  if( mp_actShareDesktop->isChecked() )
-  {
-    if( ticks % 2 == 0 )
-      mp_actShareDesktop->setIcon( IconManager::instance().icon( "desktop-share.png" ) );
-    else
-      mp_actShareDesktop->setIcon( IconManager::instance().icon( "desktop-share-alternate.png" ) );
-  }
-}
-#else
-void GuiChat::onTickEvent( int )
-{}
 #endif
 
 void GuiChat::copyUrlToClipboard()

@@ -5,9 +5,9 @@ int main(int argc,char** argv) {
  QJsonObject o; o["schemaVersion"]=1;o["product"]="shadowchat";o["published"]=true;o["version"]="1.1.0";
  o["channel"]="test";
  o["downloadPage"]="/tools/shadowchat";o["installerUrl"]="/downloads/shadowchat/1.1.0/setup.exe";o["sha256"]=QString(64,'a');
- const QUrl source("https://flowx.gz/updates/shadowchat.json");QString v,d;
+ const QUrl source("https://updates.example.test/updates/shadowchat.json");QString v,d;
  auto parse=[&](){return ShadowUpdateManifest::parse(QJsonDocument(o).toJson(),source,&v,&d);};
- if(!parse() || v!="1.1.0" || d!="https://flowx.gz/tools/shadowchat")return 1;
+ if(!parse() || v!="1.1.0" || d!="https://updates.example.test/tools/shadowchat")return 1;
  o["published"]=false;if(parse())return 2;o["published"]=true;
  o["downloadPage"]="https://evil.example/tools/shadowchat";if(parse())return 3;
  o["downloadPage"]="/tools/shadowchat";o["version"]="1.1.0-injected";if(parse())return 4;

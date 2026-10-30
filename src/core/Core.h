@@ -54,6 +54,7 @@ public:
   static Core* instance() { return mp_instance; }
 
   void init();
+  bool devPreviewIsolated() const { return m_devPreviewIsolated; }
 
   bool isConnected() const;
   bool start();
@@ -283,8 +284,6 @@ protected:
   void parseHelpMessage( const User&, const Message& );
 
   /* CoreUser */
-  void showUserNameChanged( const User&, const QString& old_user_name );
-  void showUserVCardChanged( const User&, const VCard& old_vcard );
   void sendLocalUserStatus();
   void addGroup( const Group& );
   void sendLocalConnectedUsersTo( const User& );
@@ -326,6 +325,7 @@ protected:
   void buildShareBoxFileList( const User&, const QString&, bool create_folder );
 
 private:
+  bool m_devPreviewIsolated;
   static Core* mp_instance;
   QList<Connection*> m_connections;
   Listener* mp_listener;
