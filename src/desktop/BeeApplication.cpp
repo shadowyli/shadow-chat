@@ -423,6 +423,8 @@ QString BeeApplication::localServerName() const
   if( account_name.isEmpty() )
     account_name = pe.value( "USER", "" );
   QString server_name = QString( "%1_%2_%3_%4" ).arg( organizationDomain(), organizationName(), applicationName(), account_name.isEmpty() ? QString( "k" ) : account_name );
+  if( !property( "shadowAccountRoot" ).toString().isEmpty() )
+    server_name += QStringLiteral( "_" ) + property( "shadowAccountRoot" ).toString();
 #ifdef BEEBEEP_UX_PREVIEW
   // Keep development previews isolated from an installed BeeBEEP instance.
   server_name += QString( "_%1" ).arg( QCoreApplication::applicationFilePath() );

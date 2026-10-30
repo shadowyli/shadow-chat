@@ -51,7 +51,6 @@ public:
 
   void updateBackground();
 
-  void onTickEvent( int );
 
   void clear();
 

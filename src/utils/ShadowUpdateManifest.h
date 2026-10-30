@@ -1,6 +1,7 @@
 #ifndef SHADOWUPDATEMANIFEST_H
 #define SHADOWUPDATEMANIFEST_H
 #include <QtCore>
+#include "../core/ShadowBuild.h"
 namespace ShadowUpdateManifest {
 inline bool allowsVersion(const QString& current, const QString& released) {
   const QRegularExpression format(QStringLiteral("^[0-9]+\\.[0-9]+\\.[0-9]+$"));
@@ -18,7 +19,8 @@ inline bool allowsVersion(const QString& current, const QString& released) {
     !currentNumber.isNull() && !releasedNumber.isNull() &&
     QVersionNumber::compare(currentNumber, releasedNumber) >= 0;
 }
-inline bool parse(const QByteArray& data, const QUrl& source, QString* version, QString* download) {
+inline bool parse(const QByteArray& data, const QUrl& source, QString* version, QString* download,
+                  const QString& channel = QString::fromLatin1(ShadowBuild::channel())) {
   version->clear(); download->clear();
   if(data.size()>65536) return false;
   QJsonParseError error;
@@ -26,12 +28,21 @@ inline bool parse(const QByteArray& data, const QUrl& source, QString* version, 
   if(error.error!=QJsonParseError::NoError || !document.isObject()) return false;
   const QJsonObject object=document.object();
   if(object.value("schemaVersion").toInt()!=1 || object.value("product").toString()!=QStringLiteral("shadowchat") || !object.value("published").toBool()) return false;
+  if((channel != QStringLiteral("test") && channel != QStringLiteral("stable")) ||
+     object.value("channel").toString() != channel) return false;
   const QString number=object.value("version").toString();
   if(!allowsVersion(number, number)) return false;
-  const QUrl page=source.resolved(QUrl(object.value("downloadPage").toString()));
-  if(page.scheme()!=source.scheme() || page.host()!=source.host() || page.port()!=source.port() ||
+  const QString pageText = object.value("downloadPage").toString();
+  if(pageText.isEmpty()) return false;
+  const QUrl page=source.resolved(QUrl(pageText));
+  const bool github = source == QUrl(QStringLiteral("https://api.github.com/repos/shadowyli/shadow-chat/releases")) &&
+    page.scheme() == QStringLiteral("https") && page.host() == QStringLiteral("github.com") &&
+    page.port(-1) == -1 && page.path() == QStringLiteral("/shadowyli/shadow-chat/releases/tag/v%1%2")
+      .arg(number, channel == QStringLiteral("test") ? QStringLiteral("-test") : QString());
+  if((!github && (page.scheme()!=source.scheme() || page.host()!=source.host() || page.port()!=source.port() ||
+     page.path()!=QStringLiteral("/tools/shadowchat"))) ||
      !page.userInfo().isEmpty() || page.hasQuery() || page.hasFragment() ||
-     page.path()!=QStringLiteral("/tools/shadowchat") || object.value("installerUrl").toString().isEmpty() ||
+     object.value("installerUrl").toString().isEmpty() ||
      !QRegularExpression(QStringLiteral("^[a-fA-F0-9]{64}$")).match(object.value("sha256").toString()).hasMatch()) return false;
   *version=number; *download=page.toString(); return true;
 }

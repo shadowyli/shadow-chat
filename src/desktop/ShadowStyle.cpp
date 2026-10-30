@@ -5,6 +5,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include <QPainter>
+#include <QPainterPath>
 #include <QFontDatabase>
 #include <QDir>
 #include "ShadowStyle.h"
@@ -75,34 +76,85 @@ QIcon ShadowStyle::actionIcon( const QString& name )
   return iconWithStates( iconResourcePath( name ), kTextSecondary, kBrand );
 }
 
+QIcon ShadowStyle::windowControlIcon( const QString& control )
+{
+  QPixmap image(64,64);
+  image.fill(Qt::transparent);
+  QPainter painter(&image);
+  painter.setRenderHint(QPainter::Antialiasing);
+  painter.scale(4,4);
+  painter.setPen(QPen(QColor("#26313A"),1.0,Qt::SolidLine,Qt::SquareCap));
+  if(control=="minimize")painter.drawLine(QPointF(2.5,8.5),QPointF(13.5,8.5));
+  else if(control=="maximize")painter.drawRect(QRectF(2.5,2.5,11,11));
+  else if(control=="restore")
+  {
+    painter.drawRect(QRectF(5.5,2.5,8,8));
+    painter.fillRect(QRectF(2.5,5.5,8,8),QColor("#E8F1F5"));
+    painter.drawRect(QRectF(2.5,5.5,8,8));
+  }
+  else
+  {
+    painter.drawLine(QPointF(2.5,2.5),QPointF(13.5,13.5));
+    painter.drawLine(QPointF(13.5,2.5),QPointF(2.5,13.5));
+  }
+  return QIcon(image);
+}
+
+QString ShadowStyle::comboBoxStyleSheet()
+{
+  return QStringLiteral(
+    "QComboBox { background:#FFFFFF; color:#526174; border:1px solid #DFE6ED; border-radius:6px; padding:6px 28px 6px 10px; font-size:12px; selection-background-color:#EAF2FF; selection-color:#2457B8; }"
+    "QComboBox:hover { background:#F8FAFD; border-color:#B8CCE6; }"
+    "QComboBox:focus, QComboBox:on { border-color:#609BF3; }"
+    "QComboBox:disabled { color:#99A4B2; background:#F5F7FA; }"
+    "QComboBox::drop-down { subcontrol-origin:padding; subcontrol-position:top right; width:24px; border:0; background:transparent; }"
+    "QComboBox::down-arrow { image:url(:/images/shadowchat/icons/chevron-down.svg); width:12px; height:12px; }"
+    "QComboBox QAbstractItemView { background:#FFFFFF; color:#34445E; border:1px solid #DFE6ED; border-radius:6px; padding:4px; outline:0; selection-background-color:#EAF2FF; selection-color:#2457B8; }"
+    "QComboBox QAbstractItemView::item { min-height:26px; padding:5px 10px; border:0; }" );
+}
+
+QPixmap ShadowStyle::avatarPixmap( const QIcon& icon, const QSize& size )
+{
+  QPixmap avatar( size );
+  avatar.fill( Qt::transparent );
+  QPainter painter( &avatar );
+  painter.setRenderHint( QPainter::Antialiasing );
+  QPainterPath circle;
+  circle.addEllipse( QRectF( QPointF(), QSizeF( size ) ) );
+  painter.setClipPath( circle );
+  painter.drawPixmap( QRect( QPoint(), size ), icon.pixmap( size ) );
+  return avatar;
+}
+
 QString ShadowStyle::applicationStyleSheet()
 {
   // Semantic token map: brand #2563EB, canvas #F5F7FB, surface #FFFFFF,
   // primary text #172033, secondary text #5F6B7A, stroke #E3E8F0.
   return QStringLiteral(
     "QWidget { font-family: 'Microsoft YaHei UI', 'Microsoft YaHei', 'Segoe UI'; font-size: 13px; }"
-    "QWidget#ShadowRoot { background: #F5F7FB; color: #172033; font-family: 'Microsoft YaHei UI', 'Segoe UI'; }"
-    "QWidget#ShadowTitleBar { background: #FFFFFF; border-bottom: 1px solid #E3E8F0; }"
+    "QWidget#ShadowRoot { background: #FFFFFF; color: #172033; font-family: 'Microsoft YaHei UI', 'Segoe UI'; }"
+    "QWidget#ShadowTitleBar { background: #E8F0F4; border-bottom: 1px solid #DDE7EC; }"
     "QWidget#ShadowShellContent { background: #F5F7FB; }"
-    "QLabel#ShadowWindowTitle { color: #243044; font-size: 12px; font-weight: 600; }"
     "QToolButton#ShadowWindowButton, QToolButton#ShadowCloseButton { background: transparent; border: 0; border-radius: 0; min-width: 42px; max-width: 42px; min-height: 36px; max-height: 36px; padding: 0; }"
     "QToolButton#ShadowWindowButton:hover { background: #EEF2F7; }"
     "QToolButton#ShadowWindowButton:focus, QToolButton#ShadowCloseButton:focus { border: 1px solid #2563EB; }"
     "QToolButton#ShadowCloseButton:hover { background: #D83B3E; color: #FFFFFF; }"
+    "QToolButton#ShadowTitleProfile { background: transparent; border: 0; padding: 4px; min-width: 32px; min-height: 32px; border-radius: 16px; }"
+    "QToolButton#ShadowTitleProfile:hover { background: #DCE7EF; }"
     "QWidget#ShadowNavRail { background: #172033; border: 0; }"
     "QLabel#ShadowBrandName { color: #FFFFFF; font-size: 14px; font-weight: 600; padding-bottom: 4px; }"
-    "QToolButton#ShadowNavButton, QToolButton#ShadowProfileButton { color: #AEB8C6; background: transparent; border: 1px solid transparent; border-radius: 10px; padding: 8px 4px; min-height: 48px; }"
-    "QToolButton#ShadowNavButton:hover, QToolButton#ShadowProfileButton:hover { background: #222D43; color: #FFFFFF; }"
-    "QToolButton#ShadowNavButton:focus, QToolButton#ShadowProfileButton:focus { border: 1px solid #8CB4FF; }"
+    "QToolButton#ShadowNavButton { color: #AEB8C6; background: transparent; border: 1px solid transparent; border-radius: 10px; padding: 8px 4px; min-height: 48px; }"
+    "QToolButton#ShadowNavButton:hover { background: #222D43; color: #FFFFFF; }"
+    "QToolButton#ShadowNavButton:focus { border: 1px solid #8CB4FF; }"
     "QToolButton#ShadowNavButton:checked { background: #2563EB; color: #FFFFFF; }"
     "QToolButton#ShadowNavButton::menu-indicator { image: none; }"
-    "QWidget#ShadowListPanel { background: #FFFFFF; border-right: 1px solid #E3E8F0; }"
+    "QWidget#ShadowListPanel { background: #F2F7FA; border-right: 1px solid #E3E8F0; }"
     "QLabel#ShadowEyebrow { color: #2563EB; font-size: 11px; font-weight: 600; }"
     "QLabel#ShadowSectionTitle { color: #172033; font-size: 21px; font-weight: 600; }"
     "QLabel#ShadowSectionHint { color: #6B7686; font-size: 12px; padding-bottom: 4px; }"
-    "QLineEdit#ShadowGlobalSearch { background: #F2F5F9; border: 1px solid #E6EBF2; border-radius: 9px; padding: 8px 10px; min-height: 22px; color: #172033; selection-background-color: #CFE0FF; }"
+    "QLineEdit#ShadowGlobalSearch { background: #FFFFFF; border: 1px solid #DFE7ED; border-radius: 6px; padding: 3px 10px; color: #172033; selection-background-color: #CFE0FF; }"
     "QLineEdit#ShadowGlobalSearch:hover { background: #EEF2F7; }"
-    "QLineEdit#ShadowGlobalSearch:focus { background: #FFFFFF; border: 2px solid #2563EB; padding: 7px 9px; }"
+    "QLineEdit#ShadowGlobalSearch:focus { background: #FFFFFF; border: 1px solid #9BBCEB; }"
     "QWidget#ShadowDirectoryTabs { background: transparent; }"
     "QToolButton#ShadowSegmentButton { background: #F2F5F9; color: #5F6B7A; border: 1px solid transparent; border-radius: 8px; padding: 7px 18px; min-height: 18px; }"
     "QToolButton#ShadowSegmentButton:hover { background: #EAF1FF; color: #1D4ED8; }"
@@ -120,7 +172,7 @@ QString ShadowStyle::applicationStyleSheet()
     "QWidget#ShadowEmptyState { background: #FFFFFF; }"
     "QLabel#ShadowEmptyTitle { color: #243044; font-size: 15px; font-weight: 600; }"
     "QLabel#ShadowEmptyHint { color: #6B7686; font-size: 12px; }"
-    "QWidget#ShadowConversationPanel, QWidget#ShadowChatPage, QWidget#ShadowChatBody { background: #F5F7FB; }"
+    "QWidget#ShadowConversationPanel, QWidget#ShadowChatPage, QWidget#ShadowChatBody { background: #FFFFFF; }"
     "QWidget#ShadowChatHeader { background: #FFFFFF; border-bottom: 1px solid #E3E8F0; }"
     "QLabel#ShadowChatTitle { color: #172033; font-size: 17px; font-weight: 600; }"
     "QLabel#ShadowChatSubtitle { color: #6B7686; font-size: 12px; }"
@@ -143,7 +195,8 @@ QString ShadowStyle::applicationStyleSheet()
     "QFrame#ShadowOnboardingTrust { background: #EAF1FF; border: 1px solid #D4E2FF; border-radius: 12px; }"
     "QLabel#ShadowOnboardingStep { color: #243044; font-size: 14px; font-weight: 600; }"
     "QLabel#ShadowOnboardingBody { color: #40516A; font-size: 12px; }"
-    "QLabel#ShadowOnboardingAvatar { background: #EEF2F7; border: 1px solid #DCE3EC; border-radius: 36px; }"
+    "QToolButton#ShadowOnboardingAvatar { background: #EEF2F7; border: 1px solid #DCE3EC; border-radius: 36px; padding: 3px; }"
+    "QToolButton#ShadowOnboardingAvatar:hover, QToolButton#ShadowOnboardingAvatar:focus { background: #EAF1FF; border-color: #609BF3; }"
     "QLineEdit#ShadowOnboardingName { background: #F7F9FC; border: 1px solid #DCE3EC; border-radius: 8px; padding: 8px 10px; color: #172033; }"
     "QLineEdit#ShadowOnboardingName:focus { background: #FFFFFF; border: 2px solid #2563EB; padding: 7px 9px; }"
     "QLabel#ShadowBatchTitle { color: #172033; font-size: 19px; font-weight: 600; }"
@@ -166,12 +219,14 @@ QString ShadowStyle::applicationStyleSheet()
     "QScrollBar::handle:vertical { background: #C9D1DC; min-height: 28px; border-radius: 4px; }"
     "QScrollBar::handle:vertical:hover { background: #AEB8C6; }"
     "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
-    "QMainWindow#GuiFloatingChat { background: #F5F7FB; border: 0; }"
-    "QFrame#ShadowTranscriptFrame { background: #F5F7FB; border: 0; }"
-    "QFrame#ShadowComposer { background: #FFFFFF; border: 0; border-top: 1px solid #E3E8F0; }"
+    "QMainWindow#GuiFloatingChat { background: #FFFFFF; border: 0; }"
+    "QFrame#ShadowTranscriptFrame { background: #FFFFFF; border: 0; }"
+    "QFrame#ShadowComposer { background: #FFFFFF; border: 1px solid #E2E6EA; border-radius: 12px; margin: 8px 16px 16px 16px; }"
+    "QTextEdit#GuiMessageEdit { background: transparent; color: #243044; border: 0; padding: 4px; selection-background-color: #CFE0FF; }"
+    "QTextEdit#GuiMessageEdit:focus { border: 0; }"
     "QFrame#ShadowComposer[dropActive='true'] { background: #F3F7FF; border: 2px solid #2563EB; }"
     "QLabel#ShadowComposerHint { color: #8A94A3; font-size: 11px; }"
-    "QToolButton#ShadowComposerAction { color: #5F6B7A; background: transparent; border: 1px solid transparent; border-radius: 7px; padding: 6px 8px; }"
+    "QToolButton#ShadowComposerAction { color: #5F6B7A; background: transparent; border: 1px solid transparent; border-radius: 7px; padding: 5px; }"
     "QToolButton#ShadowComposerAction:hover { background: #EEF3FA; color: #1D4ED8; }"
     "QToolButton#ShadowComposerAction:focus { border-color: #2563EB; }"
     "QPushButton#ShadowSendButton { color: #FFFFFF; background: #2563EB; border: 1px solid #2563EB; border-radius: 8px; padding: 6px 16px; font-weight: 600; }"
@@ -194,5 +249,5 @@ QString ShadowStyle::applicationStyleSheet()
     "QMenu::item { padding: 8px 30px 8px 12px; border-radius: 6px; }"
     "QMenu::item:selected { background: #E8F0FF; color: #1D4ED8; }"
     "QSplitter#ShadowContentSplitter::handle { background: #E3E8F0; }"
-  );
+  ) + comboBoxStyleSheet();
 }

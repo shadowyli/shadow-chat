@@ -125,6 +125,8 @@ void GuiFloatingChat::setEmbeddedMode( bool enabled )
 
   mp_barChat->hide();
   mp_barMembers->hide();
+  menuBar()->hide();
+  statusBar()->hide();
   mp_dockEmoticons->hide();
   mp_dockPresetMessageList->hide();
   mp_chat->setModernMode( true );
@@ -547,11 +549,6 @@ void GuiFloatingChat::showChatMessage( const Chat& c, const ChatMessage& cm )
 void GuiFloatingChat::showGroupMenu()
 {
   mp_chat->editChatMembers();
-}
-
-void GuiFloatingChat::onTickEvent( int ticks )
-{
-  mp_chat->onTickEvent( ticks );
 }
 
 void GuiFloatingChat::showStatusMessage( const QString& msg, int timeout )

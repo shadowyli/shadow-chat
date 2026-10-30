@@ -36,6 +36,20 @@ GuiHome::GuiHome( QWidget* parent )
 {
   setObjectName( "GuiHome" );
   setupUi( this );
+  mp_lNews->hide();
+  QGridLayout* content = qobject_cast<QGridLayout*>( layout() );
+  if( content )
+  {
+    content->removeWidget( mp_teSystem );
+    content->removeWidget( mp_lNews );
+    content->setContentsMargins( 4, 8, 4, 0 );
+    content->setSpacing( 14 );
+    QLabel* title = new QLabel( QStringLiteral( "连接与安全" ), this );
+    title->setStyleSheet( QStringLiteral( "font-size:16px;font-weight:600;color:#172033;" ) );
+    content->addWidget( title, 0, 0 );
+    content->addWidget( mp_teSystem, 1, 0 );
+    content->setRowStretch( 1, 1 );
+  }
   m_prev_sys_mess = "";
 
   mp_teSystem->setObjectName( "GuiSystemViewer" );
@@ -44,6 +58,7 @@ GuiHome::GuiHome( QWidget* parent )
   mp_teSystem->setContextMenuPolicy( Qt::CustomContextMenu );
   mp_teSystem->setOpenExternalLinks( false );
   mp_teSystem->setOpenLinks( false );
+  updateBackground();
 
   mp_lNews->setOpenExternalLinks( true );
 
@@ -58,7 +73,10 @@ bool GuiHome::addSystemMessage( const ChatMessage& cm )
   if( !cm.isSystemActivity() )
     return false;
 
-  QString sys_message = GuiChatMessage::formatSystemMessage( cm, ID_SYSTEM_MESSAGE, Settings::instance().homeShowMessageTimestamp(), false, Settings::instance().chatCompact() );
+  QString body = cm.message();
+  body.remove( QRegularExpression( QStringLiteral( "<img\\b[^>]*>" ), QRegularExpression::CaseInsensitiveOption ) );
+  QString sys_message = QStringLiteral( "<p style=\"margin-top:0;margin-bottom:14px\"><font color=\"#96A0AC\" style=\"font-size:10px\">%1</font><br>%2</p>" )
+    .arg( cm.timestamp().toString( QStringLiteral( "HH:mm" ) ), body );
 
   if( sys_message.isEmpty() )
     return false;
@@ -85,25 +103,19 @@ void GuiHome::checkAnchorClicked( const QUrl& url )
 void GuiHome::customContextMenu( const QPoint& )
 {
   mp_menuContext->clear();
-  mp_menuContext->addAction( IconManager::instance().icon( "background-color.png" ), tr( "Change background color" ) + QString("..."), this, SLOT( selectBackgroundColor() ) );
+  mp_menuContext->addAction( QStringLiteral( "全选" ), mp_teSystem, SLOT( selectAll() ), QKeySequence::SelectAll );
   mp_menuContext->addSeparator();
-  mp_menuContext->addAction( IconManager::instance().icon( "select-all.png" ), tr( "Select all" ), mp_teSystem, SLOT( selectAll() ), QKeySequence::SelectAll );
-  mp_menuContext->addSeparator();
-  QAction* act = mp_menuContext->addAction( IconManager::instance().icon( "copy.png" ), tr( "Copy to clipboard" ), mp_teSystem, SLOT( copy() ), QKeySequence::Copy );
+  QAction* act = mp_menuContext->addAction( QStringLiteral( "复制" ), mp_teSystem, SLOT( copy() ), QKeySequence::Copy );
   act->setEnabled( !mp_teSystem->textCursor().selectedText().isEmpty() );
   mp_menuContext->addSeparator();
-  act = mp_menuContext->addAction( IconManager::instance().icon( "printer.png" ), tr( "Print..." ), this, SLOT( printActivities() ) );
+  act = mp_menuContext->addAction( QStringLiteral( "打印记录" ), this, SLOT( printActivities() ) );
   QKeySequence ks = ShortcutManager::instance().shortcut( ShortcutManager::Print );
   if( !ks.isEmpty() && Settings::instance().useCustomShortcuts() )
     act->setShortcut( ks );
   else
     act->setShortcut( QKeySequence() );
   mp_menuContext->addSeparator();
-  act = mp_menuContext->addAction( tr( "Show the timestamp" ), this, SLOT( onAddTimestampClicked() ) );
-  act->setCheckable( true );
-  act->setChecked( Settings::instance().homeShowMessageTimestamp() );
-  mp_menuContext->addSeparator();
-  act = mp_menuContext->addAction( IconManager::instance().icon( "clear.png" ), tr( "Clear system messages" ), this, SLOT( clearSystemMessages() ) );
+  act = mp_menuContext->addAction( QStringLiteral( "清空活动记录" ), this, SLOT( clearSystemMessages() ) );
   mp_menuContext->exec( QCursor::pos() );
 }
 
@@ -133,22 +145,9 @@ void GuiHome::resetNews()
 
 void GuiHome::setNews( const QString& news )
 {
-  QString tooltip_text = "";
-  if( news.isEmpty() )
-  {
-    mp_lNews->setText( QString( "<a style='text-decoration: none;' href='%1'><b>%2</b></a>" )
-                         .arg( Settings::instance().newsWebSite() )
-                         .arg( Bee::beeColorsToHtmlText( "B  e  e  B  E  E  P" ) ) );
-    tooltip_text = tr( "Click here to see the latest news about BeeBEEP project" );
-  }
-  else
-  {
-    mp_lNews->setText( news );
-    tooltip_text = tr( "Click here to read more" );
-  }
-
-  if( !tooltip_text.isEmpty() )
-    mp_lNews->setToolTip( QString( "<span style='color: %1'>%2</span>" ).arg( Bee::colorYellow().name() ).arg( tooltip_text ) );
+  Q_UNUSED( news );
+  mp_lNews->clear();
+  mp_lNews->hide();
 }
 
 void GuiHome::reloadMessages()
@@ -199,5 +198,6 @@ void GuiHome::selectBackgroundColor()
 
 void GuiHome::updateBackground()
 {
-  mp_teSystem->setStyleSheet( QString( "#GuiSystemViewer { background-color: %1; }" ).arg( Settings::instance().homeBackgroundColor() ) );
+  mp_teSystem->setStyleSheet( QStringLiteral(
+    "#GuiSystemViewer { background:#FFFFFF;color:#5F6B7A;border:0;padding:4px;font-size:12px; }" ) );
 }

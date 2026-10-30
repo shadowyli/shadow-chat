@@ -20,6 +20,11 @@
 #include <QTemporaryDir>
 #include <QProcess>
 #include <cstdio>
+#ifdef SHADOW_UPDATE_INTEGRATION
+#include "ShadowUpdateController.h"
+#include <QTcpServer>
+#include <QTcpSocket>
+#endif
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <winioctl.h>
@@ -100,6 +105,29 @@ static int peer(int argc,char** argv)
   });
   QObject::connect(&core,&Core::fileTransferMessage,[&](VNumber,const User&,const FileInfo& info,const QString&,FileTransferPeer::TransferState state){ if(state==FileTransferPeer::Completed) { if(info.isDownload()) fileReceived=true; else fileUploaded=true; } });
   if(!core.start()) return 2;
+#ifdef SHADOW_UPDATE_INTEGRATION
+  QTcpServer updateServer;
+  if(!updateServer.listen(QHostAddress::LocalHost,0)) return 9;
+  QObject::connect(&updateServer,&QTcpServer::newConnection,[&]() {
+    while(updateServer.hasPendingConnections()) {
+      QTcpSocket* socket=updateServer.nextPendingConnection();
+      QObject::connect(socket,&QTcpSocket::disconnected,socket,&QObject::deleteLater);
+      QObject::connect(socket,&QTcpSocket::readyRead,socket,[socket]() {
+        if(socket->readAll().isEmpty())return;
+        socket->write("HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        socket->disconnectFromHost();
+      });
+    }
+  });
+  const QUrl updateSource(QString("http://127.0.0.1:%1/updates/shadowchat.json").arg(updateServer.serverPort()));
+  ShadowUpdateController updates("1.1.2",nullptr,updateSource,QDir(root).filePath("update-reminders.ini"));
+  bool updateFailed=false,updateRequested=false,unexpectedPrompt=false;
+  QObject::connect(&updates,&ShadowUpdateController::promptShown,[&](bool){unexpectedPrompt=true;});
+  QObject::connect(&updates,&ShadowUpdateController::checkFinished,[&](bool valid) {
+    updateFailed=!valid && core.isConnected() && core.isFileTransferActive();
+    std::printf("%s update failure leaves live Core and transfer server connected\n",updateFailed?"PASS":"FAIL");
+  });
+#endif
   QTimer timer;
   QObject::connect(&timer,&QTimer::timeout,[&](){
     if(capacity) {
@@ -136,11 +164,18 @@ static int peer(int argc,char** argv)
           f.close();
         }
         core.sendFilesFromChat(chat.id(),QStringList()<<source);
+#ifdef SHADOW_UPDATE_INTEGRATION
+        if(!updateRequested) { updateRequested=true; updates.checkAutomatically(); }
+#endif
         sent=true;
       }
     }
     core.processPendingFileTransfers();
-    if(textReceived && fileReceived && fileUploaded) { std::puts("PASS peer text and file received and upload acknowledged"); QTimer::singleShot(500,&app,[&](){app.exit(0);}); timer.stop(); }
+    if(textReceived && fileReceived && fileUploaded) {
+#ifdef SHADOW_UPDATE_INTEGRATION
+      if(!updateFailed || unexpectedPrompt || QFile::exists(QDir(root).filePath("update-reminders.ini"))) return;
+#endif
+      std::puts("PASS peer text and file received and upload acknowledged"); QTimer::singleShot(500,&app,[&](){app.exit(0);}); timer.stop(); }
   });
   timer.start(500);
   QTimer::singleShot(app.arguments().value(7)=="large"?240000:30000,&app,[&](){std::fprintf(stderr,"TIMEOUT %s text=%d file=%d sent=%d connected=%d\n",qPrintable(name),textReceived,fileReceived,sent,core.connectedUsers()); app.exit(3);});
@@ -154,7 +189,15 @@ int main(int argc,char** argv)
   if(argc>1 && QByteArray(argv[1])=="peer") return peer(argc,argv);
   if(argc>1 && QByteArray(argv[1])=="history") return restoredHistory(argc,argv);
   QCoreApplication app(argc,argv);
+#ifdef SHADOW_UPDATE_INTEGRATION
+  const QString fixtureRoot=QFileInfo(QString::fromUtf8(__FILE__)).absoluteDir().filePath("../dist/update-integration-fixtures");
+  QDir().mkpath(fixtureRoot);
+  QTemporaryDir directory(QDir(fixtureRoot).filePath("run-XXXXXX"));
+  directory.setAutoRemove(false);
+  std::printf("Synthetic update integration fixture retained: %s\n",qPrintable(directory.path()));
+#else
   QTemporaryDir directory;
+#endif
   if(!directory.isValid()) return 1;
   if(app.arguments().contains("--twenty")) {
     QList<QProcess*> peers;

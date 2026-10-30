@@ -205,38 +205,12 @@ bool GuiUserItem::updateUser( const User& u )
 
   if( !u.isLocal() )
     m_defaultIcon = icon( 0 );
-  onTickEvent( 2 );
   return true;
 }
 
 void GuiUserItem::showUserStatus()
 {
   int user_status = data( 0, Status ).toInt();
-
-  if( userId() == ID_LOCAL_USER )
-    setBackground( 0, Bee::defaultBackgroundBrush() );
-  else if( Settings::instance().showUserStatusBackgroundColor() )
-    setBackground( 0, Bee::userStatusBackgroundBrush( user_status ) );
-  else
-    setBackground( 0, Bee::defaultBackgroundBrush() );
-
-  if( userId() == ID_LOCAL_USER && !Settings::instance().chatWithAllUsersIsEnabled() )
-    setTextColor( 0, Bee::userStatusColor( User::Offline ) );
-  else if( user_status == User::Offline )
-    setTextColor( 0, Bee::userStatusColor( user_status ) );
-  else if( Settings::instance().useDarkStyle() )
-    setTextColor( 0, QColor( "#F0F0F0" ) );
-  else
-    setTextColor( 0, QColor( Qt::black ) );
-}
-
-void GuiUserItem::onTickEvent( int ticks )
-{
-  if( !isWorkgroup() && unreadMessages() > 0 )
-  {
-    if( ticks % 2 == 0 )
-      setIcon( 0, IconManager::instance().icon( "beebeep-message.png" ) );
-    else
-      setIcon( 0, m_defaultIcon );
-  }
+  setBackground( 0, QBrush( Qt::NoBrush ) );
+  setForeground( 0, QBrush( QColor( user_status == User::Offline ? "#697684" : "#243044" ) ) );
 }

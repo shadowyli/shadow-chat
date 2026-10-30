@@ -24,6 +24,8 @@ public:
     painter.end();setGeometry(bounds);setCursor(Qt::CrossCursor);setMouseTracking(true);
   }
   QPixmap selectedImage() const {return m_selection.width()>2&&m_selection.height()>2?m_screen.copy(m_selection):QPixmap();}
+  QPixmap screenImage() const { return m_screen; }
+  QRect selectedRect() const { return m_selection; }
 protected:
   void paintEvent(QPaintEvent*) override {
     QPainter painter(this);painter.drawPixmap(0,0,m_screen);painter.fillRect(rect(),QColor(0,0,0,100));

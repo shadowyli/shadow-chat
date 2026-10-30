@@ -50,13 +50,14 @@ static int worker(int argc,char** argv)
     CHECK(menu(list,tree,a.id(),QString::fromUtf8("置顶会话")));CHECK(preferences.pinned(a));CHECK(row(tree,a.id())->data(0,GuiChatItem::ChatPinned).toBool());CHECK(dynamic_cast<GuiChatItem*>(tree->topLevelItem(0))->chatId()==a.id());
     CHECK(menu(list,tree,a.id(),QString::fromUtf8("取消置顶")));CHECK(!preferences.pinned(a));CHECK(menu(list,tree,a.id(),QString::fromUtf8("置顶会话")));CHECK(preferences.pinned(a));
     CHECK(menu(list,tree,a.id(),QString::fromUtf8("消息免打扰")));CHECK(preferences.muted(a));CHECK(row(tree,a.id())->data(0,GuiChatItem::ChatMuted).toBool());
+    CHECK(menu(list,tree,a.id(),QString::fromUtf8("标为待处理")));CHECK(preferences.pending(a));CHECK(row(tree,a.id())->data(0,GuiChatItem::ChatPending).toBool());
     bool checked=false;CHECK(menu(list,tree,a.id(),QString::fromUtf8("消息免打扰"),&checked));CHECK(checked && !preferences.muted(a));CHECK(menu(list,tree,a.id(),QString::fromUtf8("消息免打扰")));CHECK(preferences.muted(a));
     CHECK(menu(list,tree,a.id(),QString::fromUtf8("移除会话")));CHECK(row(tree,a.id())->isHidden());CHECK(preferences.hidden(a));
     const QList<VNumber> members=group.usersId();CHECK(menu(list,tree,group.id(),QString::fromUtf8("移除会话")));CHECK(preferences.hidden(group));CHECK(ChatManager::instance().chat(group.id()).usersId()==members);CHECK(ChatManager::instance().chat(a.id()).messages().size()==a.messages().size());
     CHECK(history.open(QIODevice::ReadOnly));CHECK(history.readAll()==original);history.close();
     std::puts("PASS real QWidget context actions: pinned first, muted, private/group hidden; membership and history bytes unchanged");return 0;
   }
-  CHECK(preferences.pinned(a) && preferences.muted(a) && preferences.hidden(a) && preferences.hidden(group));CHECK(row(tree,a.id())->isHidden());CHECK(row(tree,group.id())->isHidden());CHECK(!row(tree,b.id())->isHidden());
+  CHECK(preferences.pinned(a) && preferences.muted(a) && preferences.pending(a) && preferences.hidden(a) && preferences.hidden(group));CHECK(row(tree,a.id())->isHidden());CHECK(row(tree,group.id())->isHidden());CHECK(!row(tree,b.id())->isHidden());
   BuildSavedChatList loader;loader.buildList();const QString saved=loader.savedChats().values().join("\n");CHECK(saved.contains("keep-message-alpha") && saved.contains("keep-message-project"));
   CHECK(preferences.reveal(a));list.updateChat(a);CHECK(!row(tree,a.id())->isHidden());
   CHECK(preferences.setHidden(a,true));list.updateChat(a);CHECK(row(tree,a.id())->isHidden());Message fresh(Message::Chat,99999,"fresh-message");a.addMessage(ChatMessage(alpha.id(),fresh,ChatMessage::Chat,true));ChatManager::instance().setChat(a);CHECK(preferences.reveal(a));list.updateChat(a);CHECK(!row(tree,a.id())->isHidden());

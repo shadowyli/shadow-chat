@@ -36,6 +36,7 @@
 
 bool Core::startShareDesktop( VNumber user_id )
 {
+  if( m_devPreviewIsolated ) return false;
   if( !Settings::instance().enableShareDesktop() )
     return false;
 

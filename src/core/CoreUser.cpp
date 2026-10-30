@@ -88,21 +88,6 @@ void Core::setLocalUserStatusDescription( int user_status, const QString& new_st
   }
 }
 
-void Core::showUserNameChanged( const User& u, const QString& old_user_name )
-{
-  QString sHtmlMsg = IconManager::instance().toHtml( "profile.png", "*N*" ) + QString( " " );
-  if( u.isLocal() )
-    sHtmlMsg += tr( "You have changed your nickname from %1 to %2." ).arg( Bee::replaceHtmlSpecialCharacters( old_user_name ), Bee::replaceHtmlSpecialCharacters( u.name() ) );
-  else
-    sHtmlMsg += tr( "%1 has changed the nickname in %2." ).arg( Bee::replaceHtmlSpecialCharacters( old_user_name ), Bee::replaceHtmlSpecialCharacters( u.name() ) );
-  dispatchSystemMessage( ID_DEFAULT_CHAT, u.id(), sHtmlMsg, DispatchToAllChatsWithUser, ChatMessage::UserInfo, false );
-}
-
-void Core::showUserVCardChanged( const User&, const VCard& )
-{
-  // Fixme: useful?
-}
-
 void Core::sendLocalUserStatus()
 {
   Message user_status_message = Protocol::instance().userStatusMessage( Settings::instance().localUser().status(), Settings::instance().localUser().statusDescription() );
@@ -126,7 +111,6 @@ bool Core::changeLocalUser( const QString& user_name )
 
   Settings::instance().createLocalUser( user_name );
   Settings::instance().save();
-  showUserNameChanged( Settings::instance().localUser(), old_user_name );
   emit userChanged( Settings::instance().localUser() );
   return true;
 }
@@ -135,22 +119,13 @@ bool Core::setLocalUserVCard( const QString& user_color, const VCard& vc )
 {
   bool color_changed = user_color != Settings::instance().localUser().color();
   bool vc_changed = !(vc == Settings::instance().localUser().vCard());
-  bool nickname_changed = vc_changed && vc.nickName() != Settings::instance().localUser().vCard().nickName();
 
   User u = Settings::instance().localUser();
-  QString old_user_nickname = "";
-  const VCard old_vcard = u.vCard();
 
   if( color_changed )
   {
     u.setColor( user_color );
     qDebug() << "Your user color is changed to" << qPrintable( user_color );
-  }
-
-  if( nickname_changed )
-  {
-    old_user_nickname = u.vCard().nickName();
-    qDebug() << "Your nickname is changed from" << qPrintable( old_user_nickname ) << "to" << qPrintable( vc.nickName() );
   }
 
   if( vc_changed )
@@ -167,9 +142,6 @@ bool Core::setLocalUserVCard( const QString& user_color, const VCard& vc )
   MessageManager::instance().generateSaveMessagesAuthCode();
 
   sendVCardToAllConnectedUsers();
-  showUserVCardChanged( u, old_vcard );
-  if( nickname_changed )
-    showUserNameChanged( u, old_user_nickname );
   emit userChanged( u );
   return true;
 }
@@ -436,6 +408,7 @@ bool Core::removeOfflineUser( VNumber user_id )
 
 void Core::sendLocalConnectedUsersTo( const User& to_user )
 {
+  if( m_devPreviewIsolated ) return;
   if( connectedUsers() < 2 )
     return;
 

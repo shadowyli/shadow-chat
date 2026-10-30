@@ -1,6 +1,7 @@
 """Verify actual payload DLLs with a trusted local HTTPS fixture and rejection control."""
 from pathlib import Path
 import datetime
+import argparse
 import hashlib
 import http.server
 import ipaddress
@@ -18,14 +19,22 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 root = Path(__file__).resolve().parent.parent
-payload = Path(sys.argv[1]) if len(sys.argv) > 1 else root/'dist/影聊-1.1.1-test-x86'
-fixture = Path(tempfile.mkdtemp(prefix='tls-fixture-', dir=root/'dist'))
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('payload', type=Path, nargs='?')
+parser.add_argument('--receipt', type=Path, default=root/'dist/local/release-build.json')
+parser.add_argument('--report', type=Path)
+args = parser.parse_args()
+receipt = json.loads(args.receipt.read_text(encoding='utf-8'))
+payload = args.payload or Path(receipt['installer']).parent/Path(receipt['installer']).name.removesuffix('-安装包.exe')
+fixture = Path(tempfile.mkdtemp(prefix='tls-fixture-', dir=args.receipt.resolve().parent))
 runtime = fixture/'runtime'
 runtime.mkdir()
 files = {}
 for source in payload.glob('*.dll'):
     shutil.copy2(source, runtime/source.name)
     files[source.name] = hashlib.sha256(source.read_bytes()).hexdigest()
+    if receipt['payloadInventory'].get(source.name, {}).get('sha256') != files[source.name]:
+        raise SystemExit('Target TLS probe DLL differs from selected build receipt: '+source.name)
 shutil.copy2(root/'dist/tls-probe/tls_probe.exe', runtime/'tls_probe.exe')
 now = datetime.datetime.now(datetime.timezone.utc)
 ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -75,12 +84,13 @@ result = {
     'passed': passed, 'payload': str(payload), 'fixtureDirectory': str(fixture),
     'trustedHttps': positive, 'untrustedCertificateRejected': negative,
     'developerPathRemoved': True, 'payloadDllSha256': files,
+    'installerSha256': receipt['sha256'], 'releaseEnvironment': receipt['releaseEnvironment'], 'channel': receipt['channel'], 'version': receipt['version'],
     'scope': 'Exact payload DLL copies; synthetic local CA trusted only by this probe, no machine trust changes and no ignored certificate errors; fixture private key is never packaged',
 }
 for name, process in [('trusted', trusted), ('untrusted', untrusted)]:
     (fixture/(name+'.log')).write_text(process.stdout+process.stderr, encoding='utf-8')
 (fixture/'result.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
-(root/'dist/tls-verification.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
+(args.report or args.receipt.resolve().parent/'tls-verification.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
 print(json.dumps(result, indent=2))
 if not passed:
     raise SystemExit(1)

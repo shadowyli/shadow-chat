@@ -1,19 +1,33 @@
 """Repeatable silent install/upgrade check in a fresh isolated install directory."""
 from pathlib import Path
-import subprocess,hashlib,json,uuid,winreg,os,configparser,sys,ctypes,time
+import subprocess,hashlib,json,uuid,winreg,os,configparser,sys,ctypes,time,argparse
+from windows_shortcuts import refresh_shell, verify_shortcut_icons
 
 root=Path(__file__).resolve().parent.parent
-metadata=json.loads((root/'dist'/'release-build.json').read_text(encoding='utf-8'))
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('installer',nargs='?',type=Path)
+parser.add_argument('--receipt',type=Path,default=root/'dist/local/release-build.json')
+parser.add_argument('--previous-installer',type=Path,required=True)
+parser.add_argument('--previous-receipt',type=Path,required=True)
+parser.add_argument('--recovery-dir',type=Path,default=Path(os.environ.get('SHADOWCHAT_RECOVERY_DIR',str(root/'delivery-private'))))
+args=parser.parse_args()
+metadata=json.loads(args.receipt.read_text(encoding='utf-8'))
 installer=Path(metadata['installer'])
-if len(sys.argv)>1:
- installer=Path(sys.argv[1]).resolve()
- if hashlib.sha256(installer.read_bytes()).hexdigest()!=metadata['sha256']:
-  raise SystemExit('Downloaded installer differs from final release build')
-fixture=root/'dist'/('installation-test-'+uuid.uuid4().hex[:8])
+if args.installer:
+ installer=args.installer.resolve()
+if hashlib.sha256(installer.read_bytes()).hexdigest()!=metadata['sha256']:
+ raise SystemExit('Installer differs from final release build receipt')
+previous=args.previous_installer.resolve()
+previous_receipt=json.loads(args.previous_receipt.read_text(encoding='utf-8'))
+if not previous.is_file():
+ raise SystemExit('Explicit previous-version installer is required for upgrade verification')
+if hashlib.sha256(previous.read_bytes()).hexdigest()!=previous_receipt['sha256']:
+ raise SystemExit('Previous installer does not match its recorded published receipt')
+fixture=args.receipt.resolve().parent/('installation-test-'+uuid.uuid4().hex[:8])
 install=fixture/'program'
 profile=fixture/'documents'/'影聊'/'accounts'/'install-test@example.test'
 profile.mkdir(parents=True)
-for name,content in {'beebeep.dat':b'history-preservation-fixture','.shadow-account.ini':b'email=install-test@example.test','received/asset.psd':b'synthetic-material','peer-avatars.ini':b'avatar-preservation-fixture','conversation-preferences.ini':b'[fixture]\npinned=true\n'}.items():
+for name,content in {'beebeep.dat':b'history-preservation-fixture','.shadow-account.ini':b'email=install-test@example.test','received/asset.psd':b'synthetic-material','peer-avatars.ini':b'avatar-preservation-fixture','conversation-preferences.ini':b'[fixture]\npinned=true\n','pending-transfers.json':b'{"schema":1,"fixture":"pending-file-and-message-queue","entries":[{"source":"received/asset.psd","recipient":"peer@example.test"}]}'}.items():
  p=profile/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(content)
 def hash_file(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 before={str(p.relative_to(profile)):hash_file(p) for p in profile.rglob('*') if p.is_file()}
@@ -36,14 +50,21 @@ programs=Path(os.environ['APPDATA'])/'Microsoft'/'Windows'/'Start Menu'/'Program
 shortcuts=[desktop/'影聊.lnk',programs/'影聊.lnk',programs/'卸载影聊.lnk']
 saved_shortcuts={path:path.read_bytes() if path.exists() else None for path in shortcuts}
 programs_existed=programs.exists()
+icon_verifications=[]
+def verify_icons():
+ icon=install/metadata['shortcutIcon']['filename']
+ rows=verify_shortcut_icons(shortcuts,[install/'ShadowChat.exe',install/'ShadowChat.exe',install/'卸载影聊.exe'],icon,metadata['shortcutIcon']['sha256'])
+ with winreg.OpenKey(winreg.HKEY_CURRENT_USER,keys[1],0,winreg.KEY_READ|winreg.KEY_WOW64_32KEY) as key:
+  location=winreg.QueryValueEx(key,'DisplayIcon')[0]
+  if location!=str(icon)+',0':raise SystemExit('Installed DisplayIcon does not use the verified versioned ICO')
+  if winreg.QueryValueEx(key,'URLInfoAbout')[0]!=metadata['downloadPage']:raise SystemExit('Installed download page does not match selected environment')
+ icon_verifications.append({'shortcuts':rows,'displayIcon':location,'icoSha256':hash_file(icon)})
 try:
- previous=root/'dist'/'影聊-1.1.0-test-x86-安装包.exe'
  previous_installed=False
- if metadata['version']!='1.1.0' and previous.is_file():
+ if previous.is_file():
   prior=subprocess.run([str(previous),'/S','/D='+str(install)],timeout=120)
   if prior.returncode:raise SystemExit('Previous-version installation failed')
-  prior_exe=root/'dist'/'影聊-1.1.0-test-x86'/'ShadowChat.exe'
-  if hash_file(install/'ShadowChat.exe')!=hash_file(prior_exe):raise SystemExit('Previous-version payload mismatch')
+  if hash_file(install/'ShadowChat.exe')!=previous_receipt['sourceExecutableSha256']:raise SystemExit('Previous-version payload mismatch')
   previous_installed=True
  for attempt in range(2):
   result=subprocess.run([str(installer),'/S','/D='+str(install)],timeout=120)
@@ -55,11 +76,12 @@ try:
    if hash_file(install/name)!=entry['sha256']:raise SystemExit('Installed payload mismatch: '+name)
   with winreg.OpenKey(winreg.HKEY_CURRENT_USER,keys[1],0,winreg.KEY_READ|winreg.KEY_WOW64_32KEY) as key:
    if winreg.QueryValueEx(key,'DisplayVersion')[0]!=metadata['version']:raise SystemExit('Installed version registration mismatch')
+  verify_icons()
   after={str(p.relative_to(profile)):hash_file(p) for p in profile.rglob('*') if p.is_file()}
   if before!=after:raise SystemExit('External profile changed during install')
   if not (install/'shadowchat-recovery.ini').is_file():raise SystemExit('Shared recovery hash seed missing')
   config=configparser.ConfigParser();config.read(install/'shadowchat-recovery.ini',encoding='ascii')
-  owner_key=(root/'delivery-private'/'负责人恢复密码.txt').read_text(encoding='utf-8').splitlines()[2]
+  owner_key=(args.recovery_dir/'负责人恢复密码.txt').read_text(encoding='utf-8').splitlines()[2]
   expected=hashlib.pbkdf2_hmac('sha256',owner_key.encode(),bytes.fromhex(config['General']['salt']),100000,32).hex()
   if expected!=config['General']['password']:raise SystemExit('Recovery configuration does not match owner key')
  kernel=ctypes.WinDLL('kernel32',use_last_error=True)
@@ -77,6 +99,9 @@ try:
  runtime_env['PATH']=str(Path(os.environ['SystemRoot'])/'System32')+';'+os.environ['SystemRoot']
  runtime_env.pop('QT_PLUGIN_PATH',None)
  runtime_env.pop('QT_QPA_PLATFORM_PLUGIN_PATH',None)
+ identity=json.loads(subprocess.check_output([str(install/'ShadowChat.exe'),'--build-info'],cwd=install,env=runtime_env,text=True,encoding='utf-8',timeout=30))
+ for name,expected_value in {'version':metadata['version'],'environment':metadata['releaseEnvironment'],'channel':metadata['channel'],'updateSource':metadata['updateSource']}.items():
+  if identity.get(name)!=expected_value:raise SystemExit('Installed executable build identity mismatch: '+name)
  with (fixture/'dependency-probe.log').open('wb') as output:
   probe=subprocess.run([str(install/'ShadowChat.exe'),'-platformpluginpath'],cwd=install,env=runtime_env,stdout=output,stderr=output,timeout=30)
  if probe.returncode!=1:raise SystemExit('Installed executable dependency/argument-guard probe failed')
@@ -92,6 +117,7 @@ try:
  if result.returncode:raise SystemExit('Reinstall after uninstall failed')
  for name,entry in metadata['payloadInventory'].items():
   if hash_file(install/name)!=entry['sha256']:raise SystemExit('Reinstalled payload mismatch: '+name)
+ verify_icons()
 finally:
  for name,values in registrations.items():
   if values is None:
@@ -109,9 +135,14 @@ finally:
   if data is None:path.unlink(missing_ok=True)
   else:path.write_bytes(data)
  if not programs_existed and programs.exists() and not any(programs.iterdir()):programs.rmdir()
+ refresh_shell(shortcuts)
 report={'installer':str(installer),'installDirectory':str(install),'installAndOverwritePassed':True,'installedExecutableMatchesBuild':True,'allPayloadFilesMatchBuild':True,'externalFixtureDataUnchanged':True,'recoverySeedMatchesOwnerKey':True,'lockedExecutableInstallRejected':True,'sanitizedPathDependencyProbePassed':True,'silentUninstallPreservesExternalFixture':True,'reinstallAfterUninstallPassed':True,
+ 'version':metadata['version'],'releaseEnvironment':metadata['releaseEnvironment'],'channel':metadata['channel'],'installerSha256':metadata['sha256'],'externalQueueFixtureUnchanged':True,
+ 'installedBuildIdentity':identity,
+ 'versionedShortcutIconsVerified':True,'shortcutIconVerification':icon_verifications,
  'previousVersionInstalledBeforeUpgrade':previous_installed,
+ 'previousVersion':previous_receipt['version'],'previousInstallerSha256':previous_receipt['sha256'],
  'scope':'Silent installer on this Windows host; synthetic fixture external to install folder. Dependency probe exits at the argument guard before Qt UI/account startup. No real account launched; not a clean Windows VM.'}
 (fixture/'result.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
-(root/'dist'/'installation-verification.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+(args.receipt.resolve().parent/'installation-verification.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
 print(json.dumps(report,ensure_ascii=False,indent=2))
