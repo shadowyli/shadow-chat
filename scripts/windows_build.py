@@ -28,8 +28,8 @@ production = output/'production'
 executable = production/'bin/ShadowChat.exe'
 update_source = {
     'local': 'http://127.0.0.1:'+str(args.local_update_port)+'/updates/shadowchat.json',
-    'dev': 'https://dev.flowx.gz/updates/shadowchat.json',
-    'main': 'https://flowx.gz/updates/shadowchat.json',
+    'dev': 'https://api.github.com/repos/shadowyli/shadow-chat/releases',
+    'main': 'https://api.github.com/repos/shadowyli/shadow-chat/releases',
 }[args.environment]
 qmake_arguments = ['SHADOWCHAT_ENV='+args.environment, 'CONFIG+=no_batch']
 if args.environment == 'local':

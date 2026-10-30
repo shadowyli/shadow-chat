@@ -51,7 +51,7 @@ int main(int argc,char** argv)
   QString html=message("Alice",QString::fromUtf8("<b>Alice</b>：请确认这版角色配色。"));
   html+=message("Bob",QString("<a href=\"%1\">角色.psd</a>").arg(QUrl::fromLocalFile(sourceFile).toString()));
   html+=message("Alice",QString("<a href=\"%1\"><img src=\"%1\" width=\"160\"></a>").arg(QUrl::fromLocalFile(imagePath).toString()));
-  html+=message("Bob","<a href=\"https://flowx.gz/tools\">FlowX 工具站</a>");
+  html+=message("Bob","<a href=\"https://example.test/tools\">链接示例</a>");
   QMap<QString,QString> history;history.insert("项目讨论",html);ChatManager::instance().addSavedChats(history);
   GuiSavedChat window;window.showSavedChat("项目讨论");window.show();app.processEvents();
   QListWidget* results=window.findChild<QListWidget*>();QTabBar* tabs=window.findChild<QTabBar*>();QLineEdit* keyword=window.findChild<QLineEdit*>("GuiLineEditFilterHistory");
@@ -60,7 +60,7 @@ int main(int argc,char** argv)
   QUrl openedFile;QObject::connect(&window,&GuiSavedChat::openUrl,[&](const QUrl& url){openedFile=url;});results->itemDoubleClicked(results->item(0));require(openedFile.toLocalFile()==sourceFile,"file result opens exact original path");
   tabs->setCurrentIndex(2);require(results->count()==1 && !results->item(0)->icon().isNull(),"media classification and thumbnail");
   require(results->viewMode()==QListView::IconMode,"media thumbnail grid");
-  tabs->setCurrentIndex(3);require(results->count()==1 && results->item(0)->text().contains("flowx.gz"),"link classification");
+  tabs->setCurrentIndex(3);require(results->count()==1 && results->item(0)->text().contains("example.test"),"link classification");
   tabs->setCurrentIndex(0);keyword->setText("配色");require(results->count()==1,"keyword filtering");keyword->clear();
   QComboBox* sender=Q_NULLPTR;foreach(QComboBox* combo,window.findChildren<QComboBox*>())if(combo->accessibleName()==QString::fromUtf8("发送者"))sender=combo;
   require(sender,"sender filter");sender->setCurrentIndex(sender->findText("Bob"));require(results->count()==2,"sender filtering");sender->setCurrentIndex(0);

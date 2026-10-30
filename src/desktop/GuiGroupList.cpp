@@ -190,8 +190,6 @@ void GuiGroupList::showGroupMenu( const QPoint& p )
 
     mp_contextMenu->addAction( mp_actCreateGroup );
     mp_actCreateGroup->setEnabled( UserManager::instance().userList().toList().size() > 1 );
-    mp_contextMenu->addSeparator();
-    mp_contextMenu->addAction( IconManager::instance().icon( "background-color.png" ), tr( "Change background color" ) + QString("..."), this, SLOT( selectBackgroundColor() ) );
     mp_contextMenu->exec( QCursor::pos() );
     return;
   }
@@ -214,8 +212,6 @@ void GuiGroupList::showGroupMenu( const QPoint& p )
     else
       mp_contextMenu->addAction( mp_actDisableGroupNotification );
 
-    mp_contextMenu->addSeparator();
-    mp_contextMenu->addAction( IconManager::instance().icon( "background-color.png" ), tr( "Change background color" ) + QString("..."), this, SLOT( selectBackgroundColor() ) );
     mp_contextMenu->exec( QCursor::pos() );
   }
   else
@@ -308,18 +304,6 @@ void GuiGroupList::updateBackground()
   QString w_stylesheet = Settings::instance().guiCustomListStyleSheet( Settings::instance().groupListBackgroundColor(),
                                                                        IconManager::instance().iconPath( "group-list.png" ) );
   mp_twGroupList->setStyleSheet( w_stylesheet );
-}
-
-void GuiGroupList::onTickEvent( int ticks )
-{
-  GuiGroupItem* item;
-  QTreeWidgetItemIterator it( mp_twGroupList );
-  while( *it )
-  {
-    item = dynamic_cast<GuiGroupItem*>( *it );
-    item->onTickEvent( ticks );
-    ++it;
-  }
 }
 
 

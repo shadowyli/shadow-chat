@@ -58,7 +58,6 @@ public:
   void setWorkgroup( const QString& );
   inline bool isWorkgroup() const;
 
-  void onTickEvent( int );
 
   inline void setDefaultIcon( const QIcon& );
 

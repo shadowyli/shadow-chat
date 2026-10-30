@@ -48,6 +48,9 @@
 #include "Settings.h"
 #include "ShadowWorkspaceArchive.h"
 #include "ShadowLocalAccounts.h"
+#include "ShadowDevPreview.h"
+#include "ShadowDialogChrome.h"
+#include "ShadowDialogStyle.h"
 #include "ShadowUpdateController.h"
 #include "Updater.h"
 #include "Version.h"
@@ -95,6 +98,12 @@ bool CheckValidArguments( int argc, char *argv[] )
 
 int main( int argc, char *argv[] )
 {
+  QString preview_error;
+  if( !ShadowDevPreview::checkArguments( argc, argv, &preview_error ) )
+  {
+    std::fprintf( stderr, "%s\n", qPrintable( preview_error ) );
+    return 2;
+  }
   if( !CheckValidArguments( argc, argv ) )
   {
     qDebug() << "Check your arguments and restart the application.";
@@ -108,6 +117,7 @@ int main( int argc, char *argv[] )
     information["version"] = QString::fromLatin1( BEEBEEP_VERSION );
     information["environment"] = QString::fromLatin1( ShadowBuild::environment() );
     information["channel"] = QString::fromLatin1( ShadowBuild::channel() );
+    information["nativeDevPreview"] = QString::fromLatin1( ShadowBuild::environment() ) == "local";
     information["updateSource"] = Updater::productionManifestUrl().toString();
     const QByteArray json = QJsonDocument( information ).toJson( QJsonDocument::Compact ) + '\n';
     std::fwrite( json.constData(), 1, static_cast<size_t>(json.size()), stdout );
@@ -126,6 +136,8 @@ int main( int argc, char *argv[] )
 #endif
 
   BeeApplication bee_app( argc, argv );
+  ShadowDialogChrome::install( &bee_app );
+  bee_app.setStyleSheet( ShadowDialogStyle::styleSheet() );
   (void)Settings::instance();
   bee_app.setApplicationName( Settings::instance().programName() );
   bee_app.setOrganizationName( Settings::instance().organizationName() );
@@ -133,6 +145,14 @@ int main( int argc, char *argv[] )
   bee_app.setApplicationVersion( Settings::instance().version( false, false, false ) );
 
   const QStringList startup_arguments = bee_app.arguments();
+  if( !ShadowDevPreview::configure( startup_arguments, &preview_error ) )
+  {
+    qCritical() << preview_error;
+    Settings::close();
+    return 2;
+  }
+  const bool dev_preview_mode = startup_arguments.contains( QStringLiteral( "--dev-preview" ) );
+  const QString startup_profile_root = bee_app.property( "shadowAccountRoot" ).toString();
   const int profile_argument = startup_arguments.indexOf( QStringLiteral( "--profile-root" ) );
   if( profile_argument >= 0 )
   {
@@ -150,7 +170,8 @@ int main( int argc, char *argv[] )
       Settings::close();
       return 1;
     }
-    bee_app.setProperty( "shadowAccountRoot", profile_root );
+    if( !dev_preview_mode )
+      bee_app.setProperty( "shadowAccountRoot", profile_root );
   }
 
   if( bee_app.otherInstanceExists() )
@@ -186,9 +207,19 @@ int main( int argc, char *argv[] )
 #endif
 
   Settings::instance().setDefaultFolders();
-  Settings::instance().loadRcFile();
+  if( !dev_preview_mode )
+    Settings::instance().loadRcFile();
   Settings::instance().createLocalUser( "" );
-  Settings::instance().setDataFolder();
+  if( dev_preview_mode )
+    Settings::instance().setAccountDataFolder( QDir( startup_profile_root ).filePath( "bootstrap" ) );
+  else
+    Settings::instance().setDataFolder();
+  if( !ShadowDevPreview::seedAccount( &preview_error ) )
+  {
+    qCritical() << preview_error;
+    Settings::close();
+    return 2;
+  }
 #ifndef BEEBEEP_UX_PREVIEW
   QString account_email;
   QString account_folder;
@@ -238,6 +269,7 @@ int main( int argc, char *argv[] )
   Settings::instance().setAskChangeUserAtStartup( false );
 #endif
   Settings::instance().createApplicationUuid();
+  ShadowDevPreview::prepareSettings();
   Log::instance().setMaxLogLines( Settings::instance().maxLogLines() );
   qDebug() << "Log has set max lines to:" << Settings::instance().maxLogLines();
 #ifdef BEEBEEP_DEBUG
@@ -370,11 +402,15 @@ int main( int argc, char *argv[] )
   QMetaObject::invokeMethod( &mw, "checkWindowFlagsAndShow", Qt::QueuedConnection );
   qDebug() << "Loading saved session";
   mw.loadSession();
+  if( dev_preview_mode )
+    new ShadowDevPreview( &mw, &bee_core );
   updates.start();
 
   /* Event Loop */
   qDebug() << "Enter in the main event loop";
   int iRet = bee_app.exec();
+  if( dev_preview_mode && bee_app.property( "shadowRestartForLogin" ).toBool() )
+    qDebug() << "Native preview account switch exits safely; restart with the native preview launcher. No detached child.";
   qDebug() << "Check and process the remaining events in loop";
 
   /* Check Icon Provider */
@@ -383,7 +419,8 @@ int main( int argc, char *argv[] )
   /* Save final session */
   Settings::instance().setRecentEmoticons( EmoticonManager::instance().saveRencentEmoticons() );
   Settings::instance().setFavoriteEmoticons( EmoticonManager::instance().saveFavoriteEmoticons() );
-  Settings::instance().loadRcFile();
+  if( !dev_preview_mode )
+    Settings::instance().loadRcFile();
 #ifndef BEEBEEP_UX_PREVIEW
   Settings::instance().setAccountDataFolder( account_folder );
 #endif
@@ -420,7 +457,7 @@ int main( int argc, char *argv[] )
   Log::instance().close();
   Settings::close();
   /* Exit */
-  if( bee_app.property( "shadowRestartForLogin" ).toBool() )
+  if( !dev_preview_mode && bee_app.property( "shadowRestartForLogin" ).toBool() )
   {
     QStringList restart_arguments;
     if( profile_argument >= 0 )

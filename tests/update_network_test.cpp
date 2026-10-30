@@ -125,7 +125,7 @@ int main(int argc,char** argv)
   passed=run("query rejected",QUrl("http://127.0.0.1:1/updates/shadowchat.json?email=test"),nullptr)&&passed;
   passed=run("nonliteral loopback rejected",QUrl("http://127.1.2.3:1/updates/shadowchat.json"),nullptr)&&passed;
   passed=run("company HTTPS source cannot be injected through test constructor",
-    QUrl("https://flowx.gz/updates/shadowchat.json"),nullptr)&&passed;
+    QUrl("https://updates.example.test/updates/shadowchat.json"),nullptr)&&passed;
   const QString tlsFixture=qEnvironmentVariable("SHADOW_UPDATE_TLS_FIXTURE");
   if(!tlsFixture.isEmpty()) {
     if(!QSslSocket::supportsSsl()) {std::puts("FAIL TLS runtime unavailable");passed=false;}

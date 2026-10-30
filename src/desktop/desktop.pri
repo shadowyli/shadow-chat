@@ -1,5 +1,18 @@
 
 INCLUDEPATH += $$PWD
+HEADERS += desktop/ShadowConversationDelegate.h
+HEADERS += desktop/ShadowSearchPanel.h
+SOURCES += desktop/ShadowSearchPanel.cpp
+HEADERS += desktop/ShadowDirectoryPage.h
+SOURCES += desktop/ShadowDirectoryPage.cpp
+HEADERS += desktop/ShadowScreenshotPreview.h
+SOURCES += desktop/ShadowScreenshotPreview.cpp
+HEADERS += desktop/ShadowChatTranscript.h
+SOURCES += desktop/ShadowChatTranscript.cpp
+HEADERS += desktop/ShadowDialogChrome.h
+SOURCES += desktop/ShadowDialogChrome.cpp
+HEADERS += desktop/ShadowDevPreview.h
+SOURCES += desktop/ShadowDevPreview.cpp
 HEADERS += desktop/ShadowUpdateController.h
 SOURCES += desktop/ShadowUpdateController.cpp
 HEADERS += desktop/ShadowLocalAccounts.h

@@ -882,7 +882,7 @@ QString Settings::organizationDomain() const
 
 QString Settings::officialWebSite() const
 {
-  return QStringLiteral( "https://shadowyli.github.io/" );
+  return QStringLiteral( "https://github.com/shadowyli/shadow-chat" );
 }
 
 QString Settings::pluginWebSite() const
@@ -892,7 +892,7 @@ QString Settings::pluginWebSite() const
 
 QString Settings::downloadWebSite() const
 {
-  return officialWebSite() + QStringLiteral( "shadow-chat/" );
+  return officialWebSite() + QStringLiteral( "/releases" );
 }
 
 QString Settings::donationWebSite() const
@@ -912,7 +912,7 @@ QString Settings::languageWebSite() const
 
 QString Settings::lastVersionUrl() const
 {
-  return QStringLiteral( "https://flowx.gz/updates/shadowchat.json" );
+  return QStringLiteral( "https://api.github.com/repos/shadowyli/shadow-chat/releases" );
 }
 
 QString Settings::newsWebSite() const
@@ -922,12 +922,7 @@ QString Settings::newsWebSite() const
 
 QString Settings::developerWebSite() const
 {
-  QString web_url = QString::fromLatin1( QByteArray::fromBase64( "aHR0cHM6Ly93d3cubWFyY29tYXN0cm9kZGkuY29tL2Fib3V0X21lLnBocD9sYW5nPQ==" ) );
-  if( m_language == "it" )
-    web_url += QString( "it_IT" );
-  else
-    web_url += QString( "en_US" );
-  return web_url;
+  return QStringLiteral( "https://github.com/shadowyli" );
 }
 
 QString Settings::tipsWebSite() const

@@ -125,6 +125,7 @@ void Core::cancelPendingFileTransfers( VNumber user_id, VNumber chat_id )
 
 bool Core::startFileTransferServer()
 {
+  if( m_devPreviewIsolated ) return false;
   if( mp_fileTransfer->isActive() )
   {
 #ifdef BEEBEEP_DEBUG
@@ -160,6 +161,7 @@ void Core::stopFileTransferServer()
 
 bool Core::downloadFile( VNumber user_id, const FileInfo& fi, bool show_message )
 {
+  if( m_devPreviewIsolated ) return false;
   User u = UserManager::instance().findUser( user_id );
   if( !u.isValid() )
   {
@@ -502,6 +504,7 @@ bool Core::sendFile( VNumber user_id, const QString& file_path, const QString& s
 
 bool Core::sendFileToUser( const User&u, const QString& file_path, const QString& share_folder, bool to_share_box, const Chat& chat_selected )
 {
+  if( m_devPreviewIsolated ) return false;
   if( u.isLocal() )
     return false;
 
@@ -1140,6 +1143,7 @@ void Core::sendShareBoxList()
 
 void Core::downloadFromShareBox( VNumber from_user_id, const FileInfo& fi, const QString& to_path )
 {
+  if( m_devPreviewIsolated ) return;
 #ifdef BEEBEEP_DEBUG
   QString from_path = fi.shareFolder().isEmpty() ? fi.name() : QString( "%1/%2" ).arg( fi.shareFolder(), fi.name() );
   qDebug() << "Download path" << from_path << "from user" << from_user_id << "to path" << to_path
@@ -1163,6 +1167,7 @@ void Core::uploadToShareBox( VNumber to_user_id, const FileInfo& fi, const QStri
 
 bool Core::resumeFileTransfer( VNumber user_id, const FileInfo& file_info )
 {
+  if( m_devPreviewIsolated ) return false;
   if( file_info.isDownload() )
   {
 #ifdef BEEBEEP_DEBUG

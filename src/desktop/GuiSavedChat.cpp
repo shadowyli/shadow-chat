@@ -169,6 +169,15 @@ void GuiSavedChat::setupToolBar( QToolBar* bar )
   bar->addAction( QIcon(), QStringLiteral("清空记录"), this, SLOT( deleteSavedChat() ) );
 }
 
+void GuiSavedChat::setSearchText( const QString& text )
+{
+  mp_leFilter->setText( text );
+  mp_categories->setCurrentIndex( 0 );
+  filterHistory();
+  mp_teSavedChat->moveCursor( QTextCursor::Start );
+  mp_teSavedChat->find( text );
+}
+
 void GuiSavedChat::showSavedChat( const QString& chat_name )
 {
   m_savedChatName = chat_name;

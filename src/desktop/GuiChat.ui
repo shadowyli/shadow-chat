@@ -207,7 +207,7 @@
      <number>2</number>
     </property>
     <item row="0" column="0">
-     <widget class="QTextBrowser" name="mp_teChat">
+     <widget class="ShadowChatTranscript" name="mp_teChat">
       <property name="minimumSize">
        <size>
         <width>200</width>
@@ -248,6 +248,11 @@
   </widget>
  </widget>
  <customwidgets>
+  <customwidget>
+   <class>ShadowChatTranscript</class>
+   <extends>QTextBrowser</extends>
+   <header>ShadowChatTranscript.h</header>
+  </customwidget>
   <customwidget>
    <class>GuiMessageEdit</class>
    <extends>QTextEdit</extends>

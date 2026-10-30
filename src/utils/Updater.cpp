@@ -1,5 +1,6 @@
 #include "Updater.h"
 #include "ShadowUpdateManifest.h"
+#include "ShadowGitHubRelease.h"
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkProxy>
@@ -17,11 +18,11 @@ Updater::Updater(QObject* parent, const QUrl& manifest_url, const QString& test_
 QUrl Updater::productionManifestUrl()
 {
 #if defined(SHADOWCHAT_BUILD_MAIN)
-  return QUrl(QStringLiteral("https://flowx.gz/updates/shadowchat.json"));
+  return QUrl(QStringLiteral("https://api.github.com/repos/shadowyli/shadow-chat/releases"));
 #elif defined(SHADOWCHAT_LOCAL_UPDATE_PORT) && !defined(SHADOWCHAT_BUILD_DEV)
   return QUrl(QStringLiteral("http://127.0.0.1:%1/updates/shadowchat.json").arg(SHADOWCHAT_LOCAL_UPDATE_PORT));
 #else
-  return QUrl(QStringLiteral("https://dev.flowx.gz/updates/shadowchat.json"));
+  return QUrl(QStringLiteral("https://api.github.com/repos/shadowyli/shadow-chat/releases"));
 #endif
 }
 
@@ -42,12 +43,13 @@ void Updater::checkForNewVersion()
   m_news.clear();
   m_error.clear();
   const QUrl url = m_manifestUrl.isEmpty() ? productionManifestUrl() : m_manifestUrl;
+  const bool github = ShadowGitHubRelease::isSource(url);
   const bool local = (url.scheme() == QLatin1String("http") || url.scheme() == QLatin1String("https")) &&
     (url.host() == QLatin1String("localhost") || url.host() == QLatin1String("127.0.0.1") ||
      url.host() == QLatin1String("::1"));
   if(!url.isValid() || (!m_manifestUrl.isEmpty() && !local) ||
      !url.userInfo().isEmpty() || url.hasQuery() || url.hasFragment() ||
-     url.path() != QLatin1String("/updates/shadowchat.json"))
+     (!github && url.path() != QLatin1String("/updates/shadowchat.json")))
   {
     m_error = QStringLiteral("更新源无效：仅允许固定发布地址或测试构造器指定的本机地址。");
     emit jobCompleted();
@@ -67,6 +69,7 @@ void Updater::checkForNewVersion()
   request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
   request.setAttribute(QNetworkRequest::CacheSaveControlAttribute, false);
   request.setRawHeader("Accept", "application/json");
+  request.setRawHeader("User-Agent", "ShadowChat");
   request.setRawHeader("Cache-Control", "no-cache, no-store");
   QNetworkReply* reply = manager->get(request);
   reply->setReadBufferSize(65537);
@@ -95,7 +98,9 @@ void Updater::checkForNewVersion()
       m_error = QStringLiteral("更新服务返回异常状态：%1。").arg(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt());
     else
     {
-      const QByteArray data = reply->readAll();
+      QByteArray data = reply->readAll();
+      if(ShadowGitHubRelease::isSource(reply->url()))
+        data = ShadowGitHubRelease::manifest(data, m_channel, QString::fromLatin1(ShadowBuild::environment()));
       m_manifestValid = ShadowUpdateManifest::parse(data, reply->url(), &m_versionAvailable, &m_downloadUrl, m_channel);
       if(!m_manifestValid)
         m_error = QStringLiteral("暂未获得本通道的有效发布信息。");

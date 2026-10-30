@@ -130,20 +130,11 @@ void Core::parseUserMessage( const User& u, const Message& m )
     {
       bool color_changed = user_with_new_vcard.color() != u.color();
       bool vcard_changed = !(user_with_new_vcard.vCard() == u.vCard() );
-      VCard vc_tmp = user_with_new_vcard.vCard();
-      vc_tmp.setNickName( u.vCard().nickName() );
-      bool only_user_name_changed = vc_tmp == u.vCard();
-
       if( vcard_changed || color_changed )
       {
         UserManager::instance().setUser( user_with_new_vcard );
         if( user_with_new_vcard.name() != u.name() )
-        {
           ChatManager::instance().changePrivateChatNameAfterUserNameChanged( u.id(), user_with_new_vcard.name() );
-          showUserNameChanged( user_with_new_vcard, u.name() );
-        }
-        if( vcard_changed && !only_user_name_changed )
-          showUserVCardChanged( user_with_new_vcard, u.vCard() );
         emit userChanged( user_with_new_vcard );
       }
     }
@@ -597,6 +588,7 @@ void Core::parseChatReadMessage( const User& u, const Message& m )
 
 void Core::parseHiveMessage( const User& u, const Message& m )
 {
+  if( m_devPreviewIsolated ) return;
   if( !Settings::instance().useHive() )
   {
 #ifdef BEEBEEP_DEBUG

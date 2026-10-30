@@ -34,6 +34,7 @@
 #include "Protocol.h"
 #include "UserManager.h"
 #include "GAnalytics.h"
+#include "ShadowBuild.h"
 #ifdef BEEBEEP_USE_MULTICAST_DNS
   #include "MDnsManager.h"
 #endif
@@ -51,6 +52,10 @@ Core::Core( QObject* parent )
  : QObject( parent ), m_connections()
 {
   mp_instance = this;
+  m_devPreviewIsolated = false;
+#if defined(SHADOWCHAT_BUILD_LOCAL) && !defined(SHADOWCHAT_BUILD_MAIN) && !defined(SHADOWCHAT_BUILD_DEV)
+  m_devPreviewIsolated = qApp->property( "shadowDevPreview" ).toBool();
+#endif
   setObjectName( "BeeCore" );
   qRegisterMetaType<VNumber>( "VNumber" );
 
@@ -186,6 +191,17 @@ bool Core::checkSavingPaths()
 
 bool Core::start()
 {
+  if( m_devPreviewIsolated )
+  {
+    if( !mp_listener->isListening() && !mp_listener->listen( QHostAddress::LocalHost, 0 ) )
+      return false;
+    Settings::instance().setLocalUserHost( QHostAddress::LocalHost, mp_listener->serverPort() );
+    Settings::instance().setLocalUserStatus( User::Online );
+    qDebug() << "Native preview isolated on loopback" << mp_listener->serverPort()
+             << "; broadcast, Hive, mDNS and file transport disabled";
+    emit connected();
+    return true;
+  }
   if( isConnected() )
   {
     qDebug() << "Core is already connected to" << qPrintable( Settings::instance().programName() ) << "network";
@@ -308,7 +324,6 @@ bool Core::start()
       Settings::instance().setLocalUserStatus( static_cast<User::Status>(previous_local_user_status) );
   }
 
-  showUserVCardChanged( Settings::instance().localUser(), VCard() );
   emit userChanged( Settings::instance().localUser() );
 
   qDebug() << "Local user current path:" << qPrintable( Settings::instance().localUser().path() );
@@ -341,6 +356,7 @@ bool Core::start()
 #ifdef BEEBEEP_USE_MULTICAST_DNS
 void Core::startDnsMulticasting()
 {
+  if( m_devPreviewIsolated ) return;
   if( dnsMulticastingIsActive() )
     return;
 
@@ -470,6 +486,7 @@ bool Core::restartConnection()
 #ifdef BEEBEEP_USE_MULTICAST_DNS
 void Core::sendDnsMulticastingMessage()
 {
+  if( m_devPreviewIsolated ) return;
   if( !Settings::instance().useMulticastDns() )
     return;
 
@@ -502,12 +519,14 @@ void Core::sendDnsMulticastingMessage()
 
 void Core::updateUsersAddedManually()
 {
+  if( m_devPreviewIsolated ) return;
   qDebug() << "Updating users added manually to broadcaster:" << Settings::instance().networkAddressList().size();
   mp_broadcaster->updateUsersAddedManually();
 }
 
 void Core::sendBroadcastMessage()
 {
+  if( m_devPreviewIsolated ) return;
   if( !isConnected() )
     return;
 
@@ -573,6 +592,7 @@ void Core::checkNetworkInterface()
 
 void Core::postUsageStatistics()
 {
+  if( m_devPreviewIsolated ) return;
   if( !NetworkManager::instance().isMainInterfaceUp() )
     return;
 
@@ -645,7 +665,7 @@ void Core::onTickEvent( int ticks )
     }
 
     processPendingFileTransfers();
-    mp_broadcaster->onTickEvent( ticks );
+    if( !m_devPreviewIsolated ) mp_broadcaster->onTickEvent( ticks );
 
     if( Settings::instance().tickIntervalBroadcasting() > 0 && (ticks % Settings::instance().tickIntervalBroadcasting() == 0) )
       sendBroadcastMessage();

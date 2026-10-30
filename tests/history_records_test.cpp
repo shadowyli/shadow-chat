@@ -19,7 +19,7 @@ int main(int argc,char** argv)
   QString html=record("Alice","2026-10-28T12:30:00","<b>Alice</b>: hello<br>second line<br>");
   html+=record("Bob","2026-10-27T11:20:00","<a href=\"file:///C:/素材/test.psd\">test.psd</a><br>");
   html+=record("Bob","2026-10-27T11:21:00","<a href=\"file:///C:/素材/test.png\"><img src=\"file:///C:/素材/test.png\"></a><br>");
-  html+=record("Alice","2026-10-28T12:31:00","<a href=\"https://flowx.gz/tools?a=1&amp;b=2\">FlowX</a><br>");
+  html+=record("Alice","2026-10-28T12:31:00","<a href=\"https://example.test/tools?a=1&amp;b=2\">链接示例</a><br>");
   QList<HistoryRecord> records=shadowChatHistoryRecords(html);
   assert(records.size()==4);
   assert(records[0].sender=="Alice" && records[0].timestamp.date()==QDate(2026,10,28));
