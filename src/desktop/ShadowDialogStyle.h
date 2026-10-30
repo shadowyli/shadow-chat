@@ -1,6 +1,7 @@
 #ifndef SHADOWDIALOGSTYLE_H
 #define SHADOWDIALOGSTYLE_H
 #include <QtWidgets>
+#include "ShadowStyle.h"
 
 class ShadowDialogStyle
 {
@@ -42,7 +43,7 @@ public:
       "QToolButton:hover{background:#edf3fc;}"
       "QProgressBar{background:#edf1f6;border:0;border-radius:4px;text-align:center;}"
       "QProgressBar::chunk{background:#528aeb;border-radius:4px;}"
-      "QSpinBox,QDoubleSpinBox{background:#f7f9fc;border:1px solid #dce4f0;border-radius:6px;padding:6px;}");
+      "QSpinBox,QDoubleSpinBox{background:#f7f9fc;border:1px solid #dce4f0;border-radius:6px;padding:6px;}")+ShadowStyle::comboBoxStyleSheet();
   }
 
   static void apply(QWidget* widget)
@@ -50,6 +51,40 @@ public:
     widget->setProperty("shadowDialog",true);
     widget->setFont(QFont(QStringLiteral("Microsoft YaHei UI"),10));
     widget->setStyleSheet(styleSheet());
+  }
+
+  static bool confirm(QWidget* parent,const QString& title,const QString& text,const QString& action)
+  {
+    QDialog dialog(parent);
+    dialog.setObjectName("ShadowConfirmationDialog");
+    dialog.setWindowTitle(title);
+    dialog.setMinimumWidth(400);
+    apply(&dialog);
+    QVBoxLayout* layout=new QVBoxLayout(&dialog);
+    layout->setContentsMargins(24,20,24,20);
+    layout->setSpacing(20);
+    QLabel* message=new QLabel(text,&dialog);
+    message->setObjectName("ShadowConfirmationText");
+    message->setTextFormat(Qt::PlainText);
+    message->setWordWrap(true);
+    layout->addWidget(message);
+    QHBoxLayout* buttons=new QHBoxLayout;
+    buttons->addStretch();
+    QPushButton* cancel=new QPushButton(QStringLiteral("取消"),&dialog);
+    cancel->setObjectName("ShadowConfirmationCancel");
+    cancel->setDefault(true);
+    QPushButton* accept=new QPushButton(action,&dialog);
+    accept->setObjectName("ShadowConfirmationAccept");
+    accept->setProperty("role","primary");
+    accept->setAutoDefault(false);
+    buttons->addWidget(cancel);
+    buttons->addWidget(accept);
+    layout->addLayout(buttons);
+    QObject::connect(cancel,&QPushButton::clicked,&dialog,&QDialog::reject);
+    QObject::connect(accept,&QPushButton::clicked,&dialog,&QDialog::accept);
+    dialog.adjustSize();
+    cancel->setFocus();
+    return dialog.exec()==QDialog::Accepted;
   }
 };
 #endif

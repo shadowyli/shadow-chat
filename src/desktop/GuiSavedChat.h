@@ -27,13 +27,14 @@
 #include "Config.h"
 #include "HistoryRecord.h"
 
+class QStackedWidget;
 
 class GuiSavedChat : public QMainWindow
 {
   Q_OBJECT
 
 public:
-  explicit GuiSavedChat( QWidget *parent = Q_NULLPTR );
+  explicit GuiSavedChat( QWidget *parent = Q_NULLPTR, bool embedded = false );
   inline const QString& savedChatName() const;
   void setSearchText( const QString& text );
 
@@ -54,11 +55,14 @@ protected slots:
   void checkAnchorClicked( const QUrl& );
   void filterHistory();
   void locateHistoryResult();
+  void showHistoryContext();
 
 protected:
   void setupToolBar( QToolBar* );
 
 private:
+  void rebuildHistoryResults( bool resetReadingState );
+
   QTextBrowser* mp_teSavedChat;
   QLineEdit* mp_leFilter;
   QCheckBox* mp_cbCaseSensitive;
@@ -72,7 +76,12 @@ private:
   QComboBox* mp_sortOrder;
   QListWidget* mp_results;
   QLabel* mp_resultCount;
+  QLabel* mp_emptyState;
+  QStackedWidget* mp_resultsStack;
+  QPushButton* mp_contextButton;
+  bool m_embedded;
   QList<HistoryRecord> m_records;
+  QStringList m_recordKeys;
 
 };
 

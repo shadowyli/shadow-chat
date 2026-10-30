@@ -35,12 +35,15 @@ if errorlevel 1 goto build_failed
 nmake /nologo /f Makefile.%1
 if errorlevel 1 goto build_failed
 popd
+pushd "%SHADOWCHAT_REGRESSION_ROOT%"
+if errorlevel 1 goto test_failed
 if "%1"=="update_build" (
   "%SHADOWCHAT_REGRESSION_ROOT%\bin\%1_test.exe" "%SHADOWCHAT_RELEASE_ENV%" "%SHADOWCHAT_RELEASE_CHANNEL%" "%SHADOWCHAT_UPDATE_SOURCE%"
 ) else (
   "%SHADOWCHAT_REGRESSION_ROOT%\bin\%1_test.exe"
 )
 set "TEST_EXIT=%errorlevel%"
+popd
 echo ==== EXIT %1 %TEST_EXIT% ====
 if not "%TEST_EXIT%"=="0" goto test_failed
 echo ==== PASS %1 ====

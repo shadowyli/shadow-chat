@@ -7,9 +7,9 @@ root=Path(__file__).resolve().parent.parent
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('installer',nargs='?',type=Path)
 parser.add_argument('--receipt',type=Path,default=root/'dist/local/release-build.json')
-parser.add_argument('--previous-installer',type=Path,default=root/'dist/影聊-1.1.1-test-x86-安装包.exe')
-parser.add_argument('--previous-receipt',type=Path,default=root/'dist/release-build.json')
-parser.add_argument('--recovery-dir',type=Path,default=root/'delivery-private')
+parser.add_argument('--previous-installer',type=Path,required=True)
+parser.add_argument('--previous-receipt',type=Path,required=True)
+parser.add_argument('--recovery-dir',type=Path,default=Path(os.environ.get('SHADOWCHAT_RECOVERY_DIR',str(root/'delivery-private'))))
 args=parser.parse_args()
 metadata=json.loads(args.receipt.read_text(encoding='utf-8'))
 installer=Path(metadata['installer'])
@@ -17,6 +17,12 @@ if args.installer:
  installer=args.installer.resolve()
 if hashlib.sha256(installer.read_bytes()).hexdigest()!=metadata['sha256']:
  raise SystemExit('Installer differs from final release build receipt')
+previous=args.previous_installer.resolve()
+previous_receipt=json.loads(args.previous_receipt.read_text(encoding='utf-8'))
+if not previous.is_file():
+ raise SystemExit('Explicit previous-version installer is required for upgrade verification')
+if hashlib.sha256(previous.read_bytes()).hexdigest()!=previous_receipt['sha256']:
+ raise SystemExit('Previous installer does not match its recorded published receipt')
 fixture=args.receipt.resolve().parent/('installation-test-'+uuid.uuid4().hex[:8])
 install=fixture/'program'
 profile=fixture/'documents'/'影聊'/'accounts'/'install-test@example.test'
@@ -54,14 +60,10 @@ def verify_icons():
   if winreg.QueryValueEx(key,'URLInfoAbout')[0]!=metadata['downloadPage']:raise SystemExit('Installed download page does not match selected environment')
  icon_verifications.append({'shortcuts':rows,'displayIcon':location,'icoSha256':hash_file(icon)})
 try:
- previous=args.previous_installer.resolve()
  previous_installed=False
- if not previous.is_file():raise SystemExit('Previous 1.1.1 installer is required for upgrade verification')
  if previous.is_file():
   prior=subprocess.run([str(previous),'/S','/D='+str(install)],timeout=120)
   if prior.returncode:raise SystemExit('Previous-version installation failed')
-  previous_receipt=json.loads(args.previous_receipt.read_text(encoding='utf-8'))
-  if hash_file(previous)!=previous_receipt['sha256']:raise SystemExit('Previous installer does not match its recorded published receipt')
   if hash_file(install/'ShadowChat.exe')!=previous_receipt['sourceExecutableSha256']:raise SystemExit('Previous-version payload mismatch')
   previous_installed=True
  for attempt in range(2):
@@ -139,6 +141,7 @@ report={'installer':str(installer),'installDirectory':str(install),'installAndOv
  'installedBuildIdentity':identity,
  'versionedShortcutIconsVerified':True,'shortcutIconVerification':icon_verifications,
  'previousVersionInstalledBeforeUpgrade':previous_installed,
+ 'previousVersion':previous_receipt['version'],'previousInstallerSha256':previous_receipt['sha256'],
  'scope':'Silent installer on this Windows host; synthetic fixture external to install folder. Dependency probe exits at the argument guard before Qt UI/account startup. No real account launched; not a clean Windows VM.'}
 (fixture/'result.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
 (args.receipt.resolve().parent/'installation-verification.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')

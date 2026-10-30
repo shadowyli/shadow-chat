@@ -19,6 +19,8 @@ parser.add_argument('action', nargs='?', choices=('build', 'rebuild', 'test', 'c
 parser.add_argument('--environment', choices=ENVIRONMENTS, default='local')
 parser.add_argument('--local-update-port', type=int, default=5173)
 parser.add_argument('--tests', nargs='+')
+parser.add_argument('--tls-dir', type=Path, default=Path(os.environ.get('SHADOWCHAT_TLS_DIR', str(root/'dist/tls-runtime-x86'))))
+parser.add_argument('--tls-fixture', type=Path)
 args = parser.parse_args()
 if not 1 <= args.local_update_port <= 65535:
     raise SystemExit('Local update port must be between 1 and 65535')
@@ -86,6 +88,10 @@ if args.action == 'test':
             raise SystemExit('Test configuration differs from production build: '+field)
     if sha256(executable) != recorded['sourceExecutableSha256']:
         raise SystemExit('Production executable changed since selected environment build')
+    snapshot = output/'build-source-inputs.json'
+    if sha256(snapshot) != recorded['sourceSnapshotSha256']:
+        raise SystemExit('Source snapshot differs from the selected production build')
+    verify(snapshot)
     test_define = {
         'local': 'SHADOWCHAT_LOCAL_UPDATE_PORT='+str(args.local_update_port),
         'dev': 'SHADOWCHAT_BUILD_DEV',
@@ -104,16 +110,22 @@ if args.action == 'test':
         environment['SHADOWCHAT_TEST_SELECTION'] = ' '.join(args.tests)
     else:
         environment.pop('SHADOWCHAT_TEST_SELECTION', None)
-    tls_runtime = root/'dist/tls-runtime-x86'
+    tls_runtime = args.tls_dir.resolve()
     tls_record = json.loads((tls_runtime/'TLS-DEPENDENCIES.json').read_text(encoding='utf-8'))
     for name, expected in tls_record['runtimeSha256'].items():
         if sha256(tls_runtime/name) != expected:
             raise SystemExit('Test TLS runtime digest mismatch: '+name)
     environment['PATH'] = str(tls_runtime)+os.pathsep+environment['PATH']
-    fixtures = [directory for directory in (root/'dist').glob('tls-fixture-*') if (directory/'server.pem').is_file() and (directory/'synthetic-server-key.pem').is_file()]
-    if not fixtures:
-        raise SystemExit('Synthetic TLS fixture is required for update network regression')
-    environment['SHADOW_UPDATE_TLS_FIXTURE'] = str(max(fixtures, key=lambda directory: directory.stat().st_mtime))
+    if not args.tests or 'update_network' in args.tests:
+        candidates = [args.tls_fixture] if args.tls_fixture else [
+            directory for parent in (output, root/'dist') for directory in parent.glob('tls-fixture-*')
+        ]
+        fixtures = [directory for directory in candidates if all(
+            (directory/name).is_file() for name in ('server.pem', 'synthetic-server-key.pem')
+        )]
+        if not fixtures:
+            raise SystemExit('Synthetic TLS fixture is required; use --tls-fixture or packaging/verify_tls.py')
+        environment['SHADOW_UPDATE_TLS_FIXTURE'] = str(max(fixtures, key=lambda directory: directory.stat().st_mtime).resolve())
     regression = output/'regression'
     test_record = output/'test-configuration.json'
     prior_test = json.loads(test_record.read_text(encoding='utf-8')) if test_record.exists() else None

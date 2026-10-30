@@ -86,11 +86,13 @@ int main( int argc, char** argv )
     "profile first-open geometry stays inside the owning screen" );
   QWidget* surface = dialog.findChild<QWidget*>( "shadowDialogSurface" );
   QWidget* shadow = dialog.findChild<QWidget*>( "shadowDialogShadow" );
+  const QMargins shadowMargins = dialog.layout()->contentsMargins();
   check( surface && shadow && dialog.testAttribute( Qt::WA_TranslucentBackground ) &&
     shadow->isVisible() && shadow->testAttribute( Qt::WA_TransparentForMouseEvents ),
     "profile has a translucent outer shadow that does not intercept mouse input" );
   check( surface && !surface->mask().contains( QPoint() ) && dialog.mask().isEmpty() &&
-    surface->geometry().left() >= 20 && surface->geometry().top() >= 20 &&
+    shadowMargins == QMargins( 14, 14, 14, 14 ) &&
+    surface->geometry().left() >= shadowMargins.left() && surface->geometry().top() >= shadowMargins.top() &&
     shadow->geometry() == dialog.rect(), "rounded content leaves room for all sides of the shadow" );
   if( surface && shadow )
   {
@@ -138,7 +140,7 @@ int main( int argc, char** argv )
   check( dialog.rect().contains( QRect( saveAction->mapTo( &dialog, QPoint() ), saveAction->size() ) ) &&
     editorScroll->verticalScrollBar()->maximum() > 0, "small window scrolls form while keeping save footer visible" );
   check( shadow && shadow->geometry() == dialog.rect() && surface &&
-    surface->geometry().left() >= 20 && surface->mask().contains( surface->rect().center() ),
+    surface->geometry().left() >= shadowMargins.left() && surface->mask().contains( surface->rect().center() ),
     "shadow and rounded surface follow small-window resizing" );
   editorScroll->ensureWidgetVisible( dialog.findChild<QLineEdit*>( "mp_lePhone" ) ); app.processEvents();
   QLineEdit* phoneAction = dialog.findChild<QLineEdit*>( "mp_lePhone" );

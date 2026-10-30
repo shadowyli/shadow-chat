@@ -11,6 +11,7 @@
 #include "ShadowChatTranscript.h"
 #include "ShadowDialogChrome.h"
 #include "ShadowStyle.h"
+#include "ShadowDialogStyle.h"
 #include "ShadowScreenshotPreview.h"
 #include "GuiChat.h"
 #include "MessageManager.h"
@@ -18,10 +19,13 @@
 #include "ShadowDirectoryPage.h"
 #include "ShadowSearchPanel.h"
 #include "GuiSavedChat.h"
+#include "GuiWizard.h"
 #include "GuiChatList.h"
 #include "ShadowConversationPreferences.h"
 #include "Random.h"
 #include "Protocol.h"
+#include "ShadowWindowShape.h"
+#include <QTcpServer>
 #include <QtWidgets>
 #include <cstdio>
 
@@ -179,6 +183,149 @@ static void settle()
   loop.exec();
 }
 
+static bool symmetricCorners( const QWidget& widget )
+{
+  const QRegion mask = widget.mask();
+  if( mask.isEmpty() ) return false;
+  for( int row = 0; row < 18; ++row )
+    for( int column = 0; column < 18; ++column )
+    {
+      const bool included = mask.contains( QPoint( column, row ) );
+      if( mask.contains( QPoint( widget.width() - 1 - column, row ) ) != included ||
+          mask.contains( QPoint( column, widget.height() - 1 - row ) ) != included ||
+          mask.contains( QPoint( widget.width() - 1 - column, widget.height() - 1 - row ) ) != included )
+        return false;
+    }
+  return mask.contains( widget.rect().center() ) && !mask.contains( QPoint() );
+}
+
+static int verifyWindowCorners( GuiMain& window )
+{
+  const QSize originalSize = window.size();
+  const QList<QSize> sizes = QList<QSize>() << QSize( 900, 700 ) << QSize( 901, 701 ) << QSize( 1280, 820 );
+  for( const QSize& size : sizes )
+  {
+    window.resize( size );
+    QApplication::processEvents();
+    CHECK( symmetricCorners( window ) );
+    CHECK( window.mask() == ShadowWindowShape::roundedMask( window.size() ) );
+  }
+  window.grab().save( QDir::currentPath() + "/ui-036-main-corners.png" );
+  QDialog dialog( &window );
+  QVBoxLayout* layout = new QVBoxLayout( &dialog );
+  layout->addWidget( new QLabel( QStringLiteral( "四角统一圆角验证" ), &dialog ) );
+  dialog.resize( 500, 320 );
+  dialog.show();
+  QApplication::processEvents();
+  QWidget* surface = dialog.findChild<QWidget*>( "shadowDialogSurface" );
+  CHECK( surface && symmetricCorners( *surface ) );
+  dialog.grab().save( QDir::currentPath() + "/ui-036-dialog-corners.png" );
+  dialog.reject();
+  window.showMaximized();
+  QApplication::processEvents();
+  CHECK( window.mask().isEmpty() );
+  window.showNormal();
+  window.resize( originalSize );
+  QApplication::processEvents();
+  CHECK( symmetricCorners( window ) );
+  std::puts( "PASS symmetric window corners: four mirrored corners, odd/even sizes, shared dialog radius, maximize and restore" );
+  return 0;
+}
+
+static int verifyPreviewSending( GuiMain& window, Core& core, ShadowDevPreview& preview )
+{
+  CHECK( core.devPreviewIsolated() && ShadowDevPreview::testPeerReady() );
+  CHECK( QMetaObject::invokeMethod( &window, "showChat", Qt::DirectConnection, Q_ARG( VNumber, VNumber( 88001 ) ) ) );
+  settle();
+  GuiChat* chat = Q_NULLPTR;
+  for( GuiChat* candidate : window.findChildren<GuiChat*>() )
+    if( candidate->isVisible() ) chat = candidate;
+  CHECK( chat && chat->chatId() == 88001 );
+  QObject* transport = preview.findChild<QObject*>( "ShadowPreviewTransport" );
+  QTcpServer* server = preview.findChild<QTcpServer*>( "ShadowPreviewPeerServer" );
+  CHECK( transport && server && server->serverAddress().isLoopback() && server->serverPort() > 0 );
+  QTextEdit* input = chat->findChild<QTextEdit*>( "GuiMessageEdit" );
+  QPushButton* send = chat->findChild<QPushButton*>( "ShadowSendButton" );
+  QLabel* feedback = chat->findChild<QLabel*>( "ShadowSendFeedback" );
+  CHECK( input && send && feedback );
+  const int originalCount = ChatManager::instance().chat( 88001 ).messages().size();
+  const int receivedBefore = transport->property( "receivedMessages" ).toInt();
+  const int queuedBefore = MessageManager::instance().countMessagesToSendInChatId( 88001 );
+  chat->addText( QStringLiteral( "1234564 本机收发验证" ) );
+  send->click();
+  CHECK( input->toPlainText().isEmpty() );
+  CHECK( feedback->text().contains( QStringLiteral( "本机测试对端已收到" ) ) );
+  CHECK( transport->property( "receivedMessages" ).toInt() == receivedBefore + 1 );
+  CHECK( ChatManager::instance().chat( 88001 ).messages().size() == originalCount + 2 );
+  CHECK( ChatManager::instance().chat( 88001 ).messages().last().message().contains( QStringLiteral( "1234564" ) ) );
+  CHECK( MessageManager::instance().countMessagesToSendInChatId( 88001 ) == queuedBefore );
+  const User originalPeer = UserManager::instance().findUser( 87001 );
+  User outsidePeer = originalPeer;
+  outsidePeer.setHash( "outside-test-fixtures" );
+  UserManager::instance().setUser( outsidePeer );
+  QString error;
+  CHECK( !ShadowDevPreview::sendTestText( 88001, "must not reach peer", false, &error ) );
+  CHECK( transport->property( "receivedMessages" ).toInt() == receivedBefore + 1 );
+  UserManager::instance().setUser( originalPeer );
+  QImage screenshot( 1000, 520, QImage::Format_RGB32 );
+  screenshot.fill( QColor( "#DCE8F8" ) );
+  chat->addText( QStringLiteral( "图片发送后保留的草稿" ) );
+  QImage submittedImage;
+  bool screenshotSent = false;
+  QTimer::singleShot( 100, chat, [&]() {
+    ShadowScreenshotPreview* editor = qobject_cast<ShadowScreenshotPreview*>( QApplication::activeModalWidget() );
+    if( !editor ) return;
+    QWidget* canvas = editor->findChild<QWidget*>( "ShadowScreenshotCanvas" );
+    QPushButton* rectangle = editor->findChild<QPushButton*>( "ShadowScreenshotrectangle" );
+    if( !canvas || !rectangle ) { editor->reject(); return; }
+    rectangle->click();
+    const QPoint begin = canvas->rect().center() - QPoint( 90, 50 );
+    const QPoint end = canvas->rect().center() + QPoint( 90, 50 );
+    QMouseEvent press( QEvent::MouseButtonPress, begin, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
+    QMouseEvent move( QEvent::MouseMove, end, Qt::NoButton, Qt::LeftButton, Qt::NoModifier );
+    QMouseEvent release( QEvent::MouseButtonRelease, end, Qt::LeftButton, Qt::NoButton, Qt::NoModifier );
+    QApplication::sendEvent( canvas, &press );
+    QApplication::sendEvent( canvas, &move );
+    QApplication::sendEvent( canvas, &release );
+    submittedImage = editor->selectedImage().toImage();
+    editor->findChild<QPushButton*>( "ShadowScreenshotSend" )->click();
+    screenshotSent = editor->result() == QDialog::Accepted;
+    if( !screenshotSent ) editor->reject();
+  } );
+  chat->previewScreenshot( QPixmap::fromImage( screenshot ) );
+  CHECK( screenshotSent && submittedImage != screenshot );
+  const QString imagePath = preview.property( "lastTestReceivedFile" ).toString();
+  CHECK( QImage( imagePath ).convertToFormat( submittedImage.format() ) == submittedImage );
+  CHECK( input->toPlainText() == QStringLiteral( "图片发送后保留的草稿" ) );
+  CHECK( transport->property( "receivedMessages" ).toInt() == receivedBefore + 2 );
+  QTemporaryDir files;
+  CHECK( files.isValid() );
+  const QByteArray binary = QByteArray::fromHex( "000102ff10203040" ).repeated( 10000 );
+  const QString sourcePath = files.path() + "/test-file.bin";
+  QFile source( sourcePath );
+  CHECK( source.open( QIODevice::WriteOnly ) && source.write( binary ) == binary.size() );
+  source.close();
+  CHECK( QMetaObject::invokeMethod( &window, "sendFilesFromChat", Qt::DirectConnection,
+    Q_ARG( VNumber, VNumber( 88001 ) ), Q_ARG( QStringList, QStringList() << sourcePath ) ) );
+  QFile receivedFile( preview.property( "lastTestReceivedFile" ).toString() );
+  CHECK( receivedFile.open( QIODevice::ReadOnly ) && receivedFile.readAll() == binary );
+  CHECK( transport->property( "receivedMessages" ).toInt() == receivedBefore + 3 );
+  CHECK( core.findChildren<Connection*>().isEmpty() && !core.startFileTransferServer() );
+  window.grab().save( QDir::currentPath() + "/ui-037-local-send.png" );
+  input->clear();
+  server->close();
+  chat->addText( QStringLiteral( "失败时保留此输入" ) );
+  const int beforeFailure = ChatManager::instance().chat( 88001 ).messages().size();
+  send->click();
+  CHECK( input->toPlainText() == QStringLiteral( "失败时保留此输入" ) );
+  CHECK( feedback->text().contains( QStringLiteral( "未就绪" ) ) );
+  CHECK( ChatManager::instance().chat( 88001 ).messages().size() == beforeFailure );
+  CHECK( transport->property( "receivedMessages" ).toInt() == receivedBefore + 3 );
+  CHECK( verifyWindowCorners( window ) == 0 );
+  std::puts( "PASS local preview sending: TCP peer receipt, text via send button, edited screenshot exact pixels, binary file exact bytes, no office peers or regular file server, invalid recipient rejected, failure keeps draft without fake message" );
+  return 0;
+}
+
 static QList<QImage> notificationIcons( GuiMain& window )
 {
   QList<QImage> icons;
@@ -270,6 +417,27 @@ static GuiChatItem* conversationRow( QTreeWidget* list, VNumber id )
   return Q_NULLPTR;
 }
 
+static bool chooseConversationAction( GuiChatList* sidebar, QTreeWidget* list, GuiChatItem* row, const QString& text )
+{
+  list->scrollToItem( row );
+  bool triggered = false;
+  QTimer::singleShot( 80, sidebar, [&]() {
+    QMenu* menu = qobject_cast<QMenu*>( QApplication::activePopupWidget() );
+    if( !menu ) return;
+    for( QAction* action : menu->actions() )
+      if( action->text() == text )
+      {
+        action->trigger();
+        triggered = true;
+        break;
+      }
+    menu->close();
+  } );
+  QMetaObject::invokeMethod( sidebar, "showChatMenu", Qt::DirectConnection,
+    Q_ARG( QPoint, list->visualItemRect( row ).center() ) );
+  return triggered;
+}
+
 static int verifyConversationSidebar( GuiMain& window, Core& core )
 {
   CHECK( QMetaObject::invokeMethod( &window, "showModernMessages", Qt::DirectConnection ) );
@@ -283,7 +451,21 @@ static int verifyConversationSidebar( GuiMain& window, Core& core )
   const Chat original = ChatManager::instance().chat( 88006 );
   CHECK( original.isValid() );
   const ShadowConversationPreferences preferences;
-  const bool wasPinned = preferences.pinned( original );
+  QMap<VNumber, bool> originalPins;
+  for( const Chat& chat : ChatManager::instance().constChatList() )
+    if( !chat.isDefault() )
+    {
+      originalPins.insert( chat.id(), preferences.pinned( chat ) );
+      CHECK( preferences.setPinned( chat, false ) );
+    }
+  sidebar->updateChats();
+  settle();
+  QToolButton* expand = sidebar->findChild<QToolButton*>( "ShadowQuickExpand" );
+  CHECK( sidebar->findChildren<QToolButton*>( "ShadowQuickChat" ).isEmpty() );
+  CHECK( !sidebar->findChild<QToolButton*>( "ShadowQuickTransfers" ) );
+  CHECK( !sidebar->findChild<QWidget*>( "ShadowQuickArea" )->isVisible() );
+  CHECK( expand && !expand->isVisible() );
+  const bool wasPinned = originalPins.value( original.id() );
   const bool wasMuted = preferences.muted( original );
   const bool wasPending = preferences.pending( original );
   const bool wasHidden = preferences.hidden( original );
@@ -319,19 +501,104 @@ static int verifyConversationSidebar( GuiMain& window, Core& core )
   CHECK( preferences.setPending( changed, false ) );
   sidebar->updateChat( changed );
   CHECK( row->isHidden() );
-  CHECK( preferences.setPinned( changed, true ) && preferences.setMuted( changed, true ) );
+  filters->setCurrentIndex( 0 );
+  CHECK( chooseConversationAction( sidebar, list, row, QStringLiteral( "置顶会话" ) ) );
+  CHECK( preferences.pinned( changed ) && preferences.setMuted( changed, true ) );
   sidebar->updateChat( changed );
   filters->setCurrentIndex( 0 );
   settle();
   CHECK( static_cast<GuiChatItem*>( list->topLevelItem( 0 ) )->chatId() == changed.id() );
   CHECK( row->data( 0, GuiChatItem::ChatMuted ).toBool() );
   QList<QToolButton*> shortcuts = sidebar->findChildren<QToolButton*>( "ShadowQuickChat" );
-  CHECK( shortcuts.size() == 9 );
-  QToolButton* expand = sidebar->findChild<QToolButton*>( "ShadowQuickExpand" );
-  CHECK( expand && expand->isVisible() );
+  CHECK( shortcuts.size() == 1 && shortcuts.first()->property( "chatId" ).toULongLong() == changed.id() );
+  CHECK( sidebar->findChild<QWidget*>( "ShadowQuickArea" )->isVisible() );
+  CHECK( shortcuts.first()->mapTo( sidebar, QPoint() ).x() < 20 );
+  CHECK( !expand->isVisible() );
+  filters->setCurrentIndex( 3 );
+  settle();
+  CHECK( sidebar->findChildren<QToolButton*>( "ShadowQuickChat" ).size() == 1 );
+  filters->setCurrentIndex( 0 );
+  QToolButton* pinned = sidebar->findChildren<QToolButton*>( "ShadowQuickChat" ).first();
+  CHECK( QMetaObject::invokeMethod( pinned, "customContextMenuRequested", Qt::DirectConnection,
+    Q_ARG( QPoint, QPoint( 4, 4 ) ) ) );
+  QMenu* pinMenu = qobject_cast<QMenu*>( QApplication::activePopupWidget() );
+  CHECK( pinMenu && pinMenu->actions().size() == 1 && pinMenu->actions().first()->text() == QStringLiteral( "取消置顶" ) );
+  pinMenu->actions().first()->trigger();
+  pinMenu->close();
+  settle();
+  CHECK( !preferences.pinned( changed ) && sidebar->findChildren<QToolButton*>( "ShadowQuickChat" ).isEmpty() );
+  CHECK( !sidebar->findChild<QWidget*>( "ShadowQuickArea" )->isVisible() );
+  for( const Chat& chat : ChatManager::instance().constChatList() )
+    if( !chat.isDefault() ) CHECK( preferences.setPinned( chat, true ) );
+  sidebar->updateChats();
+  settle();
+  CHECK( sidebar->findChildren<QToolButton*>( "ShadowQuickChat" ).size() == 10 );
+  CHECK( expand->isVisible() && expand->accessibleName().contains( QStringLiteral( "置顶会话" ) ) );
+  window.grab().save( QDir::currentPath() + "/ui-035-pinned-collapsed.png" );
   expand->click();
   settle();
   CHECK( sidebar->findChildren<QToolButton*>( "ShadowQuickChat" ).size() == 11 );
+  for( QToolButton* button : sidebar->findChildren<QToolButton*>( "ShadowQuickChat" ) )
+    CHECK( preferences.pinned( ChatManager::instance().chat( button->property( "chatId" ).toULongLong() ) ) );
+  const Chat temporarilyHidden = ChatManager::instance().chat( 88001 );
+  const bool originalHidden = preferences.hidden( temporarilyHidden );
+  CHECK( preferences.setHidden( temporarilyHidden, true ) );
+  sidebar->updateChat( temporarilyHidden );
+  settle();
+  CHECK( sidebar->findChildren<QToolButton*>( "ShadowQuickChat" ).size() == 10 );
+  CHECK( !expand->isVisible() );
+  CHECK( preferences.setHidden( temporarilyHidden, originalHidden ) );
+  sidebar->updateChat( temporarilyHidden );
+  settle();
+  expand->click();
+  settle();
+  QList<Chat> extraPinnedChats;
+  QList<User> extraPinnedUsers;
+  for( int index = 0; index < 18; ++index )
+  {
+    User user( 98001 + index );
+    user.setName( QStringLiteral( "置顶测试%1（合成）" ).arg( index + 1 ) );
+    user.setHash( QStringLiteral( "pinned-overflow-fixture-%1" ).arg( index ) );
+    UserManager::instance().setUser( user );
+    Group group;
+    group.setId( 99001 + index );
+    group.setName( user.name() );
+    group.setChatType( Group::PrivateChat );
+    group.setPrivateId( QStringLiteral( "pinned-overflow-chat-%1" ).arg( index ) );
+    group.addUser( ID_LOCAL_USER );
+    group.addUser( user.id() );
+    Chat chat;
+    chat.setGroup( group );
+    ChatManager::instance().setChat( chat );
+    CHECK( preferences.setPinned( chat, true ) );
+    sidebar->updateChat( chat );
+    extraPinnedChats.append( chat );
+    extraPinnedUsers.append( user );
+  }
+  settle();
+  CHECK( sidebar->findChildren<QToolButton*>( "ShadowQuickChat" ).size() == 29 );
+  QScrollArea* pinnedScroll = sidebar->findChild<QScrollArea*>( "ShadowPinnedScroll" );
+  CHECK( pinnedScroll && pinnedScroll->verticalScrollBar()->maximum() > 0 &&
+    pinnedScroll->horizontalScrollBar()->maximum() == 0 );
+  QToolButton* lastPinned = sidebar->findChildren<QToolButton*>( "ShadowQuickChat" ).last();
+  pinnedScroll->ensureWidgetVisible( lastPinned );
+  settle();
+  CHECK( pinnedScroll->viewport()->rect().contains( lastPinned->mapTo( pinnedScroll->viewport(), lastPinned->rect().center() ) ) );
+  window.grab().save( QDir::currentPath() + "/ui-035-pinned-overflow.png" );
+  for( const Chat& chat : extraPinnedChats )
+  {
+    ChatManager::instance().removeChat( chat );
+    core.chatRemoved( chat );
+  }
+  for( const User& user : extraPinnedUsers )
+  {
+    UserManager::instance().removeUser( user );
+    core.userRemoved( user );
+  }
+  sidebar->updateChats();
+  settle();
+  row = conversationRow( list, changed.id() );
+  CHECK( row );
   expand->click();
   settle();
   QToolButton* shortcut = Q_NULLPTR;
@@ -350,16 +617,367 @@ static int verifyConversationSidebar( GuiMain& window, Core& core )
     QDialog* dialog = qobject_cast<QDialog*>( QApplication::activeModalWidget() );
     if( dialog ) { transfersOpened = dialog->objectName() == "ShadowTransferDialog"; dialog->reject(); }
   } );
-  sidebar->findChild<QToolButton*>( "ShadowQuickTransfers" )->click();
+  CHECK( QMetaObject::invokeMethod( &window, "showModernTransfers", Qt::DirectConnection ) );
   CHECK( transfersOpened );
+  for( auto pin = originalPins.constBegin(); pin != originalPins.constEnd(); ++pin )
+    CHECK( preferences.setPinned( ChatManager::instance().chat( pin.key() ), pin.value() ) );
   CHECK( preferences.setPinned( original, wasPinned ) && preferences.setMuted( original, wasMuted ) &&
          preferences.setPending( original, wasPending ) && preferences.setHidden( original, wasHidden ) );
   ChatManager::instance().setChat( original );
   core.chatChanged( original );
+  sidebar->updateChats();
   filters->setCurrentIndex( 0 );
   settle();
   window.grab().save( QDir::currentPath() + "/ui-sidebar-recent.png" );
-  std::puts( "PASS conversation sidebar: summaries/time, unread/@me/pending filters, stable pin/mute, quick grid expand/open, file transfer entry and persistent selected chat" );
+  std::puts( "PASS conversation sidebar: summaries/time, unread/@me/pending filters, actual pin/unpin menus, pinned-only grid without file shortcut or empty space, single/10-pin collapsed/11-pin expanded/29-pin scroll, hidden pins, local transfer dialog and persistent selected chat" );
+  return 0;
+}
+
+static int verifyReply( GuiMain& window, ShadowDevPreview& preview )
+{
+  CHECK(QMetaObject::invokeMethod(&window,"showChat",Qt::DirectConnection,Q_ARG(VNumber,88001)));
+  window.findChild<ShadowSearchPanel*>("ShadowSearchPanel")->dismiss();
+  settle();
+  GuiChat* chat=Q_NULLPTR;
+  for(GuiChat* candidate:window.findChildren<GuiChat*>())if(candidate->isVisible())chat=candidate;
+  CHECK(chat);
+  QTextBrowser* transcript=chat->findChild<QTextBrowser*>("GuiChatViewer");
+  QTextEdit* input=chat->findChild<QTextEdit*>("GuiMessageEdit");
+  QPushButton* send=chat->findChild<QPushButton*>("ShadowSendButton");
+  QWidget* replyBar=chat->findChild<QWidget*>("ShadowReplyPreview");
+  CHECK(transcript&&input&&send&&replyBar);
+  QTextCursor source=transcript->document()->find(QStringLiteral("这是一段"));
+  CHECK(!source.isNull());
+  transcript->setTextCursor(source);
+  transcript->ensureCursorVisible();
+  const QPoint point=transcript->cursorRect(source).center();
+  bool replySelected=false;
+  QTimer::singleShot(60,chat,[&]() {
+    QMenu* menu=qobject_cast<QMenu*>(QApplication::activePopupWidget());
+    if(!menu)return;
+    for(QAction* action:menu->actions())if(action->objectName()=="ShadowReplyAction")
+    {
+      action->trigger();
+      replySelected=true;
+      break;
+    }
+    menu->close();
+  });
+  CHECK(QMetaObject::invokeMethod(chat,"customContextMenu",Qt::DirectConnection,Q_ARG(QPoint,point)));
+  CHECK(replySelected&&replyBar->isVisible());
+  CHECK(chat->findChild<QLabel*>("ShadowReplyText")->text().contains(QStringLiteral("林舟")));
+  CHECK(chat->findChild<QLabel*>("ShadowReplyText")->text().contains(QStringLiteral("这是一段")));
+  input->setPlainText(QStringLiteral("会话 A 的独立正文"));
+  CHECK(QMetaObject::invokeMethod(&window,"showChat",Qt::DirectConnection,Q_ARG(VNumber,88002)));
+  CHECK(!replyBar->isVisible()&&input->toPlainText().isEmpty());
+  input->setPlainText(QStringLiteral("会话 B 的独立正文"));
+  CHECK(QMetaObject::invokeMethod(&window,"showChat",Qt::DirectConnection,Q_ARG(VNumber,88001)));
+  CHECK(replyBar->isVisible()&&input->toPlainText()==QStringLiteral("会话 A 的独立正文"));
+  input->setPlainText(QStringLiteral("引用回复发送验收"));
+  QObject* transport=preview.findChild<QObject*>("ShadowPreviewTransport");
+  CHECK(transport);
+  const int before=transport->property("receivedMessages").toInt();
+  const User peer=UserManager::instance().findUser(87001);
+  User outside=peer;
+  outside.setHash("outside-reply-test-fixtures");
+  UserManager::instance().setUser(outside);
+  send->click();
+  CHECK(input->toPlainText()==QStringLiteral("引用回复发送验收")&&replyBar->isVisible());
+  CHECK(transport->property("receivedMessages").toInt()==before);
+  CHECK(QMetaObject::invokeMethod(&window,"showChat",Qt::DirectConnection,Q_ARG(VNumber,88002)));
+  CHECK(input->toPlainText()==QStringLiteral("会话 B 的独立正文"));
+  CHECK(!chat->findChild<QLabel*>("ShadowSendFeedback")->isVisible());
+  CHECK(QMetaObject::invokeMethod(&window,"showChat",Qt::DirectConnection,Q_ARG(VNumber,88001)));
+  CHECK(input->toPlainText()==QStringLiteral("引用回复发送验收")&&replyBar->isVisible());
+  CHECK(chat->findChild<QLabel*>("ShadowSendFeedback")->property("failed").toBool());
+  UserManager::instance().setUser(peer);
+  send->click();
+  settle();
+  CHECK(input->toPlainText().isEmpty()&&!replyBar->isVisible());
+  CHECK(transport->property("receivedMessages").toInt()==before+1);
+  bool storedQuote=false;
+  const Chat sentChat=ChatManager::instance().chat(88001);
+  for(const ChatMessage& message:sentChat.messages())
+    if(message.isFromLocalUser()&&message.message().contains(QStringLiteral("引用回复发送验收")))
+      storedQuote=message.message().contains("bee-quote")&&message.message().contains(QStringLiteral("林舟"));
+  CHECK(storedQuote&&transcript->toPlainText().contains(QStringLiteral("引用回复发送验收")));
+  CHECK(window.grab().save(QDir::currentPath()+"/ui-049-reply-sent.png"));
+  source=transcript->document()->find(QStringLiteral("这是一段"));
+  transcript->setTextCursor(source);
+  transcript->ensureCursorVisible();
+  CHECK(QMetaObject::invokeMethod(chat,"replyToMessage",Qt::DirectConnection,Q_ARG(QPoint,transcript->cursorRect(source).center())));
+  CHECK(replyBar->isVisible());
+  chat->findChild<QToolButton*>("ShadowReplyCancel")->click();
+  CHECK(!replyBar->isVisible());
+  QTextCursor echo=transcript->document()->find(QStringLiteral("本机测试对端已收到"));
+  CHECK(!echo.isNull());
+  QTextTable* outer=Q_NULLPTR;
+  for(QTextFrame* frame=echo.currentFrame();frame;frame=frame->parentFrame())
+    if(QTextTable* table=qobject_cast<QTextTable*>(frame))outer=table;
+  CHECK(outer&&outer->columns()==3);
+  QTextCursor heading=outer->cellAt(0,1).firstCursorPosition();
+  transcript->setTextCursor(heading);
+  transcript->ensureCursorVisible();
+  CHECK(QMetaObject::invokeMethod(chat,"replyToMessage",Qt::DirectConnection,Q_ARG(QPoint,transcript->cursorRect(heading).center())));
+  CHECK(chat->findChild<QLabel*>("ShadowReplyText")->toolTip().contains(QStringLiteral("本机测试对端已收到")));
+  chat->findChild<QToolButton*>("ShadowReplyCancel")->click();
+  QTemporaryDir imageFiles;
+  CHECK(imageFiles.isValid());
+  const QString imagePath=imageFiles.filePath("reply-source.png");
+  QImage image(100,80,QImage::Format_RGB32);
+  image.fill(QColor("#8AADE0"));
+  CHECK(image.save(imagePath));
+  const QString sender=QStringLiteral("图片发送者（合成）");
+  const QString imageUrl=QUrl::fromLocalFile(imagePath).toString();
+  const QString imageHtml=QString("<!--shadow-sender:%1--><a href=\"%2\"><img src=\"%2\"></a>")
+    .arg(QString::fromLatin1(sender.toUtf8().toBase64()),imageUrl);
+  Chat imageChat=ChatManager::instance().chat(88001);
+  imageChat.addMessage(ChatMessage(ID_SYSTEM_MESSAGE,Protocol::instance().systemMessage(imageHtml),ChatMessage::ImagePreview,true));
+  ChatManager::instance().setChat(imageChat);
+  CHECK(chat->setChat(imageChat));
+  settle();
+  QTextCursor imageCursor(transcript->document());
+  bool imageFound=false;
+  for(QTextBlock block=transcript->document()->begin();block.isValid()&&!imageFound;block=block.next())
+    for(QTextBlock::iterator fragment=block.begin();!fragment.atEnd();++fragment)
+      if(fragment.fragment().charFormat().isImageFormat()&&fragment.fragment().charFormat().toImageFormat().name()==imageUrl)
+      {
+        imageCursor.setPosition(fragment.fragment().position());
+        imageFound=true;
+        break;
+      }
+  CHECK(imageFound);
+  transcript->setTextCursor(imageCursor);
+  transcript->ensureCursorVisible();
+  CHECK(QMetaObject::invokeMethod(chat,"replyToMessage",Qt::DirectConnection,Q_ARG(QPoint,transcript->cursorRect(imageCursor).center())));
+  CHECK(chat->findChild<QLabel*>("ShadowReplyText")->text().contains(sender));
+  CHECK(chat->findChild<QLabel*>("ShadowReplyText")->toolTip().contains("[图片]"));
+  chat->findChild<QToolButton*>("ShadowReplyCancel")->click();
+  CHECK(QMetaObject::invokeMethod(&window,"showChat",Qt::DirectConnection,Q_ARG(VNumber,88002)));
+  CHECK(input->toPlainText()==QStringLiteral("会话 B 的独立正文"));
+  input->clear();
+  std::puts("PASS replies: exact bubble/header source, system image sender, isolated body/quote/failure drafts per chat, failed send retains text/quote, retry reaches local TCP peer, quote stored/rendered inside bubble, cancel");
+  return 0;
+}
+
+static int verifyMessageBoxes( GuiMain& window )
+{
+  bool verified=false;
+  QTimer::singleShot(80,&window,[&]() {
+    QDialog* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget());
+    if(!dialog)return;
+    QWidget* surface=dialog->findChild<QWidget*>("shadowDialogSurface");
+    QLabel* text=dialog->findChild<QLabel*>("ShadowConfirmationText");
+    QPushButton* cancel=dialog->findChild<QPushButton*>("ShadowConfirmationCancel");
+    QPushButton* accept=dialog->findChild<QPushButton*>("ShadowConfirmationAccept");
+    verified=surface&&text&&text->isVisible()&&cancel&&accept&&cancel->isDefault()&&
+      surface->rect().contains(cancel->mapTo(surface,cancel->rect().bottomRight()))&&
+      surface->rect().contains(accept->mapTo(surface,accept->rect().bottomRight()))&&
+      dialog->grab().save(QDir::currentPath()+"/ui-053-confirmation.png");
+    if(cancel)cancel->click();else dialog->reject();
+  });
+  CHECK(!ShadowDialogStyle::confirm(&window,QStringLiteral("退出账号"),
+    QStringLiteral("退出将中断当前收发，未完成文件下次需重新传输。\n退出后将显示登录页，是否继续？"),
+    QStringLiteral("退出账号"))&&verified);
+  QTimer::singleShot(60,&window,[]() {
+    if(QDialog* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()))
+      if(QPushButton* accept=dialog->findChild<QPushButton*>("ShadowConfirmationAccept"))accept->click();
+  });
+  CHECK(ShadowDialogStyle::confirm(&window,QStringLiteral("确认操作"),QStringLiteral("合成资料确认测试"),QStringLiteral("继续")));
+  std::puts("PASS confirmations: unified opaque surface, full text/buttons within bounds, Chinese cancel default, cancel rejects and explicit confirmation accepts");
+  return 0;
+}
+
+static int verifyWelcome( GuiMain& window )
+{
+  Settings& settings=Settings::instance();
+  const User original=settings.localUser();
+  const bool updatePreference=settings.checkNewVersionAtStartup();
+  QTemporaryDir files;
+  CHECK(files.isValid());
+  const QString imagePath=files.filePath("welcome-avatar.png");
+  QImage image(160,96,QImage::Format_RGB32);
+  image.fill(QColor("#73A0D8"));
+  CHECK(image.save(imagePath));
+  GuiWizard dialog(&window);
+  dialog.loadSettings();
+  dialog.show();
+  settle();
+  QToolButton* avatar=dialog.findChild<QToolButton*>("ShadowOnboardingAvatar");
+  QLineEdit* name=dialog.findChild<QLineEdit*>("ShadowOnboardingName");
+  QPushButton* enter=dialog.findChild<QPushButton*>("ShadowPrimaryButton");
+  CHECK(avatar&&avatar->isVisible()&&name&&enter&&enter->isVisible());
+  CHECK(!avatar->icon().isNull()&&avatar->focusPolicy()!=Qt::NoFocus);
+  CHECK(!dialog.findChild<QFrame*>("ShadowOnboardingTrust"));
+  CHECK(dialog.findChildren<QCheckBox*>().isEmpty());
+  for(QPushButton* button:dialog.findChildren<QPushButton*>())
+    CHECK(button->text()!=QStringLiteral("选择头像"));
+  CHECK(dialog.width()<=620&&dialog.height()<480);
+  CHECK(dialog.rect().contains(enter->mapTo(&dialog,enter->rect().bottomRight())));
+  CHECK(dialog.grab().save(QDir::currentPath()+"/ui-045-welcome.png"));
+  const bool nativeDialogsDisabled=QApplication::testAttribute(Qt::AA_DontUseNativeDialogs);
+  QApplication::setAttribute(Qt::AA_DontUseNativeDialogs,true);
+  bool fileSelected=false;
+  QTimer pickerDriver;
+  QObject::connect(&pickerDriver,&QTimer::timeout,&dialog,[&]() {
+    QFileDialog* picker=qobject_cast<QFileDialog*>(QApplication::activeModalWidget());
+    if(!picker)return;
+    pickerDriver.stop();
+    picker->selectFile(imagePath);
+    fileSelected=QMetaObject::invokeMethod(picker,"accept",Qt::DirectConnection);
+  });
+  pickerDriver.start(30);
+  avatar->click();
+  pickerDriver.stop();
+  QApplication::setAttribute(Qt::AA_DontUseNativeDialogs,nativeDialogsDisabled);
+  CHECK(fileSelected&&!dialog.avatar().isNull());
+  CHECK(dialog.avatar().toImage()==QPixmap(imagePath).toImage());
+  CHECK(dialog.grab().save(QDir::currentPath()+"/ui-045-welcome-avatar-selected.png"));
+  dialog.reject();
+  CHECK(settings.localUser().name()==original.name());
+  CHECK(settings.localUser().vCard().photo().cacheKey()==original.vCard().photo().cacheKey());
+  CHECK(settings.checkNewVersionAtStartup()==updatePreference);
+  GuiWizard accepted(&window);
+  accepted.loadSettings();
+  accepted.findChild<QLineEdit*>("ShadowOnboardingName")->setText(QStringLiteral("  欢迎页验收  "));
+  accepted.findChild<QPushButton*>("ShadowPrimaryButton")->click();
+  CHECK(accepted.result()==QDialog::Accepted&&accepted.userName()==QStringLiteral("欢迎页验收"));
+  CHECK(settings.checkNewVersionAtStartup()==updatePreference);
+  std::puts("PASS welcome: compact identity-only page, clickable keyboard-focusable avatar opens actual picker and loads selected image, cancel preserves profile, trimmed nickname accepted, update preference unchanged");
+  return 0;
+}
+
+static int verifyEmbeddedHistory( GuiMain& window )
+{
+  window.resize(1120,820);
+  CHECK(QMetaObject::invokeMethod(&window,"showChat",Qt::DirectConnection,Q_ARG(VNumber,88001)));
+  settle();
+  const Chat chat=ChatManager::instance().chat(88001);
+  CHECK(chat.isValid());
+  QToolButton* historyButton=Q_NULLPTR;
+  for(QToolButton* button:window.findChildren<QToolButton*>())
+    if(button->isVisible()&&button->accessibleName()==QStringLiteral("聊天记录"))historyButton=button;
+  CHECK(historyButton);
+  historyButton->click();
+  settle();
+  GuiSavedChat* history=window.findChild<GuiSavedChat*>();
+  CHECK(history&&history->isVisible()&&!history->isWindow()&&history->window()==&window);
+  CHECK(!window.findChild<ShadowSearchPanel*>("ShadowSearchPanel")->isVisible());
+  CHECK(window.size()==QSize(1120,820));
+  CHECK(history->width()>=320&&history->width()<=420);
+  QWidget* conversation=window.findChild<QWidget*>("ShadowConversationStack");
+  CHECK(conversation->width()>=320);
+  CHECK(history->mapTo(&window,QPoint()).x()>=conversation->mapTo(&window,QPoint(conversation->width(),0)).x());
+  QListWidget* results=history->findChild<QListWidget*>("ShadowHistoryResults");
+  QLineEdit* keyword=history->findChild<QLineEdit*>("GuiLineEditFilterHistory");
+  QTabBar* categories=history->findChild<QTabBar*>();
+  CHECK(results&&results->count()>0&&keyword&&categories&&categories->count()==4);
+  const QString original=ChatManager::instance().chatSavedText(chat.name());
+  const bool hadArchive=ChatManager::instance().chatHasSavedText(chat.name());
+  QTemporaryDir files;
+  CHECK(files.isValid());
+  const QString imagePath=files.filePath("UI044-image.png");
+  QImage image(100,100,QImage::Format_RGB32);
+  image.fill(QColor("#8CAFE6"));
+  CHECK(image.save(imagePath));
+  const QString filePath=files.filePath("UI044-material.txt");
+  CHECK(atomicWrite(filePath,"synthetic history attachment"));
+  const auto record=[](const QString& sender,const QString& body,int daysAgo) {
+    QJsonObject metadata;
+    metadata.insert("sender",sender);
+    metadata.insert("time",QDateTime::currentDateTime().addDays(-daysAgo).toString(Qt::ISODate));
+    return QString("<!--shadow-record:%1-->%2<br>").arg(
+      QString::fromLatin1(QJsonDocument(metadata).toJson(QJsonDocument::Compact).toBase64()),body);
+  };
+  QString archive=record("Alice","UI044 early message",40);
+  archive+=record("Bob","UI044 recent message",0);
+  archive+=record("Alice",QString("<a href=\"%1\">UI044-material.txt</a>").arg(QUrl::fromLocalFile(filePath).toString()),0);
+  archive+=record("Bob",QString("UI044 image <a href=\"%1\"><img src=\"%1\"></a>").arg(QUrl::fromLocalFile(imagePath).toString()),0);
+  archive+=record("Alice","<a href=\"https://example.test/UI044\">UI044-link</a>",0);
+  QMap<QString,QString> saved;
+  saved.insert(chat.name(),original+archive);
+  ChatManager::instance().addSavedChats(saved);
+  history->showSavedChat(chat.name());
+  keyword->setText("UI044");
+  CHECK(results->count()==5);
+  QComboBox* sender=Q_NULLPTR;
+  QComboBox* date=Q_NULLPTR;
+  QComboBox* sort=Q_NULLPTR;
+  for(QComboBox* filter:history->findChildren<QComboBox*>())
+  {
+    if(filter->accessibleName()==QStringLiteral("发送者"))sender=filter;
+    if(filter->accessibleName()==QStringLiteral("时间范围"))date=filter;
+    if(filter->accessibleName()==QStringLiteral("排序"))sort=filter;
+  }
+  CHECK(sender&&date&&sort);
+  sort->setCurrentIndex(1);
+  CHECK(results->item(0)->text().contains("UI044 early message"));
+  sort->setCurrentIndex(0);
+  CHECK(!results->item(0)->text().contains("UI044 early message"));
+  sender->setCurrentIndex(sender->findData("Alice"));
+  CHECK(results->count()==3);
+  sender->setCurrentIndex(0);
+  date->setCurrentIndex(1);
+  CHECK(results->count()==4);
+  date->setCurrentIndex(0);
+  categories->setCurrentIndex(1);
+  CHECK(results->count()==1&&results->item(0)->text().contains("UI044-material.txt"));
+  categories->setCurrentIndex(2);
+  CHECK(results->count()==1&&!results->item(0)->icon().isNull());
+  CHECK(results->viewMode()==QListView::IconMode);
+  categories->setCurrentIndex(3);
+  CHECK(results->count()==1&&results->item(0)->text().contains("example.test"));
+  categories->setCurrentIndex(0);
+  keyword->setText("UI044-no-match");
+  CHECK(results->count()==0&&history->findChild<QLabel*>("ShadowHistoryEmpty")->isVisible());
+  keyword->setText("UI044");
+  results->setCurrentRow(0);
+  QPushButton* context=history->findChild<QPushButton*>("ShadowHistoryContext");
+  CHECK(context&&context->isEnabled());
+  context->click();
+  CHECK(history->findChild<QStackedWidget*>("ShadowHistoryPages")->currentIndex()==1);
+  CHECK(history->findChild<QTextBrowser*>()->isVisible());
+  history->findChild<QPushButton*>("ShadowHistoryBack")->click();
+  CHECK(history->findChild<QStackedWidget*>("ShadowHistoryPages")->currentIndex()==0);
+  keyword->clear();
+  settle();
+  CHECK(window.grab().save(QDir::currentPath()+"/ui-044-history-sidebar.png"));
+  CHECK(QMetaObject::invokeMethod(&window,"showChat",Qt::DirectConnection,Q_ARG(VNumber,88002)));
+  settle();
+  CHECK(history->savedChatName()==ChatManager::instance().chat(88002).name());
+  CHECK(keyword->text().isEmpty());
+  keyword->setText("UI044");
+  CHECK(results->count()==0);
+  CHECK(QMetaObject::invokeMethod(&window,"showChat",Qt::DirectConnection,Q_ARG(VNumber,88001)));
+  settle();
+  window.resize(900,740);
+  settle();
+  CHECK(window.width()==900&&history->isVisible()&&conversation->isVisible());
+  CHECK(!window.findChild<QWidget*>("ShadowListPanel")->isVisible());
+  CHECK(conversation->width()>=320&&history->width()>=320);
+  CHECK(window.grab().save(QDir::currentPath()+"/ui-044-history-narrow.png"));
+  history->findChild<QToolButton*>("ShadowHistoryClose")->click();
+  settle();
+  CHECK(!history->isVisible()&&window.findChild<QWidget*>("ShadowListPanel")->isVisible());
+  window.resize(1120,820);
+  settle();
+  const int fullWidth=conversation->width();
+  QToolButton* headerSearch=window.findChild<QToolButton*>("ShadowHeaderAction");
+  CHECK(headerSearch);
+  headerSearch->click();
+  settle();
+  CHECK(history->isVisible()&&window.findChildren<GuiSavedChat*>().size()==1&&!history->isWindow());
+  CHECK(conversation->width()<fullWidth);
+  history->close();
+  settle();
+  CHECK(conversation->width()==fullWidth);
+  if(hadArchive)
+  {
+    saved[chat.name()]=original;
+    ChatManager::instance().addSavedChats(saved);
+  }
+  else ChatManager::instance().removeSavedTextFromChat(chat.name());
+  std::puts("PASS embedded history: composer/header share one child panel, active and archived records, keyword/sender/date/categories, thumbnails, inline source, conversation scoping, 1120/900 layouts, close restores width");
   return 0;
 }
 
@@ -441,7 +1059,7 @@ static int verifySearch( GuiMain& window )
   for( GuiSavedChat* history : window.findChildren<GuiSavedChat*>() )
     if( history->savedChatName() == QStringLiteral( "搜索归档验收（合成）" ) )
     {
-      archiveOpened = history->isVisible();
+      archiveOpened = history->isVisible()&&!history->isWindow()&&history->window()==&window;
       bool keywordApplied = false;
       for( QLineEdit* filter : history->findChildren<QLineEdit*>() )
         keywordApplied = keywordApplied || filter->text() == QStringLiteral( "搜索验收词" );
@@ -671,14 +1289,103 @@ int main( int argc, char** argv )
   window.loadStyle();
   window.resize( 1100, 760 );
   window.show();
+  const bool checkStartupSize = app.arguments().contains( "--startup-size-only" );
+  if( checkStartupSize )
+  {
+    settings.setResetGeometryAtStartup( false );
+    settings.setLoadOnTrayAtStartup( false );
+    settings.setShowMinimizedAtStartup( false );
+    window.resize( 1800, 1100 );
+    window.showMaximized();
+    QApplication::processEvents();
+    settings.setGuiGeometry( window.saveGeometry() );
+    CHECK( QMetaObject::invokeMethod( &window, "checkWindowFlagsAndShow", Qt::DirectConnection ) );
+    QApplication::processEvents();
+    CHECK( !window.isMaximized() && !window.isFullScreen() );
+    CHECK( window.width() <= 1120 && window.height() <= 820 );
+    window.resize( 1300, 900 );
+    CHECK( window.width() == 1300 && window.height() == 900 );
+    window.resize( 900, 650 );
+    settings.setGuiGeometry( window.saveGeometry() );
+    CHECK( QMetaObject::invokeMethod( &window, "checkWindowFlagsAndShow", Qt::DirectConnection ) );
+    CHECK( window.width() <= 900 && window.height() <= 650 &&
+      window.width() >= window.minimumWidth() && window.height() >= window.minimumHeight() );
+    CHECK( window.findChild<QWidget*>( "ShadowResizeRight" )->isVisible() );
+    window.resize( 1800, 1100 );
+    window.showMaximized();
+    QApplication::processEvents();
+    QSettings session( profile + "/preview-window.ini", QSettings::IniFormat );
+    session.setValue( "geometry", window.saveGeometry() );
+    session.setValue( "layout", QByteArray( "{\"windowWidth\":1120,\"windowHeight\":820,\"conversationListWidth\":300}" ) );
+    session.sync();
+    window.showNormal();
+    window.resize( 1100, 760 );
+  }
   const QString baselineStyle = window.styleSheet();
   QMap<QString,QString> oldFixtureHistory;
   oldFixtureHistory.insert( QString::fromUtf8( "林舟（合成）" ), "&lt;a href=\"file:///old-fixture.txt\"&gt;old markup&lt;/a&gt;" );
   ChatManager::instance().addSavedChats( oldFixtureHistory );
   CHECK( atomicWrite( config + "/preview.qss", "QLabel#ShadowChatTitle {font-size:21px;color:#172033;padding:0px;}" ) );
-  CHECK( atomicWrite( config + "/layout.json", "{\"windowWidth\":1200,\"windowHeight\":800,\"conversationListWidth\":300}" ) );
+  CHECK( atomicWrite( config + "/layout.json", checkStartupSize
+    ? "{\"windowWidth\":1120,\"windowHeight\":820,\"conversationListWidth\":300}"
+    : "{\"windowWidth\":1200,\"windowHeight\":800,\"conversationListWidth\":300}" ) );
   ShadowDevPreview preview( &window, &core );
   settle();
+  if( checkStartupSize )
+  {
+    CHECK( window.width() <= 1120 && window.height() <= 820 && !window.isMaximized() );
+    CHECK( window.findChild<QWidget*>( "ShadowListPanel" )->width() == 300 );
+    CHECK( symmetricCorners( window ) );
+    window.grab().save( QDir::currentPath() + "/ui-042-default-size.png" );
+    CHECK( verifyWindowCorners( window ) == 0 );
+    core.stop();
+    std::puts( "PASS startup size: saved large/maximized state clamped to normal compact window, smaller geometry retained, user enlargement allowed, preview restore capped to 1120x820, corners and resize handles preserved" );
+    return 0;
+  }
+  if( app.arguments().contains( "--local-send-only" ) )
+  {
+    const int result = verifyPreviewSending( window, core, preview );
+    core.stop();
+    return result;
+  }
+  if( app.arguments().contains( "--corners-only" ) )
+  {
+    const int result = verifyWindowCorners( window );
+    core.stop();
+    return result;
+  }
+  if( app.arguments().contains( "--sidebar-only" ) )
+  {
+    const int result = verifyConversationSidebar( window, core );
+    core.stop();
+    return result;
+  }
+  if( app.arguments().contains("--history-only") )
+  {
+    int result=verifyEmbeddedHistory(window);
+    if(result==0)result=verifySearch(window);
+    core.stop();
+    return result;
+  }
+  if(app.arguments().contains("--welcome-only"))
+  {
+    const int result=verifyWelcome(window);
+    core.stop();
+    return result;
+  }
+  if(app.arguments().contains("--reply-only"))
+  {
+    int result=verifyReply(window,preview);
+    if(result==0)result=verifyMessageBoxes(window);
+    core.stop();
+    return result;
+  }
+  if(app.arguments().contains("--messagebox-only"))
+  {
+    const int result=verifyMessageBoxes(window);
+    core.stop();
+    return result;
+  }
   if( app.arguments().contains( "--profile-status-only" ) )
     return verifyProfileStatus( window );
   QLabel* title = window.findChild<QLabel*>( "ShadowChatTitle" );
@@ -775,10 +1482,14 @@ int main( int argc, char** argv )
   activeChat->addText( retainedDraft );
   const int messagesBeforeSend = ChatManager::instance().chat( activeChat->chatId() ).messages().size();
   const int pendingBeforeSend = MessageManager::instance().countMessagesToSendInChatId( activeChat->chatId() );
+  QTcpServer* blockedPeer = preview.findChild<QTcpServer*>( "ShadowPreviewPeerServer" );
+  CHECK( blockedPeer );
+  blockedPeer->close();
   sendButton->click();
+  CHECK( blockedPeer->listen( QHostAddress::LocalHost, 0 ) );
   CHECK( messageEdit->toPlainText() == retainedDraft );
   CHECK( sendFeedback->isVisible() && sendFeedback->text().contains( QStringLiteral( "未发送" ) ) );
-  CHECK( sendFeedback->text().contains( QStringLiteral( "本机预览" ) ) );
+  CHECK( sendFeedback->text().contains( QStringLiteral( "未就绪" ) ) );
   CHECK( ChatManager::instance().chat( activeChat->chatId() ).messages().size() == messagesBeforeSend );
   CHECK( MessageManager::instance().countMessagesToSendInChatId( activeChat->chatId() ) == pendingBeforeSend );
   window.grab().save( QDir::currentPath() + "/ui-send-failure-draft.png" );
@@ -794,14 +1505,15 @@ int main( int argc, char** argv )
   const QString screenshotOutput = temporary.path() + "/screenshot-must-not-be-written";
   Settings::instance().setDownloadDirectory( screenshotOutput );
   bool screenshotVerified = false;
+  const bool transfersEnabled = Settings::instance().enableFileTransfer();
+  Settings::instance().setEnableFileTransfer( false );
   QTimer::singleShot( 100, activeChat, [&screenshotVerified]() {
     QDialog* screenshotDialog = qobject_cast<QDialog*>( QApplication::activeModalWidget() );
     if( !screenshotDialog ) return;
     QWidget* canvas = screenshotDialog->findChild<QWidget*>( "ShadowScreenshotCanvas" );
     QLabel* dimensions = screenshotDialog->findChild<QLabel*>( "ShadowScreenshotDimensions" );
-    QPushButton* original = screenshotDialog->findChild<QPushButton*>( "ShadowScreenshotOriginal" );
     QPushButton* send = screenshotDialog->findChild<QPushButton*>( "ShadowScreenshotSend" );
-    if( !canvas || !dimensions || !original || !send )
+    if( !canvas || !dimensions || !send )
     {
       screenshotDialog->reject();
       return;
@@ -817,29 +1529,35 @@ int main( int argc, char** argv )
       }
     screenshotVerified = bluePixels > 1000 && goldPixels > 1000 && dimensions->text().contains( "1000" );
     screenshotDialog->grab().save( QDir::currentPath() + "/ui-screenshot-preview.png" );
-    original->click();
-    screenshotVerified = screenshotVerified && canvas->minimumWidth() == 1000;
-    original->click();
+    ShadowScreenshotPreview* editor = qobject_cast<ShadowScreenshotPreview*>( screenshotDialog );
+    QWidget* toolbar = screenshotDialog->findChild<QWidget*>( "ShadowScreenshotToolbar" );
+    screenshotVerified = screenshotVerified && editor && editor->selectedImage().size() == QSize( 1000, 520 ) &&
+      toolbar && toolbar->isVisible() && !screenshotDialog->findChild<QWidget*>( "shadowDialogHeader" );
     send->click();
     QApplication::processEvents( QEventLoop::ExcludeUserInputEvents );
     QLabel* error = screenshotDialog->findChild<QLabel*>( "ShadowScreenshotFeedback" );
     screenshotVerified = screenshotVerified && screenshotDialog->isVisible() && canvas->isVisible() &&
       error && error->isVisible() && error->text().contains( QStringLiteral( "未发送" ) ) &&
-      error->text().contains( QStringLiteral( "本机预览" ) ) &&
+      error->text().contains( QStringLiteral( "文件传输" ) ) &&
       error->text().contains( QStringLiteral( "可重试或取消" ) );
-    QScrollArea* screenshotScroll = screenshotDialog->findChild<QScrollArea*>( "ShadowScreenshotScroll" );
-    screenshotVerified = screenshotVerified && screenshotScroll &&
-      screenshotScroll->horizontalScrollBar()->maximum() == 0;
+    screenshotVerified = screenshotVerified && editor->selectedImage().size() == QSize( 1000, 520 );
     screenshotDialog->grab().save( QDir::currentPath() + "/ui-screenshot-send-blocked.png" );
     screenshotDialog->reject();
   } );
   activeChat->previewScreenshot( QPixmap::fromImage( screenshot ) );
+  Settings::instance().setEnableFileTransfer( transfersEnabled );
   std::puts( "Screenshot preview closed after verified refusal" );
   CHECK( screenshotVerified );
   CHECK( !QFileInfo::exists( screenshotOutput ) );
   CHECK( messageEdit->toPlainText() == retainedDraft );
   CHECK( !QFileInfo::exists( folder + "/pending-transfers.json" ) );
   Settings::instance().setDownloadDirectory( originalDownloadFolder );
+  if( app.arguments().contains( "--screenshot-only" ) )
+  {
+    core.stop();
+    std::puts( "PASS screenshot editor integration: native chat send refusal keeps edited image and draft, no output or pending transfer" );
+    return 0;
+  }
   {
     std::puts( "Checking accepted submission acknowledgement" );
     QToolBar submissionTools;

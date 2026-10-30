@@ -25,18 +25,20 @@
 #include "GuiWizard.h"
 #include "IconManager.h"
 #include "Settings.h"
+#include "ShadowDialogChrome.h"
 #include "ShadowStyle.h"
 
 
 GuiWizard::GuiWizard( QWidget *parent )
-  : QDialog( parent ), mp_cbCheckForUpdates( Q_NULLPTR ), mp_pbChooseAvatar( Q_NULLPTR )
+  : QDialog( parent ), mp_avatarButton( Q_NULLPTR )
 {
+  setProperty( "shadowDialogChromeSkip", true );
   setupUi( this );
   setObjectName( "ShadowOnboardingDialog" );
   setWindowTitle( QStringLiteral( "欢迎使用影聊" ) );
   Bee::removeContextHelpButton( this );
-  setMinimumSize( 560, 480 );
-  resize( 600, 520 );
+  setMinimumSize( 520, 320 );
+  resize( 560, 350 );
   setStyleSheet( ShadowStyle::applicationStyleSheet() );
 
   delete layout();
@@ -46,7 +48,7 @@ GuiWizard::GuiWizard( QWidget *parent )
 
   mp_lWelcome->setText( QStringLiteral( "欢迎使用影聊" ) );
   mp_lWelcome->setObjectName( "ShadowOnboardingTitle" );
-  QLabel* subtitle = new QLabel( QStringLiteral( "三步完成设置，然后在局域网里找到同事" ), this );
+  QLabel* subtitle = new QLabel( QStringLiteral( "设置名字和头像，开始与同事聊天" ), this );
   subtitle->setObjectName( "ShadowOnboardingSubtitle" );
   root_layout->addWidget( mp_lWelcome );
   root_layout->addWidget( subtitle );
@@ -57,53 +59,28 @@ GuiWizard::GuiWizard( QWidget *parent )
   identity_layout->setContentsMargins( 18, 16, 18, 16 );
   identity_layout->setHorizontalSpacing( 14 );
   identity_layout->setVerticalSpacing( 8 );
-  mp_lPix->setMinimumSize( 72, 72 );
-  mp_lPix->setMaximumSize( 72, 72 );
-  mp_lPix->setAlignment( Qt::AlignCenter );
-  mp_lPix->setObjectName( "ShadowOnboardingAvatar" );
-  identity_layout->addWidget( mp_lPix, 0, 0, 3, 1 );
-  QLabel* name_label = new QLabel( QStringLiteral( "1  设置你的名字和头像" ), identity_card );
+  mp_lPix->hide();
+  mp_avatarButton = new QToolButton(identity_card);
+  mp_avatarButton->setObjectName("ShadowOnboardingAvatar");
+  mp_avatarButton->setFixedSize(72,72);
+  mp_avatarButton->setIconSize(QSize(64,64));
+  mp_avatarButton->setCursor(Qt::PointingHandCursor);
+  mp_avatarButton->setAccessibleName(QStringLiteral("点击上传头像"));
+  mp_avatarButton->setToolTip(QStringLiteral("点击上传头像"));
+  connect(mp_avatarButton,&QToolButton::clicked,this,&GuiWizard::chooseAvatar);
+  identity_layout->addWidget( mp_avatarButton, 0, 0, 3, 1 );
+  QLabel* name_label = new QLabel( QStringLiteral( "设置你的名字和头像" ), identity_card );
   name_label->setObjectName( "ShadowOnboardingStep" );
-  identity_layout->addWidget( name_label, 0, 1, 1, 2 );
+  identity_layout->addWidget( name_label, 0, 1 );
   mp_leName->setObjectName( "ShadowOnboardingName" );
   mp_leName->setPlaceholderText( QStringLiteral( "例如：李明" ) );
   mp_leName->setAccessibleName( QStringLiteral( "你的名字" ) );
   identity_layout->addWidget( mp_leName, 1, 1 );
-  mp_pbChooseAvatar = new QPushButton( QStringLiteral( "选择头像" ), identity_card );
-  mp_pbChooseAvatar->setAccessibleName( QStringLiteral( "选择头像" ) );
-  connect( mp_pbChooseAvatar, SIGNAL( clicked() ), this, SLOT( chooseAvatar() ) );
-  identity_layout->addWidget( mp_pbChooseAvatar, 1, 2 );
   mp_lAccount->setObjectName( "ShadowOnboardingAccount" );
-  identity_layout->addWidget( mp_lAccount, 2, 1, 1, 2 );
+  mp_lAccount->setWordWrap(true);
+  identity_layout->addWidget( mp_lAccount, 2, 1 );
+  identity_layout->setColumnStretch(1,1);
   root_layout->addWidget( identity_card );
-
-  QFrame* privacy_card = new QFrame( this );
-  privacy_card->setObjectName( "ShadowOnboardingTrust" );
-  QVBoxLayout* privacy_layout = new QVBoxLayout( privacy_card );
-  privacy_layout->setContentsMargins( 18, 14, 18, 14 );
-  privacy_layout->setSpacing( 5 );
-  QLabel* privacy_title = new QLabel( QStringLiteral( "2  确认使用范围" ), privacy_card );
-  privacy_title->setObjectName( "ShadowOnboardingStep" );
-  QLabel* privacy_text = new QLabel( QStringLiteral( "聊天、文件和通讯录留在局域网内。影聊不使用云端中转，也不需要注册账号。" ), privacy_card );
-  privacy_text->setWordWrap( true );
-  privacy_text->setObjectName( "ShadowOnboardingBody" );
-  privacy_layout->addWidget( privacy_title );
-  privacy_layout->addWidget( privacy_text );
-  root_layout->addWidget( privacy_card );
-
-  QFrame* update_card = new QFrame( this );
-  update_card->setObjectName( "ShadowOnboardingCard" );
-  QVBoxLayout* update_layout = new QVBoxLayout( update_card );
-  update_layout->setContentsMargins( 18, 14, 18, 14 );
-  update_layout->setSpacing( 6 );
-  QLabel* update_title = new QLabel( QStringLiteral( "3  选择是否接收新版本提醒" ), update_card );
-  update_title->setObjectName( "ShadowOnboardingStep" );
-  mp_cbCheckForUpdates = new QCheckBox( QStringLiteral( "每 7 天仅检查一次版本号（推荐）" ), update_card );
-  mp_cbCheckForUpdates->setToolTip( QStringLiteral( "只请求静态版本清单；请求内容不包含姓名、设备标识、联系人或使用数据。网站仍会看到普通网络连接所需的出口 IP。" ) );
-  mp_cbCheckForUpdates->setAccessibleName( QStringLiteral( "接收新版本提醒" ) );
-  update_layout->addWidget( update_title );
-  update_layout->addWidget( mp_cbCheckForUpdates );
-  root_layout->addWidget( update_card );
   root_layout->addStretch( 1 );
 
   QHBoxLayout* button_layout = new QHBoxLayout;
@@ -119,18 +96,22 @@ GuiWizard::GuiWizard( QWidget *parent )
   m_userName = "";
   connect( mp_pbChangeUser, SIGNAL( clicked() ), this, SLOT( saveSettings() ) );
   connect( mp_pbCancel, SIGNAL( clicked() ), this, SLOT( reject() ) );
+  setProperty( "shadowDialogChromeSkip", false );
+  ShadowDialogChrome::decorate( this );
+  layout()->activate();
+  adjustSize();
 }
 
 void GuiWizard::loadSettings()
 {
-  mp_lAccount->setText( QStringLiteral( "Windows 账号：%1；无需注册" ).arg( Settings::instance().localUser().accountName() ) );
+  const QString email = Settings::instance().localUser().vCard().email();
+  mp_lAccount->setText( QStringLiteral( "本机账号：%1" ).arg(
+    email.isEmpty() ? Settings::instance().localUser().accountName() : email ) );
   m_avatar = Settings::instance().localUser().vCard().photo();
   if( m_avatar.isNull() )
-    mp_lPix->setPixmap( QPixmap( QStringLiteral( ":/images/shadowchat/shadowchat-mark-source.png" ) ).scaled( 58, 58, Qt::KeepAspectRatio, Qt::SmoothTransformation ) );
+    mp_avatarButton->setIcon( QIcon( QStringLiteral( ":/images/shadowchat/shadowchat-mark-source.png" ) ) );
   else
-    mp_lPix->setPixmap( m_avatar.scaled( 64, 64, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation ) );
-  if( mp_cbCheckForUpdates )
-    mp_cbCheckForUpdates->setChecked( Settings::instance().firstTime() || Settings::instance().checkNewVersionAtStartup() );
+    mp_avatarButton->setIcon( QIcon( ShadowStyle::avatarPixmap(m_avatar,QSize(64,64)) ) );
 
   if( Settings::instance().allowEditNickname() )
   {
@@ -169,7 +150,7 @@ void GuiWizard::chooseAvatar()
     return;
   }
   m_avatar = avatar;
-  mp_lPix->setPixmap( avatar.scaled( 64, 64, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation ) );
+  mp_avatarButton->setIcon( QIcon( ShadowStyle::avatarPixmap(avatar,QSize(64,64)) ) );
 }
 
 void GuiWizard::saveSettings()

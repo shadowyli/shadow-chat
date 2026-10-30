@@ -11,15 +11,15 @@ import shutil
 import subprocess
 import uuid
 from urllib.parse import urlparse, urlunparse
-from release_config import ENVIRONMENTS, artifact_name, channel as release_channel, output_directory, version as release_version
+from release_config import ENVIRONMENTS, artifact_name, channel as release_channel, output_directory, qt_directory, version as release_version
 
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--qt-dir', type=Path, default=Path(os.environ.get('SHADOWCHAT_QT_DIR', str(root.parent/'Qt/5.15.2/msvc2019'))))
-parser.add_argument('--makensis', type=Path, default=root/'.tools/NSIS/makensis.exe')
-parser.add_argument('--recovery-dir', type=Path, default=root/'delivery-private')
+parser.add_argument('--qt-dir', type=Path, default=qt_directory())
+parser.add_argument('--makensis', type=Path, default=Path(os.environ.get('SHADOWCHAT_MAKENSIS_PATH', str(root/'.tools/NSIS/makensis.exe'))))
+parser.add_argument('--recovery-dir', type=Path, default=Path(os.environ.get('SHADOWCHAT_RECOVERY_DIR', str(root/'delivery-private'))))
 parser.add_argument('--crt-dir', type=Path)
-parser.add_argument('--tls-dir', type=Path, default=root/'dist/tls-runtime-x86')
+parser.add_argument('--tls-dir', type=Path, default=Path(os.environ.get('SHADOWCHAT_TLS_DIR', str(root/'dist/tls-runtime-x86'))))
 parser.add_argument('--environment', choices=ENVIRONMENTS, default='local')
 args = parser.parse_args()
 version = release_version()
@@ -48,6 +48,8 @@ if not build_configuration.get('updateSource'):
     raise SystemExit('Effective update source is missing from production build record')
 update_source = urlparse(build_configuration['updateSource'])
 download_page = urlunparse((update_source.scheme, update_source.netloc, '/tools/shadowchat', '', '', ''))
+if args.environment != 'local':
+    download_page = 'https://github.com/shadowyli/shadow-chat/releases'
 identity = build_configuration.get('binaryBuildIdentity', {})
 for field, expected_value in {'version': version, 'environment': args.environment, 'channel': channel, 'updateSource': build_configuration['updateSource']}.items():
     if identity.get(field) != expected_value:

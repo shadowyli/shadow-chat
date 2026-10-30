@@ -20,6 +20,9 @@ int main()
     std::fprintf( stderr, "FAIL preview configure accepted a non-loopback production update source\n" );
     return 1;
   }
+  if( ShadowDevPreview::testPeerReady() ||
+      ShadowDevPreview::sendTestText( 88001, "release must reject local test sender", false, &error ) )
+    return 1;
   std::puts( "PASS release arguments rejected, normal arguments accepted, non-loopback production update source rejected" );
   return 0;
 }

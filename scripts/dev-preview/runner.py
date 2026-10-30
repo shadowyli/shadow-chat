@@ -15,6 +15,9 @@ import time
 import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "packaging"))
+from release_config import artifact_name, version
+
 OUT = ROOT / "dist/dev-preview"
 MARKER = "shadow-native-preview-synthetic-v1"
 CREATE_NO_WINDOW = 0x08000000
@@ -177,7 +180,7 @@ def fingerprint():
 def verify():
     build()
     _, qmake, nmake, environment = toolchain()
-    payload = ROOT / "dist/local/影聊-1.1.4-test-x86"
+    payload = ROOT / "dist/local" / artifact_name("local")
     environment["PATH"] = str(payload) + os.pathsep + environment["PATH"]
     platforms = managed(OUT / "tools/qt-platforms")
     platforms.mkdir(parents=True, exist_ok=True)
@@ -233,8 +236,8 @@ def verify():
 def build():
     configuration, qmake, nmake, environment = toolchain()
     production = ROOT / "dist/local/production"
-    if configuration["version"] != "1.1.4" or configuration["releaseEnvironment"] != "local":
-        raise RuntimeError("Expected verified 1.1.4 local production build")
+    if configuration["version"] != version() or configuration["releaseEnvironment"] != "local":
+        raise RuntimeError("Expected verified " + version() + " local production build")
     if digest(production / "bin/ShadowChat.exe") != configuration["sourceExecutableSha256"]:
         raise RuntimeError("Verified production executable identity changed")
     workspace = managed(OUT / "production")
@@ -255,12 +258,12 @@ def build():
     run_logged([str(nmake), "/nologo", "/f", "Makefile.Release"], workspace, log, environment)
     binary = workspace / "bin/ShadowChat.exe"
     identity = json.loads(subprocess.check_output([str(binary), "--build-info"], cwd=binary.parent, env=environment, creationflags=CREATE_NO_WINDOW))
-    if identity.get("version") != "1.1.4" or identity.get("environment") != "local" or not identity.get("nativeDevPreview"):
+    if identity.get("version") != version() or identity.get("environment") != "local" or not identity.get("nativeDevPreview"):
         raise RuntimeError("New binary failed native local preview identity check")
     generation = uuid.uuid4().hex[:12]
     stage = managed(OUT / "runtime" / generation)
     stage.mkdir()
-    payload = ROOT / "dist/local/影聊-1.1.4-test-x86"
+    payload = ROOT / "dist/local" / artifact_name("local")
     for filename in payload.iterdir():
         if filename.is_file() and filename.suffix.lower() in (".dll", ".qm", ".wav", ".ico"):
             shutil.copy2(filename, managed(stage / filename.name))

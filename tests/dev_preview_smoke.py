@@ -84,7 +84,7 @@ try:
     first = runner.launch(receipt, config)
     baseline = status(lambda value: value.get("pid") == first["pid"] and value.get("titleFontPx") == 21)
     assert "原生开发预览" in baseline["windowTitle"] and "本机预览" in baseline["developerTitle"]
-    assert baseline["networkLabel"] == "本机预览 · 不连接办公网络"
+    assert baseline["networkLabel"] == "本机收发测试 · 对端就绪"
     assert baseline["visibleChatMessageCount"] == 4 and baseline["visibleFixtureWelcomeCount"] == 1
     assert not baseline["visibleChatPlainHasRawMarkup"]
     assert baseline["visibleChatHasFixtureImage"] and baseline["visibleChatHasFixtureFileLink"] and baseline["fixtureImageLoaded"]
