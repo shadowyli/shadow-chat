@@ -24,9 +24,11 @@ public:
   bool pinned(const Chat& chat) const{return read(chat,"pinned");}
   bool muted(const Chat& chat) const{return read(chat,"muted");}
   bool hidden(const Chat& chat) const{return read(chat,"hidden");}
+  bool pending(const Chat& chat) const{return read(chat,"pending");}
   bool setPinned(const Chat& chat,bool value) const{return write(chat,"pinned",value);}
   bool setMuted(const Chat& chat,bool value) const{return write(chat,"muted",value);}
   bool setHidden(const Chat& chat,bool value) const{return write(chat,"hidden",value);}
+  bool setPending(const Chat& chat,bool value) const{return write(chat,"pending",value);}
   bool reveal(const Chat& chat) const{return !hidden(chat) || setHidden(chat,false);}
 private:
   QString setting(const Chat& chat,const QString& name) const

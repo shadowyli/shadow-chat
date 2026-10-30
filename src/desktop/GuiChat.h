@@ -66,8 +66,11 @@ public:
   void updateChatColors();
   bool updateChat( const Chat& );
   void updateUserAvatar( const User& );
+  void previewScreenshot( const QPixmap& );
+  void setMessageSendResult( const QString& message, bool accepted, const QString& feedback );
+  void setFileSendResult( bool accepted, const QString& feedback );
+  void showSendFeedback( const QString& feedback, bool failed );
 
-  void onTickEvent( int );
 
 #ifdef BEEBEEP_USE_VOICE_CHAT
   GuiVoicePlayer* guiVoicePlayer();
@@ -173,6 +176,7 @@ protected:
   QString modernMessageId( const ChatMessage& ) const;
   QString avatarUrlForUser( const User& );
   void updateFilterMessagesButton();
+  bool submitImage( const QImage& );
 
 private:
   VNumber m_chatId;
@@ -203,7 +207,10 @@ private:
 
   QSplitter* mp_splitter;
   QToolButton* mp_modernAttachButton;
-  QLabel* mp_modernComposerHint;
+  QLabel* mp_sendFeedback;
+  QString m_pendingMessage;
+  QString m_fileSendFeedback;
+  bool m_fileSendAccepted;
   bool m_modernMode;
   QSet<QString> m_expandedMessageIds;
   QHash<VNumber,QString> m_avatarUrls;

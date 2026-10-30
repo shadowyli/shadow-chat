@@ -87,8 +87,11 @@ Connection* Core::createConnection()
 
 void Core::newPeerFound( const QHostAddress& sender_ip, int sender_port )
 {
-  if( m_updateBlocked )
+  if( m_devPreviewIsolated && !sender_ip.isLoopback() )
+  {
+    qWarning() << "Native preview rejected non-loopback peer" << sender_ip;
     return;
+  }
   if( !isConnected() )
     return;
 
@@ -138,15 +141,14 @@ void Core::newPeerFound( const QHostAddress& sender_ip, int sender_port )
 
 void Core::checkNewConnection( qintptr socket_descriptor )
 {
-  if( m_updateBlocked )
-  {
-    QTcpSocket rejected;
-    if( rejected.setSocketDescriptor( socket_descriptor ) )
-      rejected.abort();
-    return;
-  }
   Connection *c = createConnection();
   c->initSocket( socket_descriptor, mp_listener->serverPort() );
+  if( m_devPreviewIsolated && !c->peerAddress().isLoopback() )
+  {
+    qWarning() << "Native preview rejected non-loopback incoming connection";
+    closeConnection( c );
+    return;
+  }
   qDebug() << "New connection to port" << mp_listener->serverPort() << "from" << qPrintable( c->networkAddress().toString() );
   if( NetworkManager::instance().isHostAddressAllowed( c->networkAddress().hostAddress() ) )
   {
@@ -174,11 +176,6 @@ void Core::setupNewConnection( Connection *c )
 
 void Core::addConnectionReadyForUse( Connection* c, const User& u )
 {
-  if( m_updateBlocked )
-  {
-    closeConnection( c );
-    return;
-  }
 #ifdef BEEBEEP_DEBUG
   qDebug() << "Connection from" << qPrintable( c->networkAddress().toString() ) << "is ready for use by" << qPrintable( u.path() );
 #endif
@@ -255,8 +252,6 @@ void Core::closeConnection( Connection *c )
 
 void Core::checkUserAuthentication( const QByteArray& auth_byte_array )
 {
-  if( m_updateBlocked )
-    return;
   Connection* c = qobject_cast<Connection*>( sender() );
   if( !c )
   {
@@ -422,10 +417,7 @@ void Core::checkUserAuthentication( const QByteArray& auth_byte_array )
   if( private_chat.isValid() )
   {
     if( user_found.isValid() && u.name() != user_found.name() )
-    {
       ChatManager::instance().changePrivateChatNameAfterUserNameChanged( u.id(), u.name() );
-      showUserNameChanged( u, user_found.name() );
-    }
   }
   else
     createPrivateChat( u );
@@ -495,6 +487,7 @@ int Core::connectedUsers() const
 
 void Core::checkConnectionPorts()
 {
+  if( m_devPreviewIsolated ) return;
   if( isConnected() && connectedUsers() == 0 )
   {
     // FIXME: it works always... not useful to check if firewall ports are opened
@@ -508,12 +501,14 @@ void Core::checkConnectionPorts()
 
 void Core::checkFirewall()
 {
+  if( m_devPreviewIsolated ) return;
   // FIXME: how to do this?
   FirewallManager::instance().allowApplication( Settings::instance().programName(), QDir::toNativeSeparators( qApp->applicationFilePath() ) );
 }
 
 void Core::updateNetworkConfiguration( const QNetworkConfiguration& net_conf )
 {
+  if( m_devPreviewIsolated ) return;
 #ifdef BEEBEEP_DEBUG
   qDebug() << "Core is checking network configuration:" << qPrintable( net_conf.name() ) << "-" << qPrintable( net_conf.identifier() )
            << "- bearer:" << qPrintable( net_conf.bearerTypeName() ) << net_conf.bearerType()

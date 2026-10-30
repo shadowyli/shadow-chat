@@ -24,7 +24,7 @@
 #ifndef BEEBEEP_GUIEDITVCARD_H
 #define BEEBEEP_GUIEDITVCARD_H
 
-#include "ui_GuiEditVCard.h"
+#include <ui_GuiEditVCard.h>
 #include "User.h"
 
 
@@ -36,12 +36,17 @@ public:
   GuiEditVCard( QWidget* parent = Q_NULLPTR );
 
   void setUser( const User& );
+  void setProfileStatus( int );
 
   inline const VCard& vCard() const;
   inline const QString& userColor() const;
   inline bool regenerateUserHash() const;
 
+signals:
+  void userStatusSelected( int );
+
 protected:
+  void showEvent( QShowEvent* ) override;
   void loadVCard();
   void setUserColor( const QString& );
   bool checkLineEdit( QLineEdit*, const QString& );
@@ -49,6 +54,8 @@ protected:
   void saveVCard();
   QString currentAvatarName() const;
   void resizeProfilePage();
+  void showProfileEditor( QWidget* );
+  void updateCardClock();
 
 private slots:
   void changePhoto();
@@ -63,13 +70,15 @@ private:
   bool m_regenerateUserHash;
   QString m_accountEmail;
   QStackedWidget* m_profilePages;
+  bool m_resizingProfile = false;
   QLabel* m_cardNickname;
-  QLabel* m_cardAccount;
   QLabel* m_cardPhoto;
   QLabel* m_cardInfo;
   QLabel* m_cardEmail;
   QLabel* m_cardPhone;
-  QLabel* m_cardLocation;
+  QLabel* m_cardGroups;
+  QLabel* m_cardClock;
+  QPushButton* m_cardStatus;
 
 };
 

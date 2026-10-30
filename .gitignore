@@ -7,6 +7,8 @@ test/
 /.tools/
 aqtinstall.log
 /delivery-private/
+__pycache__/
+*.pyc
 /integrations/flowx-tools/public/downloads/
 *.obj
 *.pdb

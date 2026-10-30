@@ -54,12 +54,12 @@ public:
   static Core* instance() { return mp_instance; }
 
   void init();
+  bool devPreviewIsolated() const { return m_devPreviewIsolated; }
 
   bool isConnected() const;
   bool start();
   void stop();
   void restart();
-  void blockForUpdate();
 
 #ifdef BEEBEEP_USE_MULTICAST_DNS
   bool dnsMulticastingIsActive() const;
@@ -186,7 +186,6 @@ signals:
 public slots:
   void sendBroadcastMessage();
   void checkNetworkInterface();
-  void checkNewVersion();
   void postUsageStatistics();
   void onTickEvent( int );
 #ifdef BEEBEEP_USE_MULTICAST_DNS
@@ -218,7 +217,6 @@ public slots:
 
 protected slots:
   bool restartConnection();
-  void onUpdaterJobCompleted();
   void onPostUsageStatisticsJobCompleted();
 #ifdef BEEBEEP_USE_MULTICAST_DNS
   void onMulticastDnsServiceRegistered();
@@ -286,8 +284,6 @@ protected:
   void parseHelpMessage( const User&, const Message& );
 
   /* CoreUser */
-  void showUserNameChanged( const User&, const QString& old_user_name );
-  void showUserVCardChanged( const User&, const VCard& old_vcard );
   void sendLocalUserStatus();
   void addGroup( const Group& );
   void sendLocalConnectedUsersTo( const User& );
@@ -329,6 +325,7 @@ protected:
   void buildShareBoxFileList( const User&, const QString&, bool create_folder );
 
 private:
+  bool m_devPreviewIsolated;
   static Core* mp_instance;
   QList<Connection*> m_connections;
   Listener* mp_listener;
@@ -344,7 +341,6 @@ private:
 #ifdef BEEBEEP_USE_VOICE_CHAT
   VoicePlayer* mp_voicePlayer;
 #endif
-  bool m_updateBlocked = false;
 
 };
 

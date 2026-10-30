@@ -28,7 +28,11 @@ bool checkPassword( QSettings& settings, const QString& password )
 }
 
 ShadowLocalAccounts::ShadowLocalAccounts( const QString& root )
-  : m_root( root.isEmpty() ? QDir( QStandardPaths::writableLocation( QStandardPaths::DocumentsLocation ) ).filePath( QString::fromUtf8("影聊/accounts") ) : root ), m_useInstalledRecovery( root.isEmpty() ) {}
+  : m_root( root.isEmpty() ?
+      (qApp && !qApp->property("shadowAccountRoot").toString().isEmpty() ?
+        qApp->property("shadowAccountRoot").toString() :
+        QDir( QStandardPaths::writableLocation( QStandardPaths::DocumentsLocation ) ).filePath( QString::fromUtf8("影聊/accounts") )) : root ),
+    m_useInstalledRecovery( root.isEmpty() && (!qApp || qApp->property("shadowAccountRoot").toString().isEmpty()) ) {}
 
 QString ShadowLocalAccounts::normalizeEmail( const QString& email )
 {
@@ -108,7 +112,14 @@ bool ShadowLocalAccounts::login( QString* email, QString* folder, const QString&
   if( selected.isEmpty() )
   {
     QDialog dialog;
+    dialog.setProperty("shadowDialogChromeSkip", true);
     dialog.setObjectName("ShadowAccountLogin");
+    dialog.setWindowFlag(Qt::WindowContextHelpButtonHint, false);
+    dialog.setAttribute(Qt::WA_TranslucentBackground, false);
+    dialog.setAutoFillBackground(true);
+    QPalette loginPalette = dialog.palette();
+    loginPalette.setColor(QPalette::Window, Qt::white);
+    dialog.setPalette(loginPalette);
     dialog.setWindowTitle(QString::fromUtf8("影聊 · 登录")); dialog.setFixedWidth(420);
     dialog.setFont(QFont(QStringLiteral("Microsoft YaHei UI"),10));
     dialog.setStyleSheet(QStringLiteral(
@@ -128,11 +139,11 @@ bool ShadowLocalAccounts::login( QString* email, QString* folder, const QString&
     QLabel* title=new QLabel(QString::fromUtf8("欢迎登录")); title->setObjectName("LoginTitle"); layout->addWidget(title);
     QLabel* hint=new QLabel(QString::fromUtf8("登录自己的账号，继续团队沟通。")); hint->setObjectName("LoginHint"); layout->addWidget(hint);
     layout->addSpacing(10);
-    QLineEdit* address=new QLineEdit; address->setPlaceholderText(QString::fromUtf8("邮箱")); layout->addWidget(address);
-    QLineEdit* password=new QLineEdit; password->setEchoMode(QLineEdit::Password); password->setPlaceholderText(QString::fromUtf8("密码（至少 6 位）")); layout->addWidget(password);
+    QLineEdit* address=new QLineEdit(&dialog); address->setObjectName("LoginEmail"); address->setAccessibleName(QString::fromUtf8("邮箱")); address->setPlaceholderText(QString::fromUtf8("邮箱")); layout->addWidget(address);
+    QLineEdit* password=new QLineEdit(&dialog); password->setObjectName("LoginPassword"); password->setAccessibleName(QString::fromUtf8("密码")); password->setEchoMode(QLineEdit::Password); password->setPlaceholderText(QString::fromUtf8("密码（至少 6 位）")); layout->addWidget(password);
     QLabel* message=new QLabel; message->setObjectName("LoginError"); message->setWordWrap(true); layout->addWidget(message);
     QPushButton* signIn=new QPushButton(QString::fromUtf8("登录")); signIn->setObjectName("LoginPrimary"); signIn->setDefault(true); layout->addWidget(signIn);
-    QPushButton* create=new QPushButton(QString::fromUtf8("首次使用？创建本地账号")); layout->addWidget(create);
+    QPushButton* create=new QPushButton(QString::fromUtf8("首次使用？创建本地账号")); create->setObjectName("LoginCreateAccount"); layout->addWidget(create);
     QHBoxLayout* tools=new QHBoxLayout;
     QPushButton* recover=new QPushButton(QString::fromUtf8("忘记密码")); tools->addWidget(recover); tools->addStretch();
     QPushButton* restore=new QPushButton(QString::fromUtf8("从备份恢复")); tools->addWidget(restore); layout->addLayout(tools);
@@ -174,6 +185,8 @@ bool ShadowLocalAccounts::login( QString* email, QString* folder, const QString&
       if(!accounts.setPassword(normalized,password->text(),&error)) {message->setText(error);return;}
       selected=normalized; dialog.accept();
     });
+    layout->activate();
+    dialog.adjustSize();
     if(dialog.exec()!=QDialog::Accepted)return false;
   }
   accounts.rememberLogin(selected);
