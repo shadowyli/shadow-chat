@@ -2,6 +2,7 @@
 #define SHADOWGITHUBRELEASE_H
 
 #include <QtCore>
+#include "ShadowUpdateManifest.h"
 
 namespace ShadowGitHubRelease {
 inline bool isSource(const QUrl& source)
@@ -11,6 +12,7 @@ inline bool isSource(const QUrl& source)
 
 inline QByteArray manifest(const QByteArray& data, const QString& channel, const QString& environment)
 {
+  if(data.size() > 1024 * 1024) return QByteArray();
   QJsonParseError error;
   const QJsonDocument document = QJsonDocument::fromJson(data, &error);
   if(error.error != QJsonParseError::NoError || !document.isArray() ||
@@ -31,6 +33,7 @@ inline QByteArray manifest(const QByteArray& data, const QString& channel, const
     const QRegularExpressionMatch match = pattern.match(tag);
     if(!match.hasMatch()) continue;
     const QString version = match.captured(1);
+    if(!ShadowUpdateManifest::allowsVersion(version, version)) continue;
     const QVersionNumber number = QVersionNumber::fromString(version);
     if(!selected.isEmpty() && QVersionNumber::compare(number, selectedVersion) <= 0) continue;
     const QString filename = QStringLiteral("ShadowChat-%1-%2-setup.exe").arg(version, environment);

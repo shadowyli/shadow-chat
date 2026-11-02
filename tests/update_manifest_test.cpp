@@ -7,10 +7,10 @@ int main(int argc,char** argv) {
  o["downloadPage"]="/tools/shadowchat";o["installerUrl"]="/downloads/shadowchat/1.1.0/setup.exe";o["sha256"]=QString(64,'a');
  const QUrl source("https://updates.example.test/updates/shadowchat.json");QString v,d;
  auto parse=[&](){return ShadowUpdateManifest::parse(QJsonDocument(o).toJson(),source,&v,&d);};
- if(!parse() || v!="1.1.0" || d!="https://updates.example.test/tools/shadowchat")return 1;
+ if(!parse() || v!="1.1.0" || d!="https://updates.example.test/downloads/shadowchat/1.1.0/setup.exe")return 1;
  o["published"]=false;if(parse())return 2;o["published"]=true;
- o["downloadPage"]="https://evil.example/tools/shadowchat";if(parse())return 3;
- o["downloadPage"]="/tools/shadowchat";o["version"]="1.1.0-injected";if(parse())return 4;
+ o["installerUrl"]="https://evil.example/downloads/setup.exe";if(parse())return 3;
+ o["installerUrl"]="/downloads/shadowchat/1.1.0/setup.exe";o["version"]="1.1.0-injected";if(parse())return 4;
  o["version"]="1.1.0";o["sha256"]="";if(parse())return 5;
  if(ShadowUpdateManifest::parse(QByteArray(65537,'x'),source,&v,&d))return 6;
  if(!ShadowUpdateManifest::allowsVersion("1.1.0","1.1.0"))return 7;
@@ -22,10 +22,13 @@ int main(int argc,char** argv) {
  if(!parse() || ShadowUpdateManifest::allowsVersion("1.0.0",v))return 12;
  o.remove("mandatory");
  if(!parse() || ShadowUpdateManifest::allowsVersion("1.0.0",v))return 13;
- o["downloadPage"]="/tools/shadowchat?redirect=https://evil.example";if(parse())return 14;
- o["downloadPage"]="/tools/shadowchat";o["channel"]="stable";if(parse())return 15;
+ o["installerUrl"]="/downloads/shadowchat/1.1.0/setup.exe?redirect=https://evil.example";if(parse())return 14;
+ o["installerUrl"]="/downloads/shadowchat/1.1.0/setup.exe";o["channel"]="stable";if(parse())return 15;
  if(!ShadowUpdateManifest::parse(QJsonDocument(o).toJson(),source,&v,&d,"stable"))return 16;
  o.remove("channel");if(parse())return 17;
  o["channel"]="test";o["mandatory"]=true;if(!parse())return 18;
+ o["installerUrl"]="/tools/shadowchat";if(parse())return 19;
+ o["installerUrl"]="/downloads/shadowchat/1.1.0/setup.zip";if(parse())return 20;
+ o["installerUrl"]="/downloads/shadowchat/1.1.0/setup.exe";o.remove("downloadPage");if(!parse())return 21;
  qInfo()<<"update manifest: released/unpublished/origin/version/checksum/size checks passed";return 0;
 }

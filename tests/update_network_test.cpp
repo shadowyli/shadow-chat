@@ -86,7 +86,7 @@ static bool run(const char* name,const QUrl& url,HttpFixture* fixture,const QStr
   passed=passed && updater.hasNewerVersion("1.1.0")==expectedNew;
   passed=passed && updater.errorString().isEmpty()==!expectedVersion.isEmpty();
   if(expectedVersion.isEmpty())passed=passed && updater.downloadUrl().isEmpty();
-  else passed=passed && updater.downloadUrl()==url.resolved(QUrl("/tools/shadowchat")).toString();
+  else passed=passed && updater.downloadUrl()==url.resolved(QUrl("/downloads/fixture.exe")).toString();
   if(fixture)passed=passed && fixture->requests==1 && fixture->lastRequest.startsWith("GET /updates/shadowchat.json HTTP/1.") && !fixture->lastRequest.toLower().contains("cookie:") && !fixture->lastRequest.toLower().contains("authorization:");
   std::printf("%s %s completions=%d version=%s\n",passed?"PASS":"FAIL",name,completions,qPrintable(updater.versionAvailable()));
   return passed;
