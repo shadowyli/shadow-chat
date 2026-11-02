@@ -35,6 +35,7 @@ class ChatMessage;
 class Emoticon;
 class QLabel;
 class QToolButton;
+class QTimer;
 
 
 class GuiChat : public QWidget, private Ui::GuiChatWidget
@@ -70,6 +71,7 @@ public:
   void setMessageSendResult( const QString& message, bool accepted, const QString& feedback );
   void setFileSendResult( bool accepted, const QString& feedback );
   void showSendFeedback( const QString& feedback, bool failed );
+  void refreshTransferIndicators();
 
 
 #ifdef BEEBEEP_USE_VOICE_CHAT
@@ -97,6 +99,7 @@ signals:
   void updateChatColorsRequest();
   void showStatusMessageRequest( const QString&, int );
   void openSavedChatRequest( VNumber );
+  void showFileTransfersRequest();
 #ifdef BEEBEEP_USE_SHAREDESKTOP
   void shareDesktopToChatRequest( VNumber, bool );
   void screenshotToChatRequest( VNumber );
@@ -174,10 +177,14 @@ protected:
   void updateChat();
   void setChatStylesheet( QTextDocument* );
   QString modernChatMessageToText( const ChatMessage& );
+  User modernMessageSender( const ChatMessage&, bool* outgoing ) const;
   QString modernImageAlbumHtml( const QStringList&, const ChatMessage& );
+  QString modernFileMessageToText( const ChatMessage& );
+  QString modernHistoryHtml( const QString&, int maximumMessages = -1, int* missedMessages = Q_NULLPTR );
   QString modernBubbleHtml( const QString& body, const User&, bool outgoing, const QDateTime&, int preferredWidth, const QString& sourceId = QString() );
   QString modernMessageId( const ChatMessage& ) const;
   QPair<QString,QString> replyTargetAt( const QPoint& ) const;
+  void applyTransferIndicators( const QVariantList& );
   QString avatarUrlForUser( const User& );
   void updateFilterMessagesButton();
   bool submitImage( const QImage& );
@@ -212,6 +219,14 @@ private:
   QSplitter* mp_splitter;
   QToolButton* mp_modernAttachButton;
   QLabel* mp_sendFeedback;
+  QTimer* mp_sendFeedbackTimer;
+  QTimer* mp_transferRefreshTimer;
+  struct TransferBubble
+  {
+    QStringList paths;
+    QString batch;
+  };
+  QHash<QString,TransferBubble> m_transferBubbles;
   QString m_pendingMessage;
   QString m_pendingDraftMessage;
   QHash<VNumber,QPair<QString,QString>> m_replyDrafts;

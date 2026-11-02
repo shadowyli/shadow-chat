@@ -196,6 +196,18 @@ bool GuiChatItem::updateItem( const Chat& c )
   setData( 0, ChatLastMessageTimestamp, latestTimestamp );
   if( m_defaultIcon.isNull() )
     m_defaultIcon = IconManager::instance().icon( "chat.png" );
+  if(c.isPrivate()&&online_users==0)
+  {
+    QImage image=m_defaultIcon.pixmap(QSize(48,48)).toImage().convertToFormat(QImage::Format_ARGB32);
+    for(int row=0;row<image.height();++row)
+      for(int column=0;column<image.width();++column)
+      {
+        const QColor color=image.pixelColor(column,row);
+        const int gray=qMin(255,qGray(color.rgb())+28);
+        image.setPixelColor(column,row,QColor(gray,gray,gray,color.alpha()));
+      }
+    m_defaultIcon=QIcon(QPixmap::fromImage(image));
+  }
 
   setIcon( 0, m_defaultIcon );
   setForeground( 0, QBrush( QColor( "#243044" ) ) );

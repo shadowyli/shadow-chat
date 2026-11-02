@@ -31,7 +31,7 @@ int main(int argc, char** argv)
   std::setvbuf(stdout, Q_NULLPTR, _IONBF, 0);
   QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
   BeeApplication app(argc, argv);
-  const QString accountEmail = "synthetic-login@example.test";
+  const QString accountEmail = "synthetic-login@corp.netease.com";
   const QString accountPassword = "synthetic-login-only";
   if(app.arguments().size() == 3 && app.arguments().at(1) == "--verify-persisted-login")
   {
@@ -120,7 +120,7 @@ int main(int argc, char** argv)
       "login raster has a complete opaque background instead of floating input fields");
     dialog->grab().save(QDir::currentPath() + "/login-first-open.png");
     signIn->click();
-    check(dialog->isVisible() && message->isVisible() && message->text().contains(QStringLiteral("有效")),
+    check(dialog->isVisible() && message->isVisible() && message->text().contains(QStringLiteral("邮箱名称")),
       "empty login keeps the form open with visible email feedback");
     recover->click();
     check(message->text().contains(QStringLiteral("已存在")), "password recovery still validates the entered account");
@@ -129,16 +129,16 @@ int main(int argc, char** argv)
     email->setText("../invalid@example.test");
     password->setText(accountPassword);
     signIn->click();
-    check(dialog->isVisible() && message->isVisible() && message->text().contains(QStringLiteral("有效")) &&
+    check(dialog->isVisible() && message->isVisible() && message->text().contains(QStringLiteral("邮箱名称")) &&
       !QFileInfo::exists(accountRoot),
       "invalid email cannot create a profile or close the login form");
-    email->setText("short-login@example.test");
+    email->setText("short-login@corp.netease.com");
     password->setText("12345");
     signIn->click();
     check(dialog->isVisible() && message->isVisible() && message->text().contains(QStringLiteral("6")) &&
-      !accounts.exists(email->text()) && accounts.autoLoginEmail().isEmpty(),
+      !accounts.exists("short-login@corp.netease.com") && accounts.autoLoginEmail().isEmpty(),
       "short password cannot create or remember an account");
-    email->setText(" SYNTHETIC-LOGIN@EXAMPLE.TEST ");
+    email->setText(" SYNTHETIC-LOGIN@CORP.NETEASE.COM ");
     password->setText(accountPassword);
     signIn->click();
   });
@@ -207,7 +207,7 @@ int main(int argc, char** argv)
     QPushButton* signIn = dialog->findChild<QPushButton*>("LoginPrimary");
     QLabel* message = dialog->findChild<QLabel*>("LoginError");
     if(!address || !password || !signIn || !message) qFatal("Existing account login controls missing");
-    address->setText(" SYNTHETIC-LOGIN@EXAMPLE.TEST ");
+    address->setText(" SYNTHETIC-LOGIN@CORP.NETEASE.COM ");
     password->setText("wrong-existing-password");
     signIn->click();
     metadata.open(QIODevice::ReadOnly);

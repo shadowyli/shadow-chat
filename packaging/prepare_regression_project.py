@@ -30,6 +30,7 @@ for line in text.splitlines():
     lines.append(line)
 lines.append('INCLUDEPATH += '+(ROOT/'tests').as_posix()+' '+(ROOT/'src').as_posix()+' '+(args.production_root/'generated').resolve().as_posix())
 lines.append('win32-msvc*: QMAKE_CXXFLAGS += /FC')
+lines.append('win32: LIBS += gdi32.lib')
 destination = args.output_root/'projects'/(args.name+'_test.pro')
 destination.parent.mkdir(parents=True, exist_ok=True)
 destination.write_text('\n'.join(lines)+'\n', encoding='utf-8')
