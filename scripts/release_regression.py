@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT/'packaging'))
 from release_config import artifact_name, sha256, version
 from source_snapshot import verify
+from stage_video_runtime import stage_video_runtime
 
 
 def main():
@@ -24,6 +25,7 @@ def main():
     ])
     parser.add_argument('--scale-factors', nargs='+', choices=('1', '1.5', '2'), default=['1', '1.5', '2'])
     parser.add_argument('--runtime-dir', type=Path)
+    parser.add_argument('--platform', choices=('windows', 'offscreen'), default='windows')
     parser.add_argument('--dev-preview-modes', nargs='+', choices=(
         'all', 'reply', 'local-send', 'history', 'welcome', 'corners',
         'startup-size', 'messagebox', 'sidebar',
@@ -65,7 +67,7 @@ def main():
         raise SystemExit('Stage the matching release payload before native regression')
     environment = dict(os.environ)
     environment['PATH'] = str(payload)+os.pathsep+environment['PATH']
-    environment['QT_QPA_PLATFORM'] = 'windows'
+    environment['QT_QPA_PLATFORM'] = args.platform
     environment['QT_QPA_PLATFORM_PLUGIN_PATH'] = str(payload/'platforms')
     environment['QT_PLUGIN_PATH'] = str(payload)
     directory = output/'release-tests'/('run-'+uuid.uuid4().hex[:8])
@@ -84,6 +86,7 @@ def main():
         'sourceSnapshotSha256': sha256(snapshot),
         'testPlatformSha256': platform_inventory,
         'startedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        'qtPlatform': args.platform,
         'passed': False, 'results': [],
         'scope': 'Selected final-object native tests with synthetic profiles; not real office network acceptance',
     }
@@ -92,7 +95,7 @@ def main():
             workspace = directory/name
             workspace.mkdir()
             log = workspace/'verification.log'
-            scales = args.scale_factors if name in ('login_startup', 'onboarding_startup', 'login_email_domains', 'dev_preview') else ['1']
+            scales = ['1'] if name == 'github_release' else args.scale_factors
             modes = args.dev_preview_modes if name == 'dev_preview' else ['all']
             with log.open('wb') as stream:
                 for command in (
@@ -104,6 +107,8 @@ def main():
                 target = workspace/(name+'_test.exe')
                 if not target.is_file():
                     target = workspace/'release'/(name+'_test.exe')
+                if name == 'video_preview':
+                    stage_video_runtime(ROOT/'dist/deps/vlc-3.0.24-win32', target.parent)
                 for scale in scales:
                     test_environment = dict(environment)
                     test_environment['QT_SCALE_FACTOR'] = scale

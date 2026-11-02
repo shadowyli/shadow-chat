@@ -44,6 +44,7 @@ ChatMessageData& ChatMessageData::operator=( const ChatMessageData& cmd )
     m_groupName = cmd.m_groupName;
     m_groupLastModified = cmd.m_groupLastModified;
     m_groupOwnerHash = cmd.m_groupOwnerHash;
+    m_richText = cmd.m_richText;
   }
 
   return *this;

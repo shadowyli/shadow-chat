@@ -25,6 +25,7 @@
 #include "BeeUtils.h"
 #include "ChatManager.h"
 #include "GuiVCard.h"
+#include "ShadowAvatarInteractions.h"
 #include "IconManager.h"
 #include "PluginManager.h"
 #include "Settings.h"
@@ -34,281 +35,168 @@
 
 
 GuiVCard::GuiVCard( QWidget *parent )
- : QFrame( parent )
+ : QFrame( parent ), m_userId( ID_INVALID ), m_chatId( ID_INVALID )
 {
   setupUi( this );
   setObjectName( "GuiVCard" );
-
-  setWindowFlags( Qt::Popup );
+  setWindowFlags( Qt::Popup | Qt::FramelessWindowHint );
   setAttribute( Qt::WA_DeleteOnClose, true );
+  setFocusPolicy( Qt::StrongFocus );
   setFrameShape( QFrame::NoFrame );
-  setMinimumWidth( 480 );
-  setMaximumWidth( 560 );
+  setMinimumSize( 0, 0 );
+  setMaximumWidth( 420 );
   delete layout();
   QVBoxLayout* card = new QVBoxLayout( this );
-  card->setContentsMargins( 24, 24, 24, 24 );
+  card->setContentsMargins( 20, 16, 20, 20 );
   card->setSpacing( 12 );
-  QFrame* headerPanel = new QFrame(this);
-  headerPanel->setStyleSheet(QStringLiteral("QFrame { background: #EEF4FF; border-radius: 12px; }"));
-  QHBoxLayout* header = new QHBoxLayout(headerPanel);
-  header->setContentsMargins(16,16,16,16);
-  header->setSpacing( 18 );
-  header->addWidget( mp_lPhoto );
-  QVBoxLayout* identity = new QVBoxLayout;
-  QLabel* cardTitle=new QLabel(QStringLiteral("同事资料"),headerPanel);cardTitle->setProperty("role","hint");identity->addWidget(cardTitle);
+  QHBoxLayout* heading = new QHBoxLayout;
+  QLabel* title = new QLabel( QStringLiteral( "公开资料" ), this );
+  title->setProperty( "role", "hint" );
+  heading->addWidget( title );
+  heading->addStretch();
+  QToolButton* closeButton = new QToolButton( this );
+  closeButton->setObjectName( QStringLiteral( "closePublicProfile" ) );
+  closeButton->setText( QStringLiteral( "×" ) );
+  closeButton->setFixedSize( 32, 32 );
+  closeButton->setToolTip( QStringLiteral( "关闭资料卡（Esc）" ) );
+  closeButton->setAccessibleName( QStringLiteral( "关闭资料卡" ) );
+  connect( closeButton, &QToolButton::clicked, this, &QWidget::close );
+  heading->addWidget( closeButton );
+  card->addLayout( heading );
+
+  mp_publicDetails = new QScrollArea( this );
+  mp_publicDetails->setObjectName( QStringLiteral( "publicProfileDetails" ) );
+  mp_publicDetails->setFrameShape( QFrame::NoFrame );
+  mp_publicDetails->setWidgetResizable( true );
+  mp_publicDetails->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
+  QWidget* details = new QWidget;
+  details->setObjectName( QStringLiteral( "publicProfileBody" ) );
+  details->setStyleSheet( QStringLiteral( "QWidget#publicProfileBody{background:#ffffff;}" ) );
+  QVBoxLayout* identity = new QVBoxLayout( details );
+  identity->setContentsMargins( 0, 0, 8, 0 );
+  identity->setSpacing( 12 );
+  mp_lPhoto->setFixedSize( 64, 64 );
+  identity->addWidget( mp_lPhoto, 0, Qt::AlignLeft );
   mp_lName->setProperty( "role", "title" );
-  mp_lName->setMinimumHeight(32);
-  mp_lName->setWordWrap( true );
+  mp_lName->setStyleSheet( QStringLiteral( "font-size:22px;font-weight:600;color:#14213a;background:transparent;" ) );
+  mp_fullName = new QLabel( details );
+  mp_fullName->setObjectName( QStringLiteral( "publicProfileFullName" ) );
+  mp_fullName->setProperty( "role", "hint" );
+  foreach( QLabel* detail, QList<QLabel*>() << mp_lName << mp_fullName << mp_lStatusDescription <<
+           mp_lEmail << mp_lPhone << mp_lRoom << mp_lBirthday << mp_lWorkgroups )
+  {
+    detail->setMinimumSize( 0, 0 );
+    detail->setMaximumSize( QWIDGETSIZE_MAX, QWIDGETSIZE_MAX );
+    detail->setTextFormat( Qt::PlainText );
+    detail->setTextInteractionFlags( Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard );
+    detail->setWordWrap( true );
+    detail->setSizePolicy( QSizePolicy::Ignored, QSizePolicy::Preferred );
+  }
   mp_lStatusDescription->setProperty( "role", "hint" );
   identity->addWidget( mp_lName );
+  identity->addWidget( mp_fullName );
   identity->addWidget( mp_lStatusDescription );
-  identity->addWidget( mp_lStatus );
-  header->addLayout( identity, 1 );
-  card->addWidget( headerPanel );
+  mp_teInfo->setReadOnly( true );
+  mp_teInfo->setMinimumSize( 0, 48 );
+  mp_teInfo->setMaximumHeight( 100 );
+  mp_teInfo->setAccessibleName( QStringLiteral( "个人介绍" ) );
+  mp_teInfo->setStyleSheet( QStringLiteral( "QPlainTextEdit{background:transparent;border:0;padding:0;color:#697b94;}" ) );
+  identity->addWidget( mp_teInfo );
   foreach( QLabel* detail, QList<QLabel*>() << mp_lEmail << mp_lPhone << mp_lRoom << mp_lBirthday << mp_lWorkgroups )
-  {
-    detail->setWordWrap( true );
-    card->addWidget( detail );
-  }
-  mp_teInfo->setMinimumHeight( 70 );
-  mp_teInfo->setMaximumHeight( 110 );
-  card->addWidget( mp_teInfo );
-  mp_lPath->setProperty( "role", "hint" );
-  mp_lPath->setWordWrap( true );
-  QPushButton* networkDetails = new QPushButton(QStringLiteral("连接信息"),this);
-  networkDetails->setCheckable(true);networkDetails->setMaximumWidth(120);
-  card->addWidget(networkDetails,0,Qt::AlignLeft);
-  card->addWidget( mp_lPath );
-  mp_lPath->hide();connect(networkDetails,&QPushButton::toggled,mp_lPath,&QWidget::setVisible);
-  QHBoxLayout* primaryActions = new QHBoxLayout;
-  QHBoxLayout* secondaryActions = new QHBoxLayout;
+    identity->addWidget( detail );
+  identity->addStretch();
+  mp_publicDetails->setWidget( details );
+  card->addWidget( mp_publicDetails, 1 );
+
   foreach( QPushButton* action, QList<QPushButton*>() << mp_pbChat << mp_pbFile << mp_pbFavorite << mp_pbBuzz << mp_pbColor << mp_pbRemove << mp_pbHelp )
-  {
-    action->setMinimumSize( 0, 36 );
-    action->setMaximumSize( QWIDGETSIZE_MAX, QWIDGETSIZE_MAX );
-    action->setIcon( QIcon() );
-  }
-  primaryActions->addWidget( mp_pbChat );
-  primaryActions->addWidget( mp_pbFile );
-  primaryActions->addWidget( mp_pbFavorite );
-  secondaryActions->addWidget( mp_pbBuzz );
-  secondaryActions->addWidget( mp_pbColor );
-  secondaryActions->addWidget( mp_pbRemove );
-  secondaryActions->addWidget( mp_pbHelp );
-  card->addLayout( primaryActions );
-  card->addLayout( secondaryActions );
+    action->hide();
+  mp_pbChat->setMinimumSize( 0, 36 );
+  mp_pbChat->setMaximumSize( QWIDGETSIZE_MAX, QWIDGETSIZE_MAX );
+  mp_pbChat->setIcon( QIcon() );
+  card->addWidget( mp_pbChat );
   mp_frame->hide();
   mp_frameBottom->hide();
+  mp_lPath->clear();
+  mp_lPath->hide();
+  mp_lStatus->clear();
+  mp_lStatus->hide();
   mp_pbChat->setText( QStringLiteral( "发消息" ) );
   mp_pbChat->setProperty( "role", "primary" );
-  mp_pbFile->setText( QStringLiteral( "发文件" ) );
-  mp_pbFavorite->setText( QStringLiteral( "收藏同事" ) );
-  mp_pbBuzz->setText( QStringLiteral( "提醒" ) );
-  mp_pbColor->setText( QStringLiteral( "昵称颜色" ) );
-  mp_pbRemove->setText( QStringLiteral( "移除同事" ) );
-  mp_pbHelp->setText( QStringLiteral( "求助" ) );
-
-  QPalette custom_palette = palette();
-  if( Settings::instance().useDarkStyle() )
-  {
-    custom_palette.setColor( QPalette::Window, Bee::colorDarkGrey() );
-    custom_palette.setColor( QPalette::Base, Bee::colorGrey() );
-  }
-  else
-  {
-#if QT_VERSION > 0x050000
-    custom_palette.setColor( QPalette::Window, Bee::colorWhite().lighter() );
-    custom_palette.setColor( QPalette::Base, Bee::colorWhite() );
-#else
-    custom_palette.setColor( QPalette::Window, Bee::colorWhite() );
-    custom_palette.setColor( QPalette::Base, Bee::colorWhite().lighter() );
-#endif
-  }
-  setPalette( custom_palette );
-
   ShadowDialogStyle::apply( this );
-
+  setStyleSheet( styleSheet() + QStringLiteral(
+    "QFrame#GuiVCard{background:#ffffff;border:1px solid #dce4f0;border-radius:12px;}"
+    "QScrollArea#publicProfileDetails,QScrollArea#publicProfileDetails>QWidget>QWidget{background:#ffffff;}"
+    "QPlainTextEdit#mp_teInfo{background:transparent;border:0;padding:0;color:#697b94;}" ) );
+  qApp->installEventFilter( this );
   connect( mp_pbChat, SIGNAL( clicked() ), this, SLOT( showPrivateChat() ) );
-  connect( mp_pbFile, SIGNAL( clicked() ), this, SLOT( sendFile() ) );
-  connect( mp_pbColor, SIGNAL( clicked() ), this, SLOT( changeColor() ) );
-  connect( mp_pbFavorite, SIGNAL( clicked() ), this, SLOT( favoriteClicked() ) );
-  connect( mp_pbRemove, SIGNAL( clicked() ), this, SLOT( removeUserClicked() ) );
-  connect( mp_pbBuzz, SIGNAL( clicked() ), this, SLOT( sendBuzz() ) );
 }
 
 void GuiVCard::setVCard( const User& u, VNumber chat_id, bool core_is_connected )
 {
   m_userId = u.id();
   m_chatId = chat_id;
-  QString user_path = u.isStatusConnected() ? QString( "%1: <b>%2</b>&nbsp;&nbsp;&nbsp;%3: <b>%4</b>" )
-                                                .arg( QStringLiteral( "内网地址" ) ).arg( u.networkAddress().hostAddress().toString() )
-                                                .arg( QStringLiteral( "端口" ) ).arg( u.networkAddress().hostPort() )
-                                            : Bee::replaceHtmlSpecialCharacters( u.path() );
-  mp_lPath->setText( user_path );
   m_userColor = u.color();
+  setProperty( "profileUserId", QVariant::fromValue<qulonglong>( m_userId ) );
+  mp_lName->setText( u.name() );
+  setWindowTitle( QStringLiteral( "%1的公开资料" ).arg( u.name() ) );
+  const auto setDetail = []( QLabel* label, const QString& title, const QString& value ) {
+    label->setText( value.trimmed().isEmpty() ? QString() : title + value );
+    label->setVisible( !value.trimmed().isEmpty() );
+    label->setToolTip( QString() );
+  };
+  const QString fullName = u.vCard().fullName( Settings::instance().useUserFirstNameFirstInFullName() );
+  setDetail( mp_fullName, QStringLiteral( "姓名　" ), fullName == u.name() ? QString() : fullName );
+  setDetail( mp_lStatusDescription, QString(), u.statusDescription() );
+  setDetail( mp_lEmail, QStringLiteral( "邮箱　" ), u.vCard().email() );
+  setDetail( mp_lPhone, QStringLiteral( "电话　" ), u.vCard().phoneNumber() );
+  setDetail( mp_lRoom, QStringLiteral( "位置　" ), u.vCard().roomLocation() );
+  setDetail( mp_lBirthday, QStringLiteral( "生日　" ), u.vCard().birthday().isValid() ?
+    u.vCard().birthday().toString( u.vCard().birthday().year() == 1900 ? QStringLiteral( "MM-dd" ) : QStringLiteral( "yyyy-MM-dd" ) ) : QString() );
+  setDetail( mp_lWorkgroups, QStringLiteral( "工作组　" ), u.workgroups().join( QStringLiteral( " / " ) ) );
+  mp_teInfo->setPlainText( u.vCard().info() );
+  mp_teInfo->setVisible( !u.vCard().info().trimmed().isEmpty() );
+  const QPixmap original = u.vCard().photo().isNull() ? Bee::avatarForUser( u, QSize( 64, 64 ), true ) : u.vCard().photo();
+  mp_lPhoto->setPixmap( ShadowStyle::avatarPixmap( QIcon( original ), QSize( 64, 64 ) ) );
+  mp_lPhoto->setToolTip( u.name() );
+  mp_pbChat->setVisible( !u.isLocal() && chat_id != ID_INVALID );
+  Q_UNUSED( core_is_connected );
+}
 
-  QString name_txt = "";
-  if( u.vCard().hasFullName() && u.vCard().fullName( Settings::instance().useUserFirstNameFirstInFullName() ) != u.name() )
-    name_txt = QString( "<font color=""%1"">%2</font> %3 " ).arg( u.color(), u.vCard().fullName( Settings::instance().useUserFirstNameFirstInFullName() ), tr( "is" ) );
-  name_txt += QString( "<font color=""%1""><b>%2</b></font>" ).arg( u.color(), Bee::replaceHtmlSpecialCharacters( u.name() ) );
-  if( !u.localHostName().isEmpty() )
-    name_txt.append( QString( " %1" ).arg( tr( "from %1" ).arg( u.localHostName().toLower() ) ) );
-  if( !u.domainName().isEmpty() )
-    name_txt.append( QString( ".%1" ).arg( u.domainName().toLower() ) );
-  mp_lName->setText( Bee::replaceHtmlSpecialCharacters( u.name() ) );
+void GuiVCard::showAt( const QPoint& anchor )
+{
+  const QRect available = qApp->desktop()->availableGeometry( anchor ).adjusted( 8, 8, -8, -8 );
+  const int width = qMin( 380, available.width() );
+  setMaximumWidth( width );
+  resize( width, qMin( 560, available.height() ) );
+  ensurePolished();
+  layout()->activate();
+  mp_publicDetails->widget()->layout()->activate();
+  const int contentHeight = mp_publicDetails->widget()->layout()->totalHeightForWidth(
+    qMax( 1, width - 60 ) );
+  const int desiredHeight = qMax( 240, contentHeight + (mp_pbChat->isHidden() ? 92 : 140) );
+  setGeometry( ShadowAvatarInteractions::popupGeometry( anchor,
+    QSize( width, qMin( qMin( desiredHeight, 600 ), available.height() ) ), available ) );
+  show();
+  setFocus( Qt::PopupFocusReason );
+}
 
-  if( !u.statusDescription().isEmpty() )
-    mp_lStatusDescription->setText( Bee::replaceHtmlSpecialCharacters( u.statusDescription() ) );
-  else
-    mp_lStatusDescription->hide();
-
-  if( u.vCard().birthday().isValid() )
+void GuiVCard::keyPressEvent( QKeyEvent* event )
+{
+  if( event->key() == Qt::Key_Escape )
   {
-//: This date format refers to a birthday. Date format: do not change letters. More info in https://doc.qt.io/qt-5/qdatetime.html#toString
-    QString s_birth_day = tr( "Birthday: %1" ).arg( u.vCard().birthday().year() == 1900 ? u.vCard().birthday().toString( tr( "d MMMM" ) ) : u.vCard().birthday().toString( tr("d MMMM yyyy" ) ) );
-    if( u.isBirthDay() )
-      s_birth_day += QString( " - <font color=red><b>%1!!!</b></font>" ).arg( tr( "Happy Birthday" ) );
-    mp_lBirthday->setText( s_birth_day );
+    close();
+    event->accept();
+    return;
   }
-  else
-    mp_lBirthday->hide();
+  QFrame::keyPressEvent( event );
+}
 
-  if( !u.vCard().email().isEmpty() )
-    mp_lEmail->setText( QStringLiteral("邮箱　")+u.vCard().email() );
-  else
-    mp_lEmail->hide();
-
-  const QPixmap original=u.vCard().photo().isNull()?Bee::avatarForUser(u,QSize(96,96),true):u.vCard().photo();
-  QPixmap rounded(96,96);rounded.fill(Qt::transparent);QPainter portrait(&rounded);portrait.setRenderHint(QPainter::Antialiasing);QPainterPath circle;circle.addEllipse(QRectF(0,0,96,96));portrait.setClipPath(circle);portrait.drawPixmap(0,0,original.scaled(96,96,Qt::KeepAspectRatioByExpanding,Qt::SmoothTransformation));portrait.end();mp_lPhoto->setPixmap(rounded);
-
-  mp_lPhoto->setToolTip( Bee::toolTipForUser( u, false ) );
-
-  if( !u.vCard().phoneNumber().isEmpty() )
-    mp_lPhone->setText( QStringLiteral("电话　")+u.vCard().phoneNumber() );
-  else
-    mp_lPhone->hide();
-
-  if( !u.vCard().roomLocation().isEmpty() )
-    mp_lRoom->setText( QStringLiteral("位置　")+u.vCard().roomLocation() );
-  else
-    mp_lRoom->hide();
-
-  QString workgroups_txt = "";
-  if( !u.workgroups().isEmpty() )
-  {
-    workgroups_txt = Bee::stringListToTextString( u.workgroups(), true, 9 );
-    if( u.workgroups().size() > 9 )
-      mp_lWorkgroups->setToolTip( Bee::stringListToTextString( u.workgroups(), true ) );
-    else
-      mp_lWorkgroups->setToolTip( "" );
-  }
-  else
-  {
-    workgroups_txt = tr( "none" );
-    mp_lWorkgroups->setToolTip( "" );
-  }
-  mp_lWorkgroups->setText( QString( "<b>%1</b>: %2" ).arg( QStringLiteral( "工作组" ), workgroups_txt ) );
-  mp_lWorkgroups->setVisible(!u.workgroups().isEmpty());
-
-  if( !u.vCard().info().isEmpty() )
-    mp_teInfo->setPlainText( u.vCard().info() );
-  else
-    mp_teInfo->setPlainText( tr( "No shared information." ) );
-
-  QString user_version;
-  if( u.version().isEmpty() )
-    user_version = "";
-  else if( u.version() < Settings::instance().version( false, false, false ) )
-    user_version = tr( "old %1" ).arg( u.version() );
-  else if( u.version() > Settings::instance().version( false, false, false ) )
-    user_version = tr( "new %1" ).arg( u.version() );
-  else if( u.qtVersion() != Settings::instance().localUser().qtVersion() )
-    user_version = QString( "v%1-qt%2" ).arg( u.version(), u.qtVersion() );
-  else
-    user_version = "";
-
-  if( !user_version.isEmpty() )
-  {
-    mp_lStatus->setText( QString( " (%1) " ).arg( user_version ) );
-    mp_lStatus->setToolTip( tr( "BeeBEEP version" ) );
-  }
-  else
-  {
-    mp_lStatus->setText( "" );
-    mp_lStatus->setToolTip( "" );
-  }
-
-  if( u.isLocal() )
-  {
-    mp_pbChat->hide();
-    mp_pbFile->hide();
-    mp_pbFavorite->hide();
-    mp_pbBuzz->hide();
-    mp_pbRemove->hide();
-    mp_pbHelp->hide();
-  }
-  else
-  {
-    mp_pbChat->show();
-    mp_pbChat->setToolTip( tr( "Open chat" ) );
-    if( Settings::instance().enableFileTransfer() && u.isStatusConnected() && core_is_connected )
-      mp_pbFile->show();
-    else
-      mp_pbFile->hide();
-
-    if( Settings::instance().saveUserList() )
-    {
-      mp_pbFavorite->show();
-      if( u.isFavorite() )
-      {
-        mp_pbFavorite->setText( QStringLiteral( "取消收藏" ) );
-        mp_pbFavorite->setToolTip( tr( "Remove from favorites" ) );
-      }
-      else
-      {
-        mp_pbFavorite->setText( QStringLiteral( "收藏同事" ) );
-        mp_pbFavorite->setToolTip( tr( "Add to favorites" ) );
-      }
-    }
-    else
-      mp_pbFavorite->hide();
-
-    if( u.isStatusConnected() )
-    {
-      mp_pbBuzz->show();
-      if( u.isHelper() )
-        mp_pbHelp->show();
-      else
-        mp_pbHelp->hide();
-    }
-    else
-    {
-      mp_pbBuzz->hide();
-      mp_pbHelp->hide();
-    }
-
-    bool remove_is_enabled;
-    QString remove_tooltip;
-
-    if( u.isStatusConnected() )
-    {
-      remove_is_enabled = false;
-      remove_tooltip = tr( "You cannot remove an user who is connected" );
-    }
-    else if( ChatManager::instance().userIsInGroupChat( u.id() ) )
-    {
-      remove_is_enabled = false;
-      remove_tooltip = tr( "You cannot remove an user who is in group chat" );
-    }
-    else
-    {
-      remove_is_enabled = true;
-      remove_tooltip = tr( "Remove this user" );
-    }
-
-    mp_pbRemove->setToolTip( remove_tooltip );
-    mp_pbRemove->setEnabled( remove_is_enabled );
-  }
+bool GuiVCard::eventFilter( QObject* watched, QEvent* event )
+{
+  if( isVisible() && event->type() == QEvent::MouseButtonPress &&
+      !frameGeometry().contains( static_cast<QMouseEvent*>( event )->globalPos() ) )
+    close();
+  return QFrame::eventFilter( watched, event );
 }
 
 void GuiVCard::showPrivateChat()

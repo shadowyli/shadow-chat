@@ -6,6 +6,7 @@ import ctypes
 from ctypes import wintypes
 import datetime
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
@@ -177,6 +178,16 @@ def fingerprint():
     return snapshot.hexdigest()
 
 
+def stage_video_runtime(stage):
+    specification = importlib.util.spec_from_file_location("shadow_video_runtime", ROOT / "packaging/prepare_video_runtime.py")
+    preparation = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(preparation)
+    runtime = ROOT / "dist/deps" / ("vlc-" + preparation.VERSION + "-" + preparation.ARCHITECTURE) / "runtime"
+    preparation.verify_runtime(runtime)
+    shutil.copytree(runtime, managed(stage / "video-runtime"))
+    preparation.verify_runtime(managed(stage / "video-runtime"))
+
+
 def verify():
     build()
     _, qmake, nmake, environment = toolchain()
@@ -270,6 +281,7 @@ def build():
     for name in ("platforms", "imageformats", "iconengines", "styles", "audio", "mediaservice", "bearer", "playlistformats", "printsupport"):
         if (payload / name).exists():
             shutil.copytree(payload / name, managed(stage / name))
+    stage_video_runtime(stage)
     shutil.copy2(binary, stage / "ShadowChat.exe")
     (stage / "beebeep.rc").write_text("[General]\nUseSettingsFileIni=true\nSaveDataInDocumentsFolder=false\nDataFolderPath=" +
                                      str(OUT / "profile").replace("\\", "/") + "\n", encoding="utf-8")

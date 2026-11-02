@@ -3,20 +3,26 @@
 
 #include <QAbstractTextDocumentLayout>
 #include <QEvent>
+#include <QFileInfo>
+#include <QFontMetricsF>
 #include <QImage>
+#include <QImageReader>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPainter>
+#include <QMovie>
 #include <QPaintEvent>
 #include <QPixmap>
 #include <QResizeEvent>
 #include <QRegularExpression>
 #include <QScopedValueRollback>
+#include <QScreen>
 #include <QScrollBar>
 #include <QTextBlock>
 #include <QTextCursor>
 #include <QTextDocumentFragment>
 #include <QTextImageFormat>
+#include <QTextList>
 #include <QTextTable>
 #include <QUrl>
 #include <QtMath>
@@ -36,6 +42,18 @@ namespace
   const qreal BubbleRadius = 10.0;
   const int OriginalImageSizeProperty = ShadowChatTranscript::BubbleColorProperty + 1;
   const int DocumentBackgroundProperty = ShadowChatTranscript::BubbleColorProperty + 2;
+  const int MaximumMovies = 12;
+
+  qreal documentScale( QTextDocument* document )
+  {
+    const QPaintDevice* device = document->documentLayout()->paintDevice();
+    if( !device )
+      return 1.0;
+    const QScreen* screen = QGuiApplication::primaryScreen();
+    const qreal reference = QCoreApplication::testAttribute( Qt::AA_Use96Dpi ) || !screen
+      ? 96.0 : qRound( screen->logicalDotsPerInchY() );
+    return device->logicalDpiY() / qMax( 1.0, reference );
+  }
 
   class MeasurementDocument : public QTextDocument
   {
@@ -65,16 +83,64 @@ namespace
     QTextDocument* mp_source;
   };
 
-  qreal contentWidth( QTextDocument* document, int first, int last, qreal maximum )
+  void copyMeasuredContents( QTextFrame::iterator begin, QTextFrame::iterator end, QTextCursor& destination )
   {
-    QTextCursor source( document );
-    source.setPosition( first );
-    source.setPosition( last, QTextCursor::KeepAnchor );
+    bool first = true;
+    for( auto iterator = begin; iterator != end; ++iterator )
+    {
+      if( QTextTable* table = qobject_cast<QTextTable*>( iterator.currentFrame() ) )
+      {
+        QTextTableFormat format = table->format();
+        format.clearProperty( QTextFormat::FrameWidth );
+        format.clearProperty( QTextFormat::FrameHeight );
+        format.clearColumnWidthConstraints();
+        format.setPosition( QTextFrameFormat::InFlow );
+        QTextTable* copy = destination.insertTable( table->rows(), table->columns(), format );
+        for( int row = 0; row < table->rows(); ++row )
+          for( int column = 0; column < table->columns(); ++column )
+          {
+            const QTextTableCell cell = table->cellAt( row, column );
+            if( cell.row() != row || cell.column() != column )
+              continue;
+            if( cell.rowSpan() > 1 || cell.columnSpan() > 1 )
+              copy->mergeCells( row, column, cell.rowSpan(), cell.columnSpan() );
+            QTextTableCell target = copy->cellAt( row, column );
+            target.setFormat( cell.format() );
+            QTextCursor content = target.firstCursorPosition();
+            copyMeasuredContents( cell.begin(), cell.end(), content );
+          }
+        destination.setPosition( copy->lastPosition() + 1 );
+        first = true;
+      }
+      else if( QTextFrame* frame = iterator.currentFrame() )
+        copyMeasuredContents( frame->begin(), frame->end(), destination );
+      else if( iterator.currentBlock().isValid() )
+      {
+        const QTextBlock block = iterator.currentBlock();
+        if( !first )
+          destination.insertBlock();
+        first = false;
+        destination.setBlockFormat( block.blockFormat() );
+        if( block.textList() )
+          destination.createList( block.textList()->format() );
+        for( auto part = block.begin(); !part.atEnd(); ++part )
+        {
+          const QTextFragment fragment = part.fragment();
+          if( fragment.isValid() )
+            destination.insertText( fragment.text(), fragment.charFormat() );
+        }
+      }
+    }
+  }
+
+  qreal contentWidth( QTextDocument* document, const QTextTableCell& cell, qreal maximum )
+  {
     MeasurementDocument measurement( document );
     QTextCursor destination( &measurement );
-    destination.insertFragment( QTextDocumentFragment( source ) );
-    measurement.setTextWidth( qMax( 1.0, maximum ) );
-    return qCeil( measurement.idealWidth() );
+    copyMeasuredContents( cell.begin(), cell.end(), destination );
+    const qreal scale = documentScale( document );
+    measurement.setTextWidth( qMax( 1.0, maximum * scale ) );
+    return qCeil( measurement.idealWidth() / scale );
   }
 
   QColor bubbleColor( QTextTable* table )
@@ -86,7 +152,8 @@ namespace
 
     const QColor incoming( 240, 242, 244 );
     const QColor outgoing( 221, 235, 255 );
-    const QBrush backgrounds[] = { format.background(), table->cellAt( 0, 0 ).format().background() };
+    const QBrush backgrounds[] = { format.background(), table->cellAt( 0, 0 ).format().background(),
+                                  format.borderBrush() };
     for( const QBrush& background : backgrounds )
     {
       if( background.style() == Qt::SolidPattern &&
@@ -219,6 +286,18 @@ namespace
   ShadowChatTranscript::HistoryEntry historyEntry( const QString& html, const QJsonObject& metadata )
   {
     ShadowChatTranscript::HistoryEntry entry;
+    const QString context = QRegularExpression(
+      "<!--shadow-context:[0-9a-fA-F]{64}:[0-9]+-->" ).match( html ).captured();
+    const auto preserveMarkers = [&]() {
+      for( const QString& flag : { QStringLiteral( "<!--shadow-attachment-->" ),
+                                  QStringLiteral( "<!--shadow-sticker-->" ),
+                                  QStringLiteral( "<!--shadow-transfer-error-->" ),
+                                  QStringLiteral( "<!--shadow-transfer-log-->" ) } )
+        if( html.contains( flag ) && !entry.html.contains( flag ) )
+          entry.html.prepend( flag );
+      if( !context.isEmpty() && !entry.html.contains( context ) )
+        entry.html.prepend( context );
+    };
     entry.sender = metadata.value( "sender" ).toString();
     entry.album = metadata.value( "album" ).toString();
     entry.type = metadata.value( "type" ).toInt( -1 );
@@ -238,6 +317,7 @@ namespace
     if( entry.alreadyBubbled )
     {
       entry.html = historyBodyHtml( historyInputHtml( html ) );
+      preserveMarkers();
       return entry;
     }
     const LegacyHeading heading = legacyHeading( &document, 0, document.toPlainText(), entry.sender );
@@ -257,10 +337,7 @@ namespace
     }
     else
       entry.html = historyBodyHtml( historyInputHtml( html ) );
-    for( const QString& flag : { QStringLiteral( "<!--shadow-attachment-->" ),
-                                QStringLiteral( "<!--shadow-transfer-log-->" ) } )
-      if( html.contains( flag ) && !entry.html.contains( flag ) )
-        entry.html.prepend( flag );
+    preserveMarkers();
     return entry;
   }
 
@@ -375,7 +452,18 @@ namespace
         if( original.width() <= 0.0 || original.height() <= 0.0 )
           continue;
 
-        const qreal factor = qMin( scale, maximum / original.width() );
+        qreal image_maximum = maximum;
+        QTextCursor location( document );
+        location.setPosition( fragment.position() );
+        for( QTextTable* nested = location.currentTable(); nested && nested != table;
+             nested = qobject_cast<QTextTable*>( nested->parentFrame() ) )
+        {
+          const QTextTableCell cell = nested->cellAt( fragment.position() );
+          const QTextTableFormat format = nested->format();
+          image_maximum = qMax( 1.0, (image_maximum - format.cellSpacing() * (nested->columns() + 1)) *
+            cell.columnSpan() / nested->columns() - 2.0 * format.cellPadding() );
+        }
+        const qreal factor = qMin( scale, image_maximum / original.width() );
         format.setProperty( OriginalImageSizeProperty, original );
         format.setWidth( qMax( 1.0, original.width() * factor ) );
         format.setHeight( qMax( 1.0, original.height() * factor ) );
@@ -401,17 +489,19 @@ namespace
     format.setPadding( padding );
     format.setBorder( 0.0 );
     format.setBorderStyle( QTextFrameFormat::BorderStyle_None );
+    format.clearProperty( QTextFormat::FrameWidth );
     if( clear_background )
       format.clearBackground();
     if( format != original )
       cell.setFormat( format );
   }
 
-  void normalizeBubble( QTextTable* table, const QColor& color, qreal maximum )
+  qreal prepareBubble( QTextTable* table, const QColor& color )
   {
     const QTextTableFormat original = table->format();
     QTextTableFormat format = original;
     format.setProperty( ShadowChatTranscript::BubbleColorProperty, color );
+    format.setBorderBrush( color );
     format.clearBackground();
     format.setBorder( 0.0 );
     format.setBorderStyle( QTextFrameFormat::BorderStyle_None );
@@ -419,34 +509,65 @@ namespace
     format.setCellSpacing( 0.0 );
     format.setCellPadding( BubblePadding );
     format.setPadding( 0.0 );
-    format.setMargin( 0.0 );
+    format.setLeftMargin( 0.0 );
+    format.setRightMargin( 0.0 );
+    format.setBottomMargin( 0.0 );
     format.setPosition( QTextFrameFormat::InFlow );
     format.setAlignment( Qt::AlignLeft );
     format.clearProperty( QTextFormat::FrameHeight );
     if( format != original )
       table->setFormat( format );
     normalizeCell( table->cellAt( 0, 0 ), BubblePadding, true );
+    QList<QTextFrame*> nested = table->childFrames();
+    for( int index = 0; index < nested.size(); ++index )
+    {
+      QTextFrame* frame = nested.at( index );
+      nested.append( frame->childFrames() );
+      QTextTable* child = qobject_cast<QTextTable*>( frame );
+      if( !child )
+        continue;
+      QTextTableFormat child_format = child->format();
+      child_format.clearProperty( QTextFormat::FrameWidth );
+      child_format.clearColumnWidthConstraints();
+      child_format.setPosition( QTextFrameFormat::InFlow );
+      if( child_format != child->format() )
+        child->setFormat( child_format );
+    }
 
-    const qreal maximum_content = qMax( 1.0, maximum - 2.0 * BubblePadding );
+    const qreal maximum_width = MaximumBubbleWidth / documentScale( table->document() );
+    const qreal maximum_content = qMax( 1.0, maximum_width - 2.0 * BubblePadding );
     fitImages( table, maximum_content, 1.0 );
     const QTextTableCell cell = table->cellAt( 0, 0 );
-    qreal measured = contentWidth( table->document(), cell.firstPosition(), cell.lastPosition(), maximum_content );
+    qreal measured = contentWidth( table->document(), cell, maximum_content );
     qreal image_scale = 1.0;
     for( int attempt = 0; attempt < 4 && measured > maximum_content; ++attempt )
     {
       image_scale *= qMax( 0.01, (maximum_content - 1.0) / measured );
       if( !fitImages( table, maximum_content, image_scale ) )
         break;
-      measured = contentWidth( table->document(), cell.firstPosition(), cell.lastPosition(), maximum_content );
+      measured = contentWidth( table->document(), cell, maximum_content );
     }
-    const qreal width = qMin( maximum, qMax( 1.0, measured ) + 2.0 * BubblePadding );
-    format = table->format();
-    format.setWidth( QTextLength( QTextLength::FixedLength, width ) );
-    QVector<QTextLength> columns;
-    columns.append( QTextLength( QTextLength::FixedLength, width ) );
-    format.setColumnWidthConstraints( columns );
-    if( format != table->format() )
-      table->setFormat( format );
+    return qMin( maximum_width, qMax( 1.0, measured ) + 2.0 * BubblePadding );
+  }
+
+  QString localGifPath( const QString& source, const QUrl& base )
+  {
+    QUrl url( source );
+    QString local;
+    if( QFileInfo( source ).isAbsolute() && url.scheme().size() <= 1 )
+      local = source;
+    else
+    {
+      if( url.isRelative() )
+        url = base.resolved( url );
+      if( !url.isLocalFile() || (!url.host().isEmpty() && url.host() != "localhost") )
+        return QString();
+      local = url.toLocalFile();
+    }
+    if( local.startsWith( "//" ) || local.startsWith( "\\\\" ) ||
+        QFileInfo( local ).suffix().compare( "gif", Qt::CaseInsensitive ) != 0 )
+      return QString();
+    return local;
   }
 }
 
@@ -495,7 +616,9 @@ QList<ShadowChatTranscript::HistoryEntry> ShadowChatTranscript::historyEntries( 
 
 
 ShadowChatTranscript::ShadowChatTranscript( QWidget* parent )
-  : QTextBrowser( parent ), m_normalizeTimer( this ), m_transferAnimationTimer(this), m_transferAngle(0), m_normalizing( false ), m_painting( false )
+  : QTextBrowser( parent ), m_normalizeTimer( this ), m_transferAnimationTimer(this),
+    m_mediaVisibilityTimer( this ), m_transferAngle(0), m_normalizing( false ), m_painting( false ),
+    m_contentsDirty( true ), m_resizePending( false ), m_resizeAtBottom( false ), m_lastMaximum( -1.0 )
 {
   m_transferAnimationTimer.setObjectName("ShadowTransferAnimationTimer");
   m_transferAnimationTimer.setInterval(80);
@@ -503,13 +626,18 @@ ShadowChatTranscript::ShadowChatTranscript( QWidget* parent )
     m_transferAngle=(m_transferAngle+24)%360;
     viewport()->update();
   });
-  setLineWrapMode( QTextEdit::WidgetWidth );
+  setLineWrapMode( QTextEdit::FixedPixelWidth );
+  setLineWrapColumnOrWidth( viewport()->width() );
   setWordWrapMode( QTextOption::WrapAtWordBoundaryOrAnywhere );
   viewport()->setAutoFillBackground( true );
   m_normalizeTimer.setSingleShot( true );
   m_normalizeTimer.setInterval( 0 );
   connect( &m_normalizeTimer, &QTimer::timeout, this, &ShadowChatTranscript::normalizeBubbles );
-  connect( this, &QTextEdit::textChanged, this, &ShadowChatTranscript::scheduleNormalization );
+  m_mediaVisibilityTimer.setSingleShot( true );
+  m_mediaVisibilityTimer.setInterval( 16 );
+  connect( &m_mediaVisibilityTimer, &QTimer::timeout, this, &ShadowChatTranscript::updateMediaVisibility );
+  connect( verticalScrollBar(), &QScrollBar::valueChanged, this, &ShadowChatTranscript::scheduleMediaVisibility );
+  connect( horizontalScrollBar(), &QScrollBar::valueChanged, this, &ShadowChatTranscript::scheduleMediaVisibility );
   observeDocument();
 }
 
@@ -539,8 +667,22 @@ void ShadowChatTranscript::observeDocument()
 
   disconnect( m_layoutChangedConnection );
   disconnect( m_sizeChangedConnection );
+  if( mp_observedDocument )
+    disconnect( mp_observedDocument, Q_NULLPTR, this, Q_NULLPTR );
   mp_observedDocument = document();
   m_bubbles.clear();
+  m_contentsDirty = true;
+  m_lastMaximum = -1.0;
+  connect( document(), &QTextDocument::contentsChange, this, [this]( int position, int removed, int added ) {
+    if( m_normalizing )
+      return;
+    m_contentsDirty = true;
+    const int end = position + qMax( removed, added );
+    for( Bubble& bubble : m_bubbles )
+      if( bubble.row && position <= bubble.row->lastPosition() && end >= bubble.row->firstPosition() )
+        bubble.dirty = true;
+    scheduleNormalization();
+  } );
   m_layoutChangedConnection = connect( document(), &QTextDocument::documentLayoutChanged,
                                       this, &ShadowChatTranscript::observeLayout );
   observeLayout();
@@ -549,6 +691,7 @@ void ShadowChatTranscript::observeDocument()
 void ShadowChatTranscript::observeLayout()
 {
   disconnect( m_sizeChangedConnection );
+  document()->documentLayout()->setPaintDevice( viewport() );
   m_sizeChangedConnection = connect( document()->documentLayout(), &QAbstractTextDocumentLayout::documentSizeChanged,
                                     this, &ShadowChatTranscript::scheduleNormalization );
   scheduleNormalization();
@@ -557,7 +700,118 @@ void ShadowChatTranscript::observeLayout()
 void ShadowChatTranscript::scheduleNormalization()
 {
   if( !m_normalizing && !m_normalizeTimer.isActive() )
-    m_normalizeTimer.start();
+    m_normalizeTimer.start( 0 );
+}
+
+void ShadowChatTranscript::invalidateContents()
+{
+  if( m_normalizing )
+    return;
+  m_contentsDirty = true;
+  for( Bubble& bubble : m_bubbles )
+    bubble.dirty = true;
+  scheduleNormalization();
+}
+
+void ShadowChatTranscript::rebuildBubbles()
+{
+  QHash<QTextTable*,Bubble> previous;
+  for( const Bubble& bubble : m_bubbles )
+    if( bubble.table )
+      previous.insert( bubble.table, bubble );
+  m_bubbles.clear();
+  const qreal scale = documentScale( document() );
+  QList<QTextFrame*> frames = document()->rootFrame()->childFrames();
+  for( int index = 0; index < frames.size(); ++index )
+    frames.append( frames.at( index )->childFrames() );
+  for( QTextFrame* frame : frames )
+  {
+    QTextTable* row = qobject_cast<QTextTable*>( frame );
+    if( !row || row->rows() != 1 || row->columns() != 3 )
+      continue;
+    for( QTextFrame* child : row->childFrames() )
+    {
+      QTextTable* table = qobject_cast<QTextTable*>( child );
+      if( !table || table->rows() != 1 || table->columns() != 1 )
+        continue;
+      const QTextTableCell cell = row->cellAt( table->firstPosition() );
+      const QColor color = bubbleColor( table );
+      if( !cell.isValid() || cell.column() != 1 || !color.isValid() )
+        continue;
+      const auto cached = previous.constFind( table );
+      if( cached != previous.constEnd() && !cached->dirty && cached->row == row &&
+          qFuzzyCompare( cached->deviceScale, scale ) )
+      {
+        m_bubbles.append( cached.value() );
+        break;
+      }
+      Bubble bubble;
+      bubble.row = row;
+      bubble.table = table;
+      bubble.color = color;
+      bubble.preferredWidth = prepareBubble( table, color );
+      bubble.deviceScale = scale;
+      bubble.dirty = false;
+      const bool outgoing = row->format().alignment().testFlag( Qt::AlignRight );
+      if( !outgoing )
+      {
+        const QTextTableCell content = row->cellAt( 0, 1 );
+        QVector<QTextBlock> headings;
+        for( auto iterator = content.begin(); iterator != content.end(); ++iterator )
+        {
+          if( iterator.currentFrame() == table )
+            break;
+          const QTextBlock block = iterator.currentBlock();
+          if( !block.isValid() )
+            continue;
+          QString text = block.text();
+          text.replace( QChar::LineSeparator, QLatin1Char( ' ' ) );
+          text = text.trimmed();
+          if( !text.isEmpty() )
+          {
+            if( !bubble.sender.isEmpty() )
+              bubble.sender.append( QLatin1Char( ' ' ) );
+            bubble.sender.append( text );
+            if( headings.isEmpty() )
+            {
+              bubble.senderFont = block.charFormat().font().resolve( document()->defaultFont() );
+              bubble.senderColor = QColor( "#88929F" );
+              for( auto part = block.begin(); !part.atEnd(); ++part )
+                if( !part.fragment().text().trimmed().isEmpty() )
+                {
+                  const QTextCharFormat format = part.fragment().charFormat();
+                  bubble.senderFont = format.font().resolve( document()->defaultFont() );
+                  if( format.foreground().style() != Qt::NoBrush )
+                    bubble.senderColor = format.foreground().color();
+                  break;
+                }
+            }
+          }
+          headings.append( block );
+        }
+        if( !bubble.sender.isEmpty() )
+        {
+          bubble.senderFont.setPixelSize( 11 );
+          bubble.senderHeight = qCeil( QFontMetricsF( bubble.senderFont ).height() ) + 4.0;
+          for( QTextBlock block : headings )
+            if( block.isVisible() )
+            {
+              block.setVisible( false );
+              document()->markContentsDirty( block.position(), block.length() );
+            }
+        }
+      }
+      const QTextTableCell timestamp = row->cellAt( 0, outgoing ? 0 : 2 );
+      for( auto iterator = timestamp.begin(); iterator != timestamp.end(); ++iterator )
+        for( auto part = iterator.currentBlock().begin(); !part.atEnd(); ++part )
+          if( part.fragment().charFormat().anchorHref().startsWith( "shadowtransfer:" ) ||
+              (part.fragment().charFormat().isImageFormat() &&
+               part.fragment().charFormat().toImageFormat().name().startsWith( "shadowtransfer:" )) )
+            bubble.timestampWidth = 64.0;
+      m_bubbles.append( bubble );
+      break;
+    }
+  }
 }
 
 void ShadowChatTranscript::normalizeBubbles()
@@ -573,70 +827,73 @@ void ShadowChatTranscript::normalizeBubbles()
   QScopedValueRollback<bool> normalizing( m_normalizing, true );
   m_normalizeTimer.stop();
   observeDocument();
-  m_bubbles.clear();
   QTextDocument* transcript = document();
   QTextFrame* document_frame = transcript->rootFrame();
   const int viewport_width = viewport()->width();
   const QTextFrameFormat document_format = document_frame->frameFormat();
-  const qreal available = qMax( 1.0, viewport_width - document_format.leftMargin() - document_format.rightMargin() );
+  const qreal scale = documentScale( transcript );
+  const qreal available = qMax( 1.0, viewport_width -
+    (document_format.leftMargin() + document_format.rightMargin()) * scale );
   const qreal maximum = qMax( 2.0 * BubblePadding + 1.0,
-                             qMin( MaximumBubbleWidth, available * 0.70 - AvatarWidth - TimestampWidth ) );
+    qMin( MaximumBubbleWidth, available * 0.70 - (AvatarWidth + TimestampWidth) * scale ) / scale );
+  const bool metrics_changed = std::any_of( m_bubbles.constBegin(), m_bubbles.constEnd(),
+    [scale]( const Bubble& bubble ) { return !qFuzzyCompare( bubble.deviceScale, scale ); } );
+  if( !m_contentsDirty && !metrics_changed && qFuzzyCompare( maximum, m_lastMaximum ) &&
+      lineWrapColumnOrWidth() == viewport_width )
+  {
+    m_resizePending = false;
+    scheduleMediaVisibility();
+    return;
+  }
+  const bool rebuild = m_contentsDirty || metrics_changed;
+  m_contentsDirty = false;
+  m_lastMaximum = maximum;
 
   const int horizontal_scroll = horizontalScrollBar()->value();
-  const bool at_bottom = verticalScrollBar()->maximum() > 0 &&
-                         verticalScrollBar()->value() >= verticalScrollBar()->maximum() - 1;
-  const QTextCursor reading_position = cursorForPosition( QPoint( 0, 0 ) );
+  const bool at_bottom = m_resizePending ? m_resizeAtBottom :
+    (verticalScrollBar()->maximum() > 0 &&
+     verticalScrollBar()->value() >= verticalScrollBar()->maximum() - 1);
+  QTextCursor reading_position = cursorForPosition( QPoint( 0, 0 ) );
+  for( const Bubble& bubble : m_bubbles )
+    if( bubble.table && bubble.table->document() == transcript &&
+        bubbleFrameRect( bubble.table ).bottom() >= verticalScrollBar()->value() )
+    {
+      reading_position.setPosition( bubble.table->firstPosition() );
+      break;
+    }
   const int reading_top = cursorRect( reading_position ).top();
   const bool was_modified = transcript->isModified();
   QTextCursor edit( transcript );
   edit.beginEditBlock();
+  if( metrics_changed )
+    transcript->markContentsDirty( 0, transcript->characterCount() );
+  if( lineWrapColumnOrWidth() != viewport_width )
+    setLineWrapColumnOrWidth( viewport_width );
 
-  QList<QTextFrame*> message_frames = document_frame->childFrames();
-  for( int index = 0; index < message_frames.size(); ++index )
-    message_frames.append( message_frames.at( index )->childFrames() );
-  for( QTextFrame* frame : message_frames )
+  if( rebuild )
+    rebuildBubbles();
+  for( const Bubble& entry : m_bubbles )
   {
-    QTextTable* root = qobject_cast<QTextTable*>( frame );
-    if( !root || root->rows() != 1 || root->columns() != 3 )
+    QTextTable* root = entry.row;
+    QTextTable* bubble = entry.table;
+    if( !root || !bubble )
       continue;
-
-    QTextTable* bubble = Q_NULLPTR;
-    QColor color;
-    const QList<QTextFrame*> children = root->childFrames();
-    for( QTextFrame* child : children )
-    {
-      QTextTable* candidate = qobject_cast<QTextTable*>( child );
-      if( !candidate || candidate->rows() != 1 || candidate->columns() != 1 )
-        continue;
-      const QTextTableCell containing_cell = root->cellAt( candidate->firstPosition() );
-      if( !containing_cell.isValid() || containing_cell.column() != 1 )
-        continue;
-      color = bubbleColor( candidate );
-      if( color.isValid() )
-      {
-        bubble = candidate;
-        break;
-      }
-    }
-    if( !bubble )
-      continue;
-
-    normalizeBubble( bubble, color, maximum );
     for( int column = 0; column < root->columns(); ++column )
       normalizeCell( root->cellAt( 0, column ), 0.0, false );
 
-    const QTextTableCell body = root->cellAt( 0, 1 );
-    const qreal body_width = qMin( maximum, qMax( bubble->format().width().rawValue(),
-      contentWidth( transcript, body.firstPosition(), body.lastPosition(), maximum ) ) );
+    const qreal body_width = qMin( maximum, entry.preferredWidth );
+    const qreal content_width = qMax( 1.0, body_width - 2.0 * BubblePadding );
+    fitImages( bubble, content_width, 1.0 );
+    QTextTableFormat bubble_format = bubble->format();
+    bubble_format.setWidth( QTextLength( QTextLength::FixedLength, body_width ) );
+    bubble_format.setTopMargin( entry.senderHeight / scale );
+    bubble_format.setColumnWidthConstraints( { QTextLength( QTextLength::FixedLength, body_width ) } );
+    if( bubble_format != bubble->format() )
+      bubble->setFormat( bubble_format );
     QTextTableFormat root_format = root->format();
     const bool outgoing = root_format.alignment().testFlag( Qt::AlignRight );
     QVector<QTextLength> columns;
-    qreal timestampWidth=TimestampWidth;
-    const QTextTableCell timeCell=root->cellAt(0,outgoing?0:2);
-    QTextCursor timestampContent(transcript);
-    timestampContent.setPosition(timeCell.firstPosition());
-    timestampContent.setPosition(timeCell.lastPosition(),QTextCursor::KeepAnchor);
-    if(timestampContent.selection().toHtml().contains("shadowtransfer:"))timestampWidth=64.0;
+    const qreal timestampWidth = entry.timestampWidth;
     columns.append( QTextLength( QTextLength::FixedLength, outgoing ? timestampWidth : AvatarWidth ) );
     columns.append( QTextLength( QTextLength::FixedLength, body_width ) );
     columns.append( QTextLength( QTextLength::FixedLength, outgoing ? AvatarWidth : timestampWidth ) );
@@ -654,11 +911,6 @@ void ShadowChatTranscript::normalizeBubbles()
     root_format.clearProperty( QTextFormat::FrameHeight );
     if( root_format != root->format() )
       root->setFormat( root_format );
-
-    Bubble entry;
-    entry.table = bubble;
-    entry.color = color;
-    m_bubbles.append( entry );
   }
 
   if( !m_bubbles.isEmpty() && document_format.background().style() != Qt::NoBrush )
@@ -678,8 +930,13 @@ void ShadowChatTranscript::normalizeBubbles()
   else
     verticalScrollBar()->setValue( verticalScrollBar()->value() + cursorRect( reading_position ).top() - reading_top );
   viewport()->update();
+  if( rebuild )
+    rebuildMedia();
+  scheduleMediaVisibility();
   if( viewport()->width() != viewport_width )
-    m_normalizeTimer.start();
+    m_normalizeTimer.start( 0 );
+  else
+    m_resizePending = false;
 }
 
 int ShadowChatTranscript::bubbleCount() const
@@ -697,8 +954,22 @@ QRectF ShadowChatTranscript::bubbleFrameRect( QTextTable* table ) const
 {
   QRectF rectangle = document()->documentLayout()->frameBoundingRect( table );
   const QTextTableCellFormat cell = table->cellAt( 0, 0 ).format().toTableCellFormat();
-  rectangle.translate( -cell.leftPadding(), -cell.topPadding() );
+  const qreal scale = documentScale( document() );
+  rectangle.translate( -cell.leftPadding() * scale, -cell.topPadding() * scale );
+  rectangle.setHeight( qMax( 0.0, rectangle.height() - qRound( table->format().topMargin() * scale ) ) );
   return rectangle;
+}
+
+QRectF ShadowChatTranscript::senderLabelRect( const Bubble& bubble ) const
+{
+  if( !bubble.table || bubble.table->document() != document() || bubble.sender.isEmpty() )
+    return QRectF();
+  const QRectF body = bubbleFrameRect( bubble.table );
+  const qreal right = lineWrapColumnOrWidth() -
+    document()->rootFrame()->frameFormat().rightMargin() * documentScale( document() );
+  return QRectF( body.left(), body.top() - bubble.senderHeight,
+                 qMax( 0.0, qMin( MaximumBubbleWidth, right - body.left() ) ),
+                 bubble.senderHeight - 4.0 );
 }
 
 QVector<QRectF> ShadowChatTranscript::bubbleFrameRects() const
@@ -713,8 +984,192 @@ QVector<QRectF> ShadowChatTranscript::bubbleFrameRects() const
   return rectangles;
 }
 
+QTextTable* ShadowChatTranscript::messageFrameAt( const QPoint& viewportPosition ) const
+{
+  const int horizontal = isRightToLeft()
+    ? horizontalScrollBar()->maximum() - horizontalScrollBar()->value()
+    : horizontalScrollBar()->value();
+  const QPointF position = viewportPosition + QPoint( horizontal, verticalScrollBar()->value() );
+  for( const Bubble& bubble : m_bubbles )
+  {
+    if( !bubble.row || !bubble.table )
+      continue;
+    const QRectF row = document()->documentLayout()->frameBoundingRect( bubble.row );
+    if( senderLabelRect( bubble ).contains( position ) || row.contains( position ) )
+      return bubble.row;
+  }
+  return Q_NULLPTR;
+}
+
+void ShadowChatTranscript::rebuildMedia()
+{
+  QHash<QString,AnimatedMedia> previous = m_media;
+  m_media.clear();
+  QSet<QString> static_sources;
+  for( QTextBlock block = document()->begin(); block.isValid(); block = block.next() )
+    for( auto iterator = block.begin(); !iterator.atEnd(); ++iterator )
+    {
+      const QTextFragment fragment = iterator.fragment();
+      if( !fragment.charFormat().isImageFormat() )
+        continue;
+      const QTextImageFormat image = fragment.charFormat().toImageFormat();
+      QTextCursor location( document() );
+      location.setPosition( fragment.position() );
+      bool inside = false;
+      for( QTextFrame* frame = location.currentFrame(); frame; frame = frame->parentFrame() )
+        inside = inside || frame->frameFormat().hasProperty( BubbleColorProperty );
+      if( !inside || image.anchorHref().startsWith( "shadowuser:" ) || image.name().contains( "chat-avatar-" ) )
+        static_sources.insert( image.name() );
+    }
+  for( const Bubble& bubble : m_bubbles )
+  {
+    if( !bubble.table )
+      continue;
+    for( QTextBlock block = document()->findBlock( bubble.table->firstPosition() );
+         block.isValid() && block.position() <= bubble.table->lastPosition(); block = block.next() )
+      for( auto iterator = block.begin(); !iterator.atEnd(); ++iterator )
+      {
+        const QTextFragment fragment = iterator.fragment();
+        if( !fragment.isValid() || !fragment.charFormat().isImageFormat() )
+          continue;
+        QTextImageFormat image = fragment.charFormat().toImageFormat();
+        if( image.anchorHref().startsWith( "shadowuser:" ) || image.name().contains( "chat-avatar-" ) )
+          continue;
+        const QString local = localGifPath( image.name(), document()->baseUrl() );
+        if( local.isEmpty() )
+          continue;
+        QTextCursor cursor( document() );
+        cursor.setPosition( fragment.position() );
+        cursor.setPosition( fragment.position() + 1, QTextCursor::KeepAnchor );
+        if( static_sources.contains( image.name() ) )
+        {
+          const QVariant initial = document()->resource( QTextDocument::ImageResource, QUrl( image.name() ) );
+          QUrl animation_source = QUrl::fromLocalFile( local );
+          animation_source.setFragment( "shadow-transcript-animation" );
+          image.setName( animation_source.toString() );
+          document()->addResource( QTextDocument::ImageResource, animation_source, initial );
+          cursor.setCharFormat( image );
+        }
+        if( !m_media.contains( image.name() ) )
+        {
+          AnimatedMedia media = previous.take( image.name() );
+          media.path = local;
+          media.occurrences.clear();
+          m_media.insert( image.name(), media );
+        }
+        m_media[image.name()].occurrences.append( cursor );
+      }
+  }
+  for( const AnimatedMedia& media : previous )
+    delete media.movie.data();
+}
+
+QRectF ShadowChatTranscript::mediaRect( const QTextCursor& cursor ) const
+{
+  const QTextImageFormat format = cursor.charFormat().toImageFormat();
+  QTextCursor position = cursor;
+  position.setPosition( cursor.selectionStart() );
+  const QRect rectangle = cursorRect( position );
+  const qreal scale = documentScale( document() );
+  const qreal width = qRound( qRound( format.width() ) * scale );
+  const qreal height = qRound( qRound( format.height() ) * scale );
+  return QRectF( rectangle.left(), rectangle.bottom() + 1.0 - height, width, height );
+}
+
+void ShadowChatTranscript::scheduleMediaVisibility()
+{
+  if( isVisible() && !m_media.isEmpty() && !m_mediaVisibilityTimer.isActive() )
+    m_mediaVisibilityTimer.start();
+}
+
+void ShadowChatTranscript::updateMediaVisibility()
+{
+  QStringList visible;
+  const QRectF exposed( viewport()->rect() );
+  if( isVisible() )
+    for( auto iterator = m_media.constBegin(); iterator != m_media.constEnd(); ++iterator )
+      for( const QTextCursor& cursor : iterator->occurrences )
+        if( cursor.document() == document() && mediaRect( cursor ).intersects( exposed ) )
+        {
+          visible.append( iterator.key() );
+          break;
+        }
+  std::sort( visible.begin(), visible.end(), [this]( const QString& left, const QString& right ) {
+    return m_media.value( left ).occurrences.first().selectionStart() <
+           m_media.value( right ).occurrences.first().selectionStart();
+  } );
+  visible = visible.mid( 0, MaximumMovies );
+  int movies = 0;
+  for( auto iterator = m_media.begin(); iterator != m_media.end(); ++iterator )
+    if( iterator->movie )
+    {
+      ++movies;
+      if( !visible.contains( iterator.key() ) && iterator->movie->state() == QMovie::Running )
+        iterator->movie->setPaused( true );
+    }
+  for( const QString& source : visible )
+  {
+    AnimatedMedia& media = m_media[source];
+    if( media.rejected )
+      continue;
+    if( !media.movie )
+    {
+      QImageReader reader( media.path );
+      if( reader.format().toLower() != "gif" || !reader.supportsAnimation() ||
+          reader.size().isEmpty() )
+      {
+        media.rejected = true;
+        continue;
+      }
+      if( movies >= MaximumMovies )
+        for( auto iterator = m_media.begin(); iterator != m_media.end(); ++iterator )
+          if( iterator->movie && !visible.contains( iterator.key() ) )
+          {
+            delete iterator->movie.data();
+            --movies;
+            break;
+          }
+      if( movies >= MaximumMovies )
+        continue;
+      QMovie* movie = new QMovie( media.path, "gif", this );
+      movie->setObjectName( QStringLiteral( "ShadowTranscriptMovie" ) );
+      movie->setCacheMode( QMovie::CacheAll );
+      movie->setScaledSize( reader.size().scaled( reader.size().boundedTo( QSize( 120, 120 ) ),
+                                                Qt::KeepAspectRatio ) );
+      media.movie = movie;
+      ++movies;
+      connect( movie, &QMovie::frameChanged, this, [this, source]( int ) { updateMediaFrame( source ); } );
+    }
+    if( media.movie->state() == QMovie::Paused )
+      media.movie->setPaused( false );
+    else if( media.movie->state() == QMovie::NotRunning )
+      media.movie->start();
+  }
+}
+
+void ShadowChatTranscript::updateMediaFrame( const QString& source )
+{
+  const auto found = m_media.constFind( source );
+  if( found == m_media.constEnd() || !found->movie || !isVisible() )
+    return;
+  const QImage frame = found->movie->currentImage();
+  if( frame.isNull() )
+    return;
+  document()->addResource( QTextDocument::ImageResource, QUrl( source ), frame );
+  for( const QTextCursor& cursor : found->occurrences )
+    if( cursor.document() == document() )
+      viewport()->update( mediaRect( cursor ).toAlignedRect().adjusted( -1, -1, 1, 1 ) );
+}
+
 void ShadowChatTranscript::paintEvent( QPaintEvent* event )
 {
+  QAbstractTextDocumentLayout* layout = document()->documentLayout();
+  if( layout->paintDevice() != viewport() )
+    layout->setPaintDevice( viewport() );
+  const qreal scale = documentScale( document() );
+  if( std::any_of( m_bubbles.constBegin(), m_bubbles.constEnd(),
+        [scale]( const Bubble& bubble ) { return !qFuzzyCompare( bubble.deviceScale, scale ); } ) )
+    normalizeBubbles();
   QScopedValueRollback<bool> painting( m_painting, true );
   {
     QPainter painter( viewport() );
@@ -742,6 +1197,26 @@ void ShadowChatTranscript::paintEvent( QPaintEvent* event )
     }
   }
   QTextBrowser::paintEvent( event );
+  {
+    QPainter painter( viewport() );
+    painter.setClipRegion( event->region() );
+    const int horizontal_offset = isRightToLeft()
+      ? horizontalScrollBar()->maximum() - horizontalScrollBar()->value()
+      : horizontalScrollBar()->value();
+    painter.translate( -horizontal_offset, -verticalScrollBar()->value() );
+    const QRectF exposed = QRectF( event->rect() ).translated( horizontal_offset, verticalScrollBar()->value() );
+    for( const Bubble& bubble : m_bubbles )
+    {
+      const QRectF rectangle = senderLabelRect( bubble );
+      if( rectangle.isEmpty() || !rectangle.intersects( exposed ) )
+        continue;
+      painter.setFont( bubble.senderFont );
+      painter.setPen( bubble.senderColor );
+      const QString label = QFontMetricsF( bubble.senderFont ).elidedText(
+        bubble.sender, Qt::ElideRight, rectangle.width() );
+      painter.drawText( rectangle, Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine, label );
+    }
+  }
   if(m_transferIndicators.isEmpty())return;
   QPainter painter(viewport());
   painter.setRenderHint(QPainter::Antialiasing);
@@ -815,11 +1290,16 @@ void ShadowChatTranscript::showEvent( QShowEvent* event )
 {
   QTextBrowser::showEvent(event);
   setTransferIndicators(m_transferIndicators);
+  scheduleMediaVisibility();
 }
 
 void ShadowChatTranscript::hideEvent( QHideEvent* event )
 {
   m_transferAnimationTimer.stop();
+  m_mediaVisibilityTimer.stop();
+  for( const AnimatedMedia& media : m_media )
+    if( media.movie && media.movie->state() == QMovie::Running )
+      media.movie->setPaused( true );
   QTextBrowser::hideEvent(event);
 }
 
@@ -828,6 +1308,17 @@ bool ShadowChatTranscript::viewportEvent( QEvent* event )
   if(event->type()==QEvent::ToolTip)
   {
     const QHelpEvent* help=static_cast<QHelpEvent*>(event);
+    const int horizontal_offset = isRightToLeft()
+      ? horizontalScrollBar()->maximum() - horizontalScrollBar()->value()
+      : horizontalScrollBar()->value();
+    const QPointF position = help->pos() + QPoint( horizontal_offset, verticalScrollBar()->value() );
+    for( const Bubble& bubble : m_bubbles )
+      if( senderLabelRect( bubble ).contains( position ) )
+      {
+        QToolTip::showText( help->globalPos(),
+          QStringLiteral( "<qt>%1</qt>" ).arg( bubble.sender.toHtmlEscaped() ), viewport() );
+        return true;
+      }
     const QString target=anchorAt(help->pos());
     const QUrl source(target);
     if(source.scheme()=="shadowtransfer")
@@ -842,8 +1333,15 @@ bool ShadowChatTranscript::viewportEvent( QEvent* event )
 
 void ShadowChatTranscript::resizeEvent( QResizeEvent* event )
 {
+  if( !m_resizePending && !m_normalizing )
+  {
+    m_resizePending = true;
+    m_resizeAtBottom = verticalScrollBar()->maximum() > 0 &&
+      verticalScrollBar()->value() >= verticalScrollBar()->maximum() - 1;
+  }
   QTextBrowser::resizeEvent( event );
-  normalizeBubbles();
+  m_normalizeTimer.start( 48 );
+  scheduleMediaVisibility();
 }
 
 void ShadowChatTranscript::changeEvent( QEvent* event )
@@ -851,5 +1349,5 @@ void ShadowChatTranscript::changeEvent( QEvent* event )
   QTextBrowser::changeEvent( event );
   if( event->type() == QEvent::FontChange || event->type() == QEvent::ApplicationFontChange ||
       event->type() == QEvent::StyleChange || event->type() == QEvent::LayoutDirectionChange )
-    scheduleNormalization();
+    invalidateContents();
 }

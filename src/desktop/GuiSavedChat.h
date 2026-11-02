@@ -41,6 +41,7 @@ public:
 signals:
   void openUrl( const QUrl& );
   void deleteSavedChatRequest( const QString& );
+  void contextRequested( const QString& chatName, const QString& recordKey );
 
 public slots:
   void showSavedChat( const QString& );
@@ -59,9 +60,11 @@ protected slots:
 
 protected:
   void setupToolBar( QToolBar* );
+  bool eventFilter( QObject*, QEvent* ) override;
 
 private:
   void rebuildHistoryResults( bool resetReadingState );
+  int historyRecordIndex( const QListWidgetItem* ) const;
 
   QTextBrowser* mp_teSavedChat;
   QLineEdit* mp_leFilter;

@@ -16,6 +16,7 @@
 #include "Protocol.h"
 #include "Updater.h"
 #include "ShadowPreviewTransport.h"
+#include "ShadowStickerMedia.h"
 #include <QBuffer>
 #include <QImageReader>
 #include <QPointer>
@@ -98,7 +99,7 @@ bool ShadowDevPreview::testPeerReady()
     currentPreview->m_testTransport && currentPreview->m_testTransport->ready();
 }
 
-bool ShadowDevPreview::sendTestText( quint64 chatId, const QString& message, bool sourceCode, QString* feedback )
+bool ShadowDevPreview::sendTestText( quint64 chatId, const QString& message, bool sourceCode, QString* feedback, const QString& rich_text )
 {
   ShadowDevPreview* preview = testSession( chatId, feedback );
   if( !preview ) return false;
@@ -108,14 +109,14 @@ bool ShadowDevPreview::sendTestText( quint64 chatId, const QString& message, boo
     return false;
   }
   const Chat chat = ChatManager::instance().chat( chatId );
-  const QJsonObject request = { { "kind", "text" }, { "chat", chat.privateId() }, { "text", message } };
+  const QJsonObject request = { { "kind", "text" }, { "chat", chat.privateId() }, { "text", message }, { "richText",rich_text } };
   QByteArray received;
   if( !preview->m_testTransport->exchange( QJsonDocument( request ).toJson( QJsonDocument::Compact ),
       &received, feedback ) ) return false;
   const QJsonObject delivered = QJsonDocument::fromJson( received ).object();
   QString content = delivered.value( "text" ).toString();
   if( !sourceCode && !Settings::instance().chatUseHtmlTags() ) content = content.toHtmlEscaped();
-  Message outgoing = Protocol::instance().chatMessage( chat, content );
+  Message outgoing = Protocol::instance().chatMessage( chat, content,delivered.value("richText").toString() );
   if( sourceCode ) outgoing.setSourceCode();
   appendTestMessage( preview->m_core, chatId, ChatMessage( ID_LOCAL_USER, outgoing, ChatMessage::Chat, false ) );
   Message reply = Protocol::instance().chatMessage( chat,
@@ -172,11 +173,15 @@ bool ShadowDevPreview::receiveTestData( quint64 chatId, const QByteArray& data, 
   const bool image = imageSize.isValid() && qint64( imageSize.width() ) * imageSize.height() <= 30000000;
   QString body = image
     ? QStringLiteral( "<a href=\"%1\"><img src=\"%1\" width=\"%2\"></a>" ).arg( url ).arg( qMin( 360, imageSize.width() ) )
-    : QStringLiteral( "本机测试文件：<a href=\"%1\">%2</a> · %3 字节" )
+    : QStringLiteral( "<!--shadow-attachment--><a href=\"%1\">%2</a> · %3 字节" )
         .arg( url, safeName.toHtmlEscaped() ).arg( bytes.size() );
   if( image )
+  {
+    if( kind == QStringLiteral( "sticker" ) )
+      body.prepend( QStringLiteral( "<!--shadow-sticker-->" ) );
     body.prepend( QStringLiteral( "<!--shadow-sender:%1-->" )
       .arg( QString::fromLatin1( Settings::instance().localUser().name().toUtf8().toBase64() ) ) );
+  }
   appendTestMessage( m_core, chatId, ChatMessage( ID_SYSTEM_MESSAGE, Protocol::instance().systemMessage( body ),
     image ? ChatMessage::ImagePreview : ChatMessage::FileTransfer, false ) );
   const QString reply = image ? QStringLiteral( "本机测试对端已收到图片（%1 × %2）。" ).arg( imageSize.width() ).arg( imageSize.height() )
@@ -222,7 +227,9 @@ bool ShadowDevPreview::sendTestFiles( quint64 chatId, const QStringList& paths, 
     const QByteArray bytes = file.read( 8 * 1024 * 1024 + 1 );
     if( file.error() != QFileDevice::NoError ) { *feedback = QStringLiteral( "未发送：原文件读取失败。" ); return false; }
     QString received;
-    if( !preview->receiveTestData( chatId, bytes, source.fileName(), "file", &received, feedback ) ) return false;
+    const QString kind = shadowStoredSticker( path, Settings::instance().dataFolder() )
+      ? QStringLiteral( "sticker" ) : QStringLiteral( "file" );
+    if( !preview->receiveTestData( chatId, bytes, source.fileName(), kind, &received, feedback ) ) return false;
   }
   return true;
 }

@@ -1449,9 +1449,10 @@ FileInfo Protocol::fileInfoFromMessage( const Message& m, int proto_version )
 
   if( !sl.isEmpty() )
   {
-    if( !sl.first().isEmpty() )
+    const QString modified = sl.takeFirst();
+    if( !modified.isEmpty() )
     {
-      QDateTime dt_last_modified = QDateTime::fromString( sl.takeFirst(), Qt::ISODate );
+      QDateTime dt_last_modified = QDateTime::fromString( modified, Qt::ISODate );
       if( dt_last_modified.isValid() )
       {
         if( proto_version >= FILE_TRANSFER_UTC_MODIFIED_DATE_PROTO_VERSION )
@@ -2018,6 +2019,7 @@ ChatMessageData Protocol::dataFromChatMessage( const Message& m ) const
   if( !s_group_last_modified.isEmpty() )
     cmd.setGroupLastModified( QDateTime::fromString( s_group_last_modified, Qt::ISODate ) );
   if( !sl.isEmpty() ) cmd.setGroupOwnerHash( sl.takeFirst() );
+  if(!sl.isEmpty())cmd.setRichText(QString::fromUtf8(QByteArray::fromBase64(sl.takeFirst().toLatin1())));
 
   return cmd;
 }
@@ -2030,13 +2032,15 @@ QString Protocol::chatMessageDataToString( const ChatMessageData& cmd ) const
   sl << (cmd.groupName().size() > 0 ? cmd.groupName() : "");
   sl << (cmd.groupLastModified().isValid() ? cmd.groupLastModified().toString( Qt::ISODateWithMs ) : "");
   sl << cmd.groupOwnerHash();
+  sl << QString::fromLatin1(cmd.richText().toUtf8().toBase64());
   return sl.join( DATA_FIELD_SEPARATOR );
 }
 
-Message Protocol::chatMessage( const Chat& c, const QString& msg_txt )
+Message Protocol::chatMessage( const Chat& c, const QString& msg_txt, const QString& rich_text )
 {
   Message m( Message::Chat, newId(), msg_txt );
   ChatMessageData cmd;
+  cmd.setRichText(rich_text);
   cmd.setTextColor( Settings::instance().chatFontColor() != Settings::instance().chatDefaultTextColor() ? Settings::instance().chatFontColor() : QColor() );
   if( c.isGroup() )
   {

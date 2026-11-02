@@ -37,6 +37,11 @@ public:
   GuiVCard( QWidget* parent = Q_NULLPTR );
 
   void setVCard( const User&, VNumber chat_id, bool );
+  void showAt( const QPoint& );
+
+protected:
+  void keyPressEvent( QKeyEvent* ) override;
+  bool eventFilter( QObject*, QEvent* ) override;
 
 signals:
   void showChat( VNumber );
@@ -60,6 +65,8 @@ private:
   VNumber m_userId;
   VNumber m_chatId;
   QString m_userColor;
+  QScrollArea* mp_publicDetails;
+  QLabel* mp_fullName;
 
 };
 
