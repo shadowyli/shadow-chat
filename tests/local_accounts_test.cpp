@@ -71,6 +71,8 @@ int main(int argc,char** argv)
   VERIFY(migrated.authenticate("alice@example.com","restored-secret"));
   VERIFY(!migrated.authenticate("alice@example.com","new-secret"));
   VERIFY(!migrated.hasRecoveryPassword()); // Owner recovery secret never travels with a user backup.
+  const QString loginEmail="ui-login@qq.com";
+  VERIFY(accounts.create(loginEmail,"login-secret",&error));
   accounts.logout();
   QString loggedEmail,loggedFolder;
   QTimer::singleShot(0,[&](){
@@ -80,12 +82,12 @@ int main(int argc,char** argv)
     if(!dialog->grab().save("E:/ShadowChat/delivery/login-proof.png"))qFatal("Unable to save synthetic login proof");
     const QList<QLineEdit*> edits=dialog->findChildren<QLineEdit*>();
     if(edits.size()!=2)qFatal("Login fields missing");
-    edits.at(0)->setText("alice@example.com"); edits.at(1)->setText("new-secret");
-    foreach(QPushButton* button,dialog->findChildren<QPushButton*>()) if(button->text()==QString::fromUtf8("登录")){button->click();return;}
+    edits.at(0)->setText(loginEmail); edits.at(1)->setText("login-secret");
+    foreach(QPushButton* button,dialog->findChildren<QPushButton*>()) if(button->objectName()=="LoginPrimary"){button->click();return;}
     qFatal("Login button missing");
   });
   VERIFY(ShadowLocalAccounts::login(&loggedEmail,&loggedFolder,temporary.path()));
-  VERIFY(loggedEmail=="alice@example.com"); VERIFY(loggedFolder==accounts.profileFolder(loggedEmail));
+  VERIFY(loggedEmail==loginEmail); VERIFY(loggedFolder==accounts.profileFolder(loggedEmail));
   // A subsequent launch uses the remembered local profile without prompting.
   VERIFY(ShadowLocalAccounts::login(&loggedEmail,&loggedFolder,temporary.path()));
   accounts.logout();

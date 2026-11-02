@@ -72,8 +72,8 @@ for name in ['QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH', 'OPENSSL_CONF', 'O
     environment.pop(name, None)
 url = 'https://localhost:'+str(server.server_port)+'/fixture'
 try:
-    trusted = subprocess.run([str(runtime/'tls_probe.exe'), url, str(fixture/'ca.pem')], cwd=runtime, env=environment, capture_output=True, text=True, timeout=30)
-    untrusted = subprocess.run([str(runtime/'tls_probe.exe'), url], cwd=runtime, env=environment, capture_output=True, text=True, timeout=30)
+    trusted = subprocess.run([str(runtime/'tls_probe.exe'), url, str(fixture/'ca.pem')], cwd=runtime, env=environment, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=30)
+    untrusted = subprocess.run([str(runtime/'tls_probe.exe'), url], cwd=runtime, env=environment, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=30)
 finally:
     server.shutdown()
     server.server_close()

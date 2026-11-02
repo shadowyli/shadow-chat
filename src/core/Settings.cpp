@@ -2212,16 +2212,33 @@ void Settings::setNotificationEnabledForGroup( const QString& group_id, bool ena
   }
 }
 
+namespace
+{
+  bool isolatedStartupSettings()
+  {
+    return qApp && (qApp->property( "shadowDevPreview" ).toBool() ||
+      !qApp->property( "shadowAccountRoot" ).toString().isEmpty() ||
+      qApp->arguments().contains( "--profile-root" ) || qApp->arguments().contains( "--dev-preview" ));
+  }
+}
+
 bool Settings::addStartOnSystemBoot()
 {
 #ifdef Q_OS_WIN
+  if( isolatedStartupSettings() )
+    return false;
   QString program_path = Bee::convertToNativeFolderSeparator( qApp->applicationFilePath() );
   QSettings sets( "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", QSettings::NativeFormat );
   if( sets.isWritable() )
   {
     sets.setValue( programName(), QStringLiteral( "\"%1\"" ).arg( program_path ) );
     sets.sync();
-    return true;
+    if( sets.status() != QSettings::NoError )
+      return false;
+    QSettings preference( "HKEY_CURRENT_USER\\Software\\shadowyli\\ShadowChat", QSettings::NativeFormat );
+    preference.setValue( "StartupEnabled", 1 );
+    preference.sync();
+    return preference.status() == QSettings::NoError;
   }
   qWarning() << "Unable to add auto start in registry key:" << qPrintable( sets.fileName() );
 #endif
@@ -2231,12 +2248,19 @@ bool Settings::addStartOnSystemBoot()
 bool Settings::removeStartOnSystemBoot()
 {
 #ifdef Q_OS_WIN
+  if( isolatedStartupSettings() )
+    return false;
   QSettings sets( "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", QSettings::NativeFormat );
   if( sets.isWritable() )
   {
     sets.remove( programName() );
     sets.sync();
-    return true;
+    if( sets.status() != QSettings::NoError )
+      return false;
+    QSettings preference( "HKEY_CURRENT_USER\\Software\\shadowyli\\ShadowChat", QSettings::NativeFormat );
+    preference.setValue( "StartupEnabled", 0 );
+    preference.sync();
+    return preference.status() == QSettings::NoError;
   }
   qWarning() << "Unable to remove auto start from registry key:" << sets.fileName();
 #endif
@@ -2246,11 +2270,29 @@ bool Settings::removeStartOnSystemBoot()
 bool Settings::hasStartOnSystemBoot() const
 {
 #ifdef Q_OS_WIN
+  if( isolatedStartupSettings() )
+    return false;
   QString program_path = qApp->applicationFilePath().replace( "/", "\\" );
   QSettings sets( "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", QSettings::NativeFormat );
   const QString configured = sets.value( programName(), "" ).toString();
   return configured == program_path || configured == QStringLiteral( "\"%1\"" ).arg( program_path );
 #else
+  return false;
+#endif
+}
+
+bool Settings::configureStartOnSystemBoot( bool legacyConfigured )
+{
+#ifdef Q_OS_WIN
+  if( isolatedStartupSettings() )
+    return false;
+  QSettings preference( "HKEY_CURRENT_USER\\Software\\shadowyli\\ShadowChat", QSettings::NativeFormat );
+  const bool enabled = preference.contains( "StartupEnabled" )
+    ? preference.value( "StartupEnabled" ).toBool()
+    : !legacyConfigured || hasStartOnSystemBoot();
+  return enabled ? addStartOnSystemBoot() : removeStartOnSystemBoot();
+#else
+  Q_UNUSED( legacyConfigured );
   return false;
 #endif
 }

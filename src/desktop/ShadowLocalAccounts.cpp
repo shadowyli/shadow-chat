@@ -126,7 +126,7 @@ bool ShadowLocalAccounts::login( QString* email, QString* folder, const QString&
       "QDialog#ShadowAccountLogin{background:#ffffff;color:#202733;}"
       "QLabel{color:#202733;background:transparent;}"
       "QLabel#LoginTitle{font-size:24px;font-weight:600;}"
-      "QLabel#LoginHint{font-size:12px;color:#7a8492;}"
+      "QLabel#LoginAutoCreateHint{font-size:12px;color:#7a8492;}"
       "QLabel#LoginError{font-size:12px;color:#d84b48;}"
       "QLineEdit{background:#f5f7fa;border:1px solid #e4e8ee;border-radius:7px;padding:11px 12px;color:#202733;selection-background-color:#2878ff;}"
       "QLineEdit:focus{border:1px solid #2878ff;background:#ffffff;}"
@@ -144,66 +144,65 @@ bool ShadowLocalAccounts::login( QString* email, QString* folder, const QString&
     QVBoxLayout* layout=new QVBoxLayout(&dialog);
     layout->setContentsMargins(30,30,30,22); layout->setSpacing(14);
     QLabel* title=new QLabel(QString::fromUtf8("欢迎登录")); title->setObjectName("LoginTitle"); layout->addWidget(title);
-    QLabel* hint=new QLabel(QString::fromUtf8("首次使用的邮箱将自动创建本地账号。")); hint->setObjectName("LoginHint"); layout->addWidget(hint);
     layout->addSpacing(10);
-    QLineEdit* address=new QLineEdit(&dialog); address->setObjectName("LoginEmail"); address->setAccessibleName(QString::fromUtf8("邮箱")); address->setPlaceholderText(QString::fromUtf8("邮箱名称或完整邮箱"));
+    QLineEdit* address=new QLineEdit(&dialog); address->setObjectName("LoginEmail"); address->setAccessibleName(QString::fromUtf8("邮箱名称")); address->setPlaceholderText(QString::fromUtf8("邮箱名称")); address->setMinimumWidth(0); address->setMaxLength(180);
     QVBoxLayout* emailInput=new QVBoxLayout;
     emailInput->setSpacing(8);
     QLabel* emailLabel=new QLabel(QString::fromUtf8("邮箱"),&dialog); emailLabel->setBuddy(address); emailInput->addWidget(emailLabel);
-    emailInput->addWidget(address);
     QHBoxLayout* domainRow=new QHBoxLayout;
     domainRow->setSpacing(10);
-    QLabel* domainLabel=new QLabel(QString::fromUtf8("常用后缀"),&dialog); domainRow->addWidget(domainLabel);
+    domainRow->addWidget(address,1);
     QComboBox* domains=new QComboBox(&dialog);
     domains->setObjectName("LoginEmailDomain");
     domains->setAccessibleName(QString::fromUtf8("邮箱后缀"));
-    domains->setToolTip(QString::fromUtf8("选择后缀会补全邮箱；也可直接输入完整邮箱或自定义后缀。"));
+    domains->setToolTip(QString::fromUtf8("请选择邮箱后缀。"));
     domains->setView(new QListView(domains));
     domains->setMaxVisibleItems(8);
-    domains->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Fixed);
-    domains->addItem(QString::fromUtf8("完整邮箱 / 自定义后缀"),QString());
-    domains->addItem(QString::fromUtf8("corp 邮箱 · @corp.netease.com"),QStringLiteral("corp.netease.com"));
+    domains->setEditable(false);
+    domains->setSizePolicy(QSizePolicy::Fixed,QSizePolicy::Fixed);
+    domains->addItem(QStringLiteral("@corp.netease.com"),QStringLiteral("corp.netease.com"));
+    domains->setItemData(0,QString::fromUtf8("corp 邮箱"),Qt::ToolTipRole);
     const QStringList commonDomains=QStringList() << "163.com" << "126.com" << "qq.com" << "foxmail.com" << "yeah.net"
       << "netease.com" << "gmail.com" << "outlook.com" << "hotmail.com" << "icloud.com"
       << "vip.qq.com" << "yahoo.com" << "live.com" << "sina.com" << "sohu.com" << "139.com" << "189.cn" << "aliyun.com";
     for(const QString& domain : commonDomains) domains->addItem("@" + domain,domain);
-    domainLabel->setBuddy(domains);
-    domainRow->addWidget(domains,1);
+    address->ensurePolished();
+    domains->ensurePolished();
+    const int emailHeight=qMax(44,qMax(address->sizeHint().height(),domains->sizeHint().height()));
+    address->setFixedHeight(emailHeight);
+    domains->setFixedHeight(emailHeight);
+    domains->setFixedWidth(qMax(196,domains->fontMetrics().horizontalAdvance(QStringLiteral("@corp.netease.com"))+72));
+    domainRow->addWidget(domains);
     emailInput->addLayout(domainRow);
     layout->addLayout(emailInput);
-    QObject::connect(address,&QLineEdit::textChanged,domains,[domains](const QString& text){
+    QObject::connect(address,&QLineEdit::textChanged,domains,[address,domains](const QString& text){
       const int separator=text.indexOf('@');
-      const QString domain=separator<0 ? QString() : text.mid(separator+1).trimmed().toLower();
-      domains->setCurrentIndex(qMax(0,domains->findData(domain)));
+      if(separator<0)return;
+      const QString domain=text.mid(separator+1).trimmed().toLower();
+      const int index=domains->findData(domain);
+      if(index<0)return;
+      const QSignalBlocker blocker(address);
+      address->setText(text.left(separator).trimmed());
+      domains->setCurrentIndex(index);
     });
-    QObject::connect(domains,QOverload<int>::of(&QComboBox::activated),&dialog,[address,domains](int index){
-      QString value=address->text().trimmed();
-      int separator=value.indexOf('@');
-      const QString domain=domains->itemData(index).toString();
-      if(domain.isEmpty())
-      {
-        if(separator<0 && !value.isEmpty()) {value+="@"; separator=value.size()-1;}
-        address->setText(value);
-        address->setFocus();
-        if(separator>=0)
-        {
-          address->setCursorPosition(separator+1);
-          address->setSelection(separator+1,value.size()-separator-1);
-        }
-        return;
-      }
-      const QString localPart=separator<0 ? value : value.left(separator);
-      address->setText(localPart+"@"+domain);
+    QObject::connect(domains,QOverload<int>::of(&QComboBox::activated),&dialog,[address](int){
       address->setFocus();
-      address->setCursorPosition(localPart.isEmpty() ? 0 : address->text().size());
+      address->setCursorPosition(address->text().size());
     });
+    auto selectedEmail = [&]() {
+      const QString localPart=address->text().trimmed();
+      const QString domain=domains->currentData().toString();
+      if(localPart.contains('@') || domain.isEmpty() || domains->findData(domain)<0)return QString();
+      return accounts.normalizeEmail(localPart+"@"+domain);
+    };
     QLineEdit* password=new QLineEdit(&dialog); password->setObjectName("LoginPassword"); password->setAccessibleName(QString::fromUtf8("密码")); password->setEchoMode(QLineEdit::Password); password->setPlaceholderText(QString::fromUtf8("密码（至少 6 位）")); layout->addWidget(password);
     QLabel* message=new QLabel; message->setObjectName("LoginError"); message->setWordWrap(true); layout->addWidget(message);
-    QPushButton* signIn=new QPushButton(QString::fromUtf8("登录")); signIn->setObjectName("LoginPrimary"); signIn->setDefault(true); layout->addWidget(signIn);
+    QVBoxLayout* loginAction=new QVBoxLayout; loginAction->setSpacing(6);
+    QPushButton* signIn=new QPushButton(QString::fromUtf8("一键登录")); signIn->setObjectName("LoginPrimary"); signIn->setDefault(true); loginAction->addWidget(signIn);
+    QLabel* autoCreateHint=new QLabel(QString::fromUtf8("未创建的账号将自动创建")); autoCreateHint->setObjectName("LoginAutoCreateHint"); autoCreateHint->setAlignment(Qt::AlignCenter); loginAction->addWidget(autoCreateHint); layout->addLayout(loginAction);
     QHBoxLayout* tools=new QHBoxLayout;
     QPushButton* recover=new QPushButton(QString::fromUtf8("忘记密码")); recover->setObjectName("LoginRecoverPassword"); tools->addWidget(recover); tools->addStretch();
     QPushButton* restore=new QPushButton(QString::fromUtf8("从备份恢复")); restore->setObjectName("LoginRestoreBackup"); tools->addWidget(restore); layout->addLayout(tools);
-    QLabel* localHint=new QLabel(QString::fromUtf8("记录保存在本机 · 切换账号后独立显示")); localHint->setObjectName("LoginHint"); localHint->setAlignment(Qt::AlignCenter); layout->addWidget(localHint);
     auto finishLogin = [&](const QString& normalized) {
       QSettings session(QDir(accounts.root()).filePath("session.ini"),QSettings::IniFormat);
       const QVariant previousEmail=session.value("autoLoginEmail");
@@ -211,14 +210,14 @@ bool ShadowLocalAccounts::login( QString* email, QString* folder, const QString&
       session.sync();
       if(session.status()!=QSettings::NoError)
       {
-        if(previousEmail.isValid()) session.setValue("autoLoginEmail",previousEmail); else session.remove("autoLoginEmail");
+        if(previousEmail.isValid())session.setValue("autoLoginEmail",previousEmail);else session.remove("autoLoginEmail");
         message->setText(QString::fromUtf8("无法保存登录状态，请检查磁盘权限后重试。"));return;
       }
-      selected=normalized; dialog.accept();
+      selected=normalized;dialog.accept();
     };
     QObject::connect(signIn,&QPushButton::clicked,[&](){
-      const QString normalized=accounts.normalizeEmail(address->text());
-      if(normalized.isEmpty()) {message->setText(QString::fromUtf8("请输入有效的邮箱地址。"));return;}
+      const QString normalized=selectedEmail();
+      if(normalized.isEmpty()) {message->setText(QString::fromUtf8("请填写邮箱名称，并从列表选择邮箱后缀。"));return;}
       if(password->text().size()<6) {message->setText(QString::fromUtf8("请输入至少 6 位密码。"));return;}
       if(accounts.exists(normalized))
       {
@@ -233,17 +232,18 @@ bool ShadowLocalAccounts::login( QString* email, QString* folder, const QString&
     });
     QObject::connect(password,&QLineEdit::returnPressed,signIn,&QPushButton::click);
     QObject::connect(recover,&QPushButton::clicked,[&](){
-      if(!accounts.exists(address->text())) {message->setText(QString::fromUtf8("请先填写已存在的账号邮箱。"));return;}
+      const QString normalized=selectedEmail();
+      if(normalized.isEmpty() || !accounts.exists(normalized)) {message->setText(QString::fromUtf8("请先填写已存在的账号邮箱。"));return;}
       if(!accounts.hasRecoveryPassword()) {message->setText(QString::fromUtf8("本机尚未配置安全恢复密码，请联系负责人或从备份恢复。"));return;}
       bool ok=false; const QString recovery=QInputDialog::getText(&dialog,QString::fromUtf8("安全恢复"),QString::fromUtf8("请输入负责人保管的恢复密码"),QLineEdit::Password,QString(),&ok);
       if(!ok)return;
       if(!accounts.verifyRecoveryPassword(recovery)) {message->setText(QString::fromUtf8("恢复密码不正确。"));return;}
       const QString replacement=QInputDialog::getText(&dialog,QString::fromUtf8("重设密码"),QString::fromUtf8("新密码（至少 6 位）"),QLineEdit::Password,QString(),&ok);
       QString error;
-      if(ok && accounts.setPassword(address->text(),replacement,&error)) message->setText(QString::fromUtf8("密码已重设，请登录。")); else if(ok) message->setText(error);
+      if(ok && accounts.setPassword(normalized,replacement,&error)) message->setText(QString::fromUtf8("密码已重设，请登录。")); else if(ok) message->setText(error);
     });
     QObject::connect(restore,&QPushButton::clicked,[&](){
-      const QString normalized=accounts.normalizeEmail(address->text());
+      const QString normalized=selectedEmail();
       if(normalized.isEmpty()) {message->setText(QString::fromUtf8("请填写要恢复的账号邮箱。"));return;}
       if(password->text().size()<6) {message->setText(QString::fromUtf8("请先填写恢复后使用的新密码（至少 6 位）。无需原密码。"));return;}
       if(accounts.exists(normalized)) {message->setText(QString::fromUtf8("该账号已存在，请先登录后使用工作区导入，避免覆盖。"));return;}

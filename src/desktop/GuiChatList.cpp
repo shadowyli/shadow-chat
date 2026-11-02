@@ -300,7 +300,7 @@ void GuiChatList::refreshQuickAccess()
   {
     const GuiChatItem* item = chats.at( index );
     data << static_cast<quint64>( item->chatId() ) << item->data( 0, GuiChatItem::ChatName ).toString()
-      << item->data( 0, GuiChatItem::ChatPinned ).toBool();
+      << item->data( 0, GuiChatItem::ChatPinned ).toBool() << item->onlineUsers();
     const Chat chat = ChatManager::instance().chat( item->chatId() );
     if( chat.isPrivate() )
     {
