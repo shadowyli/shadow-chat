@@ -28,7 +28,7 @@ class UpdateSuggestionTest : public QObject
     object["mandatory"] = true;
     object["notes"] = QStringLiteral("改进文件传输体验，保留现有资料。");
     object["downloadPage"] = "/tools/shadowchat";
-    object["installerUrl"] = "/fixture.exe";
+    object["installerUrl"] = "/downloads/fixture.exe";
     object["sha256"] = QString(64, 'a');
     return QJsonDocument(object).toJson();
   }
@@ -76,6 +76,7 @@ private slots:
       }
     });
     QDesktopServices::setUrlHandler("http", this, "openFixture");
+    QDesktopServices::setUrlHandler("https", this, "openFixture");
   }
   void openFixture(const QUrl& url) { ++m_opened; m_openedUrl = url; }
   void init() { m_body = manifest(); m_delay = 0; }
@@ -187,12 +188,37 @@ private slots:
     const int opened = m_opened;
     controller.dialog()->findChild<QPushButton*>("downloadUpdate")->click();
     QCOMPARE(m_opened, opened + 1);
-    QCOMPARE(m_openedUrl, source().resolved(QUrl("/tools/shadowchat")));
+    QCOMPARE(m_openedUrl, source().resolved(QUrl("/downloads/fixture.exe")));
     QVERIFY(work.isEnabled());
     QVERIFY(!controller.dialog()->isVisible());
     check(controller, true);
     controller.dialog()->findChild<QPushButton*>("closeUpdate")->click();
     QVERIFY(work.isEnabled());
+  }
+  void githubDownloadOpensInstaller()
+  {
+    QTemporaryDir temporary;
+    const QString installer = "https://github.com/shadowyli/shadow-chat/releases/download/v1.1.3-test/ShadowChat-1.1.3-local-setup.exe";
+    QJsonObject asset{
+      {"name", "ShadowChat-1.1.3-local-setup.exe"}, {"size", 1000},
+      {"digest", "sha256:" + QString(64, 'a')}, {"browser_download_url", installer},
+    };
+    QJsonObject release{
+      {"tag_name", "v1.1.3-test"}, {"draft", false}, {"prerelease", true},
+      {"body", QString(70000, 'x') + "\n- Direct installer download"}, {"assets", QJsonArray{asset}},
+    };
+    m_body = QJsonDocument(QJsonArray{release}).toJson();
+    QUrl endpoint = source();
+    endpoint.setPath("/repos/shadowyli/shadow-chat/releases");
+    ShadowUpdateController controller("1.1.2", nullptr, endpoint, temporary.filePath("reminders.ini"));
+    check(controller, true);
+    QPushButton* download = controller.dialog()->findChild<QPushButton*>("downloadUpdate");
+    QVERIFY(download->isVisible());
+    const int opened = m_opened;
+    download->click();
+    QCOMPARE(m_opened, opened + 1);
+    QCOMPARE(m_openedUrl, QUrl(installer));
+    QVERIFY(!controller.dialog()->isVisible());
   }
   void oneRequestAndDialog()
   {
@@ -359,7 +385,7 @@ private slots:
     child("2026-10-28",0);
     child("2026-10-30",1);
   }
-  void cleanupTestCase() { QDesktopServices::unsetUrlHandler("http"); }
+  void cleanupTestCase() { QDesktopServices::unsetUrlHandler("http"); QDesktopServices::unsetUrlHandler("https"); }
 };
 QTEST_MAIN(UpdateSuggestionTest)
 #include "update_gate_test.moc"

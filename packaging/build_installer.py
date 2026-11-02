@@ -10,7 +10,6 @@ import re
 import shutil
 import subprocess
 import uuid
-from urllib.parse import urlparse, urlunparse
 from release_config import ENVIRONMENTS, artifact_name, channel as release_channel, output_directory, qt_directory, version as release_version
 
 root = Path(__file__).resolve().parent.parent
@@ -46,10 +45,7 @@ if any(build_configuration.get(key) != value for key, value in {'version': versi
     raise SystemExit('Production executable does not match the selected environment build record')
 if not build_configuration.get('updateSource'):
     raise SystemExit('Effective update source is missing from production build record')
-update_source = urlparse(build_configuration['updateSource'])
-download_page = urlunparse((update_source.scheme, update_source.netloc, '/tools/shadowchat', '', '', ''))
-if args.environment != 'local':
-    download_page = 'https://github.com/shadowyli/shadow-chat/releases'
+download_page = 'https://github.com/shadowyli/shadow-chat/releases'
 identity = build_configuration.get('binaryBuildIdentity', {})
 for field, expected_value in {'version': version, 'environment': args.environment, 'channel': channel, 'updateSource': build_configuration['updateSource']}.items():
     if identity.get(field) != expected_value:

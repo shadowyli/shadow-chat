@@ -17,24 +17,27 @@ from source_snapshot import capture, verify
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('action', nargs='?', choices=('build', 'rebuild', 'test', 'configure'), default='build')
 parser.add_argument('--environment', choices=ENVIRONMENTS, default='local')
-parser.add_argument('--local-update-port', type=int, default=5173)
+parser.add_argument('--local-update-port', type=int, help='Use a loopback update fixture for an explicit local debugging build')
 parser.add_argument('--tests', nargs='+')
 parser.add_argument('--tls-dir', type=Path, default=Path(os.environ.get('SHADOWCHAT_TLS_DIR', str(root/'dist/tls-runtime-x86'))))
 parser.add_argument('--tls-fixture', type=Path)
 args = parser.parse_args()
-if not 1 <= args.local_update_port <= 65535:
+if args.local_update_port is not None and not 1 <= args.local_update_port <= 65535:
     raise SystemExit('Local update port must be between 1 and 65535')
+if args.local_update_port is not None and args.environment != 'local':
+    raise SystemExit('Local update port is only allowed for local debugging builds')
 output = output_directory(args.environment)
 output.mkdir(parents=True, exist_ok=True)
 production = output/'production'
 executable = production/'bin/ShadowChat.exe'
 update_source = {
-    'local': 'http://127.0.0.1:'+str(args.local_update_port)+'/updates/shadowchat.json',
+    'local': ('http://127.0.0.1:'+str(args.local_update_port)+'/updates/shadowchat.json'
+              if args.local_update_port is not None else 'https://api.github.com/repos/shadowyli/shadow-chat/releases'),
     'dev': 'https://api.github.com/repos/shadowyli/shadow-chat/releases',
     'main': 'https://api.github.com/repos/shadowyli/shadow-chat/releases',
 }[args.environment]
 qmake_arguments = ['SHADOWCHAT_ENV='+args.environment, 'CONFIG+=no_batch']
-if args.environment == 'local':
+if args.local_update_port is not None:
     qmake_arguments.append('SHADOWCHAT_LOCAL_UPDATE_PORT='+str(args.local_update_port))
 configuration = {
     'version': version(), 'releaseEnvironment': args.environment,
@@ -63,8 +66,10 @@ def check_defines(makefile):
     elif args.environment == 'dev':
         valid = 'SHADOWCHAT_BUILD_DEV' in defines and 'SHADOWCHAT_BUILD_MAIN' not in defines and 'SHADOWCHAT_BUILD_LOCAL' not in defines
     else:
-        valid = 'SHADOWCHAT_BUILD_LOCAL' in defines and 'SHADOWCHAT_BUILD_MAIN' not in defines and 'SHADOWCHAT_BUILD_DEV' not in defines and 'SHADOWCHAT_LOCAL_UPDATE_PORT='+str(args.local_update_port) in defines
-    if args.environment != 'local' and 'SHADOWCHAT_LOCAL_UPDATE_PORT' in defines:
+        valid = 'SHADOWCHAT_BUILD_LOCAL' in defines and 'SHADOWCHAT_BUILD_MAIN' not in defines and 'SHADOWCHAT_BUILD_DEV' not in defines
+    if args.local_update_port is not None:
+        valid = valid and 'SHADOWCHAT_LOCAL_UPDATE_PORT='+str(args.local_update_port) in defines
+    elif 'SHADOWCHAT_LOCAL_UPDATE_PORT' in defines:
         valid = False
     if not valid:
         raise SystemExit('qmake did not apply the selected release environment: '+defines)
@@ -93,13 +98,13 @@ if args.action == 'test':
         raise SystemExit('Source snapshot differs from the selected production build')
     verify(snapshot)
     test_define = {
-        'local': 'SHADOWCHAT_LOCAL_UPDATE_PORT='+str(args.local_update_port),
+        'local': 'SHADOWCHAT_BUILD_LOCAL',
         'dev': 'SHADOWCHAT_BUILD_DEV',
         'main': 'SHADOWCHAT_BUILD_MAIN',
     }[args.environment]
     environment['SHADOWCHAT_QMAKE_ARGS'] += ' DEFINES+='+test_define
-    if args.environment == 'local':
-        environment['SHADOWCHAT_QMAKE_ARGS'] += ' DEFINES+=SHADOWCHAT_BUILD_LOCAL'
+    if args.local_update_port is not None:
+        environment['SHADOWCHAT_QMAKE_ARGS'] += ' DEFINES+=SHADOWCHAT_LOCAL_UPDATE_PORT='+str(args.local_update_port)
     environment['SHADOWCHAT_RELEASE_ENV'] = args.environment
     environment['SHADOWCHAT_RELEASE_CHANNEL'] = channel(args.environment)
     environment['SHADOWCHAT_UPDATE_SOURCE'] = update_source

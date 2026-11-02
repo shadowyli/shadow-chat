@@ -32,19 +32,27 @@ inline bool parse(const QByteArray& data, const QUrl& source, QString* version, 
      object.value("channel").toString() != channel) return false;
   const QString number=object.value("version").toString();
   if(!allowsVersion(number, number)) return false;
-  const QString pageText = object.value("downloadPage").toString();
-  if(pageText.isEmpty()) return false;
-  const QUrl page=source.resolved(QUrl(pageText));
-  const bool github = source == QUrl(QStringLiteral("https://api.github.com/repos/shadowyli/shadow-chat/releases")) &&
-    page.scheme() == QStringLiteral("https") && page.host() == QStringLiteral("github.com") &&
-    page.port(-1) == -1 && page.path() == QStringLiteral("/shadowyli/shadow-chat/releases/tag/v%1%2")
-      .arg(number, channel == QStringLiteral("test") ? QStringLiteral("-test") : QString());
-  if((!github && (page.scheme()!=source.scheme() || page.host()!=source.host() || page.port()!=source.port() ||
-     page.path()!=QStringLiteral("/tools/shadowchat"))) ||
-     !page.userInfo().isEmpty() || page.hasQuery() || page.hasFragment() ||
-     object.value("installerUrl").toString().isEmpty() ||
+  const QString installerText = object.value("installerUrl").toString();
+  if(installerText.isEmpty()) return false;
+  const QUrl installer=source.resolved(QUrl(installerText));
+  const QString tag = QStringLiteral("v%1%2").arg(number,
+    channel == QStringLiteral("test") ? QStringLiteral("-test") : QString());
+  const QString filename = installer.fileName();
+  const QRegularExpression assetName(QStringLiteral("^ShadowChat-%1-(local|dev|main)-setup\\.exe$")
+    .arg(QRegularExpression::escape(number)));
+  const bool github = installer.scheme() == QStringLiteral("https") && installer.host() == QStringLiteral("github.com") &&
+    installer.port(-1) == -1 && (assetName.match(filename).hasMatch() ||
+      (channel == QStringLiteral("stable") && filename == QStringLiteral("ShadowChat-%1-setup.exe").arg(number))) &&
+    installer.path() == QStringLiteral("/shadowyli/shadow-chat/releases/download/%1/%2").arg(tag, filename);
+  const bool mirror = source.host() != QStringLiteral("api.github.com") &&
+    (source.scheme() == QStringLiteral("http") || source.scheme() == QStringLiteral("https")) &&
+    installer.scheme() == source.scheme() && installer.host() == source.host() && installer.port() == source.port() &&
+    QRegularExpression(QStringLiteral("^/downloads/[A-Za-z0-9_./-]+\\.exe$")).match(installer.path()).hasMatch() &&
+    !installer.path().contains(QStringLiteral(".."));
+  if((!github && !mirror) || !installer.isValid() ||
+     !installer.userInfo().isEmpty() || installer.hasQuery() || installer.hasFragment() ||
      !QRegularExpression(QStringLiteral("^[a-fA-F0-9]{64}$")).match(object.value("sha256").toString()).hasMatch()) return false;
-  *version=number; *download=page.toString(); return true;
+  *version=number; *download=installer.toString(); return true;
 }
 }
 #endif
