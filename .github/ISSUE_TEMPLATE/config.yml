@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 上手指南与常见问题 / Documentation
+    url: https://github.com/shadowyli/shadow-chat/blob/main/docs/GETTING-STARTED.md
+    about: 安装、升级、账号、备份与局域网排障
+  - name: 安全问题反馈 / Security
+    url: https://github.com/shadowyli/shadow-chat/blob/main/SECURITY.md
+    about: 先阅读私密报告渠道说明；不要在公开 Issue 上传漏洞细节
