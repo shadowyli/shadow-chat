@@ -43,12 +43,14 @@ class GuiLog;
 class GuiNetworkTest;
 class GuiSavedChat;
 class GuiSavedChatList;
+class ShadowDirectoryPage;
+class ShadowSearchPanel;
 class GuiScreenShot;
 class GuiSystemTray;
 class GuiFileTransfer;
 class GuiUserList;
 class User;
-class ShadowUpdateGate;
+class ShadowUpdateController;
 class QFrame;
 class QLabel;
 class QLineEdit;
@@ -75,7 +77,7 @@ class GuiMain : public QMainWindow
 
 public:
   GuiMain( QWidget* parent = Q_NULLPTR );
-  void setUpdateGate( ShadowUpdateGate* gate ) { m_updateGate = gate; }
+  void setUpdateController( ShadowUpdateController* updates ) { m_updates = updates; }
 
 public slots:
   void loadSession();
@@ -245,13 +247,14 @@ private slots:
   void showModernMessages();
   void showModernContacts();
   void showModernGroups();
+  void showModernOrganization();
   void showModernActivities();
   void showModernSavedChats();
+  void showModernTransfers();
   void showShadowSettings();
   void exportShadowWorkspace();
   void importShadowWorkspace();
   void onModernSearchChanged( const QString& );
-  void onModernSearchItemActivated( QTreeWidgetItem*, int );
   void showModernListPanel();
 
 protected:
@@ -260,6 +263,7 @@ protected:
   void closeEvent( QCloseEvent* );
   void changeEvent( QEvent* );
   bool nativeEvent( const QByteArray&, void*, long* );
+  bool eventFilter( QObject*, QEvent* ) override;
   bool promptConnectionPassword();
   bool checkAllChatMembersAreConnected( const QList<VNumber>& );
   void showAlertForMessage( const Chat&, const ChatMessage& );
@@ -280,11 +284,14 @@ private:
   void createModernShell();
   void applyModernStyle();
   void updateModernResponsiveLayout();
+  void updateModernWindowCorners();
+  void applyStartupWindowSize();
   void updateModernNavigation();
   void updateModernNetworkState();
   void updateModernListState();
   void updateModernChatHeader( const Chat& );
   void updateModernSearchResults();
+  QString sendBlockReason( const Chat&, bool files ) const;
   void updateWindowTitle();
   void initGuiItems();
   void updadePluginMenu();
@@ -332,9 +339,13 @@ private:
   QWidget* mp_modernChatBody;
   QStackedWidget* mp_modernListStack;
   QStackedWidget* mp_modernConversationStack;
+  QStackedWidget* mp_modernWorkspace;
+  ShadowDirectoryPage* mp_modernDirectoryPage;
   QSplitter* mp_modernContentSplitter;
+  QSplitter* mp_modernHistorySplitter;
+  GuiSavedChat* mp_modernHistory;
   QLineEdit* mp_modernSearch;
-  QTreeWidget* mp_modernSearchResults;
+  ShadowSearchPanel* mp_modernSearchPanel;
   QFrame* mp_modernNetworkStrip;
   QLabel* mp_modernNetworkDot;
   QLabel* mp_modernNetworkText;
@@ -346,13 +357,12 @@ private:
   QLabel* mp_modernSectionTitle;
   QLabel* mp_modernSectionHint;
   QLabel* mp_modernChatTitle;
+  QLabel* mp_modernChatAvatar;
   QLabel* mp_modernChatSubtitle;
   QToolButton* mp_modernMessagesButton;
   QToolButton* mp_modernContactsButton;
   QToolButton* mp_modernPeopleButton;
   QToolButton* mp_modernGroupsButton;
-  QToolButton* mp_modernProfileButton;
-  QToolButton* mp_modernMoreButton;
   QToolButton* mp_modernBackButton;
   QToolButton* mp_modernMinimizeButton;
   QToolButton* mp_modernMaximizeButton;
@@ -457,7 +467,7 @@ private:
   int m_lastUserStatus;
 
   bool m_forceShutdown;
-  ShadowUpdateGate* m_updateGate = nullptr;
+  ShadowUpdateController* m_updates = nullptr;
   bool m_userSelectOffline;
 
   QShortcut* mp_scMinimizeAllChats;

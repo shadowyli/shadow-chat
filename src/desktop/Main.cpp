@@ -48,7 +48,13 @@
 #include "Settings.h"
 #include "ShadowWorkspaceArchive.h"
 #include "ShadowLocalAccounts.h"
-#include "ShadowUpdateGate.h"
+#include "ShadowDevPreview.h"
+#include "ShadowDialogChrome.h"
+#include "ShadowDialogStyle.h"
+#include "ShadowUpdateController.h"
+#include "Updater.h"
+#include "Version.h"
+#include <cstdio>
 #include "ShortcutManager.h"
 #ifdef BEEBEEP_USE_HUNSPELL
   #include "SpellChecker.h"
@@ -92,10 +98,30 @@ bool CheckValidArguments( int argc, char *argv[] )
 
 int main( int argc, char *argv[] )
 {
+  QString preview_error;
+  if( !ShadowDevPreview::checkArguments( argc, argv, &preview_error ) )
+  {
+    std::fprintf( stderr, "%s\n", qPrintable( preview_error ) );
+    return 2;
+  }
   if( !CheckValidArguments( argc, argv ) )
   {
     qDebug() << "Check your arguments and restart the application.";
     return 1;
+  }
+
+  if( argc == 2 && (QString::fromLocal8Bit( argv[1] ) == QStringLiteral( "--build-info" ) ||
+                   QString::fromLocal8Bit( argv[1] ) == QStringLiteral( "--version-json" )) )
+  {
+    QJsonObject information;
+    information["version"] = QString::fromLatin1( BEEBEEP_VERSION );
+    information["environment"] = QString::fromLatin1( ShadowBuild::environment() );
+    information["channel"] = QString::fromLatin1( ShadowBuild::channel() );
+    information["nativeDevPreview"] = QString::fromLatin1( ShadowBuild::environment() ) == "local";
+    information["updateSource"] = Updater::productionManifestUrl().toString();
+    const QByteArray json = QJsonDocument( information ).toJson( QJsonDocument::Compact ) + '\n';
+    std::fwrite( json.constData(), 1, static_cast<size_t>(json.size()), stdout );
+    return 0;
   }
 
   // Workaround for ping lag:
@@ -110,11 +136,43 @@ int main( int argc, char *argv[] )
 #endif
 
   BeeApplication bee_app( argc, argv );
+  ShadowDialogChrome::install( &bee_app );
+  bee_app.setStyleSheet( ShadowDialogStyle::styleSheet() );
   (void)Settings::instance();
   bee_app.setApplicationName( Settings::instance().programName() );
   bee_app.setOrganizationName( Settings::instance().organizationName() );
   bee_app.setOrganizationDomain( Settings::instance().organizationDomain() );
   bee_app.setApplicationVersion( Settings::instance().version( false, false, false ) );
+
+  const QStringList startup_arguments = bee_app.arguments();
+  if( !ShadowDevPreview::configure( startup_arguments, &preview_error ) )
+  {
+    qCritical() << preview_error;
+    Settings::close();
+    return 2;
+  }
+  const bool dev_preview_mode = startup_arguments.contains( QStringLiteral( "--dev-preview" ) );
+  const QString startup_profile_root = bee_app.property( "shadowAccountRoot" ).toString();
+  const int profile_argument = startup_arguments.indexOf( QStringLiteral( "--profile-root" ) );
+  if( profile_argument >= 0 )
+  {
+    if( profile_argument + 1 >= startup_arguments.size() ||
+        !QDir::isAbsolutePath( startup_arguments.at( profile_argument + 1 ) ) )
+    {
+      qCritical() << "--profile-root requires an absolute directory";
+      Settings::close();
+      return 1;
+    }
+    const QString profile_root = QDir::cleanPath( startup_arguments.at( profile_argument + 1 ) );
+    if( profile_root == QDir( profile_root ).rootPath() || !QDir().mkpath( profile_root ) )
+    {
+      qCritical() << "Unable to use the selected profile directory";
+      Settings::close();
+      return 1;
+    }
+    if( !dev_preview_mode )
+      bee_app.setProperty( "shadowAccountRoot", profile_root );
+  }
 
   if( bee_app.otherInstanceExists() )
   {
@@ -149,15 +207,18 @@ int main( int argc, char *argv[] )
 #endif
 
   Settings::instance().setDefaultFolders();
-  Settings::instance().loadRcFile();
+  if( !dev_preview_mode )
+    Settings::instance().loadRcFile();
   Settings::instance().createLocalUser( "" );
-  Settings::instance().setDataFolder();
-  ShadowUpdateGate update_gate( Settings::instance().version( false, false, false ) );
-  QTimer::singleShot( 0, &update_gate, &ShadowUpdateGate::checkNow );
-  if( update_gate.exec() != QDialog::Accepted )
+  if( dev_preview_mode )
+    Settings::instance().setAccountDataFolder( QDir( startup_profile_root ).filePath( "bootstrap" ) );
+  else
+    Settings::instance().setDataFolder();
+  if( !ShadowDevPreview::seedAccount( &preview_error ) )
   {
+    qCritical() << preview_error;
     Settings::close();
-    return 0;
+    return 2;
   }
 #ifndef BEEBEEP_UX_PREVIEW
   QString account_email;
@@ -168,6 +229,7 @@ int main( int argc, char *argv[] )
     return 0;
   }
   Settings::instance().setAccountDataFolder( account_folder );
+  if( profile_argument < 0 )
   {
     QSettings startup_settings( QDir( ShadowLocalAccounts().root() ).filePath( "session.ini" ), QSettings::IniFormat );
     if( !startup_settings.value( "startupConfigured", false ).toBool() )
@@ -207,6 +269,7 @@ int main( int argc, char *argv[] )
   Settings::instance().setAskChangeUserAtStartup( false );
 #endif
   Settings::instance().createApplicationUuid();
+  ShadowDevPreview::prepareSettings();
   Log::instance().setMaxLogLines( Settings::instance().maxLogLines() );
   qDebug() << "Log has set max lines to:" << Settings::instance().maxLogLines();
 #ifdef BEEBEEP_DEBUG
@@ -322,18 +385,10 @@ int main( int argc, char *argv[] )
 
   /* Init Main Window */
   GuiMain mw;
-  mw.setUpdateGate( &update_gate );
-  QObject::connect( &update_gate, &ShadowUpdateGate::runtimeBlocked, &bee_core, [&bee_core, &update_gate]() {
-    bee_core.blockForUpdate();
-    foreach( QWidget* window, qApp->topLevelWidgets() )
-      if( window != &update_gate )
-        window->setEnabled( false );
-  }, Qt::DirectConnection );
-  QObject::connect( &update_gate, &ShadowUpdateGate::exitRequested, &mw, [&mw]() {
-    mw.forceShutdown();
-    qApp->quit();
-  } );
-  update_gate.startMonitoring();
+  ShadowUpdateController updates( Settings::instance().version( false, false, false ), &mw, QUrl(),
+    profile_argument >= 0 ? QDir( bee_app.property( "shadowAccountRoot" ).toString() ).filePath( "update-reminders.ini" ) : QString() );
+  updates.setBusyPredicate( [&bee_core]() { return bee_core.hasFileTransferInProgress(); } );
+  mw.setUpdateController( &updates );
   QObject::connect( &bee_app, SIGNAL( enteringInIdle() ), &mw, SLOT( setInIdle() ) );
   QObject::connect( &bee_app, SIGNAL( exitingFromIdle() ), &mw, SLOT( exitFromIdle() ) );
   QObject::connect( &bee_app, SIGNAL( showUp() ), &mw, SLOT( raiseOnTop() ) );
@@ -347,10 +402,15 @@ int main( int argc, char *argv[] )
   QMetaObject::invokeMethod( &mw, "checkWindowFlagsAndShow", Qt::QueuedConnection );
   qDebug() << "Loading saved session";
   mw.loadSession();
+  if( dev_preview_mode )
+    new ShadowDevPreview( &mw, &bee_core );
+  updates.start();
 
   /* Event Loop */
   qDebug() << "Enter in the main event loop";
   int iRet = bee_app.exec();
+  if( dev_preview_mode && bee_app.property( "shadowRestartForLogin" ).toBool() )
+    qDebug() << "Native preview account switch exits safely; restart with the native preview launcher. No detached child.";
   qDebug() << "Check and process the remaining events in loop";
 
   /* Check Icon Provider */
@@ -359,7 +419,8 @@ int main( int argc, char *argv[] )
   /* Save final session */
   Settings::instance().setRecentEmoticons( EmoticonManager::instance().saveRencentEmoticons() );
   Settings::instance().setFavoriteEmoticons( EmoticonManager::instance().saveFavoriteEmoticons() );
-  Settings::instance().loadRcFile();
+  if( !dev_preview_mode )
+    Settings::instance().loadRcFile();
 #ifndef BEEBEEP_UX_PREVIEW
   Settings::instance().setAccountDataFolder( account_folder );
 #endif
@@ -396,7 +457,12 @@ int main( int argc, char *argv[] )
   Log::instance().close();
   Settings::close();
   /* Exit */
-  if( bee_app.property( "shadowRestartForLogin" ).toBool() )
-    QProcess::startDetached( QCoreApplication::applicationFilePath(), QStringList() );
+  if( !dev_preview_mode && bee_app.property( "shadowRestartForLogin" ).toBool() )
+  {
+    QStringList restart_arguments;
+    if( profile_argument >= 0 )
+      restart_arguments << QStringLiteral( "--profile-root" ) << bee_app.property( "shadowAccountRoot" ).toString();
+    QProcess::startDetached( QCoreApplication::applicationFilePath(), restart_arguments );
+  }
   return iRet;
 }

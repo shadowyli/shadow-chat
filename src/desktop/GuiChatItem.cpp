@@ -30,6 +30,7 @@
 #include "ShadowStyle.h"
 #include "UserManager.h"
 #include "ShadowConversationPreferences.h"
+#include "ShadowMention.h"
 
 
 GuiChatItem::GuiChatItem( QTreeWidget* parent )
@@ -54,19 +55,14 @@ bool GuiChatItem::operator<( const QTreeWidgetItem& item ) const
   if( Bee::qVariantToVNumber( item.data( 0, GuiChatItem::ChatId ) ) == ID_DEFAULT_CHAT )
     return true;
 
-  int chat_messages = unreadMessages();
-  int other_messages = item.data( 0, GuiChatItem::ChatUnreadMessages ).toInt();
-  if( chat_messages != other_messages )
-    return chat_messages < other_messages;
-
   QDateTime chat_timestamp = lastMessageTimestamp();
   QDateTime other_timestamp = item.data( 0, GuiChatItem::ChatLastMessageTimestamp ).toDateTime();
 
   if( chat_timestamp != other_timestamp )
     return chat_timestamp < other_timestamp;
 
-  chat_messages = data( 0, GuiChatItem::ChatMessages ).toInt();
-  other_messages = item.data( 0, GuiChatItem::ChatMessages ).toInt();
+  int chat_messages = data( 0, GuiChatItem::ChatMessages ).toInt();
+  int other_messages = item.data( 0, GuiChatItem::ChatMessages ).toInt();
   if( chat_messages != other_messages )
     return chat_messages < other_messages;
 
@@ -109,7 +105,7 @@ bool GuiChatItem::updateItem( const Chat& c )
         QString user_name = Bee::userNameToShow( u, false );
         sl.append( user_name );
         if( c.isPrivateForUser( u.id() ) )
-          m_defaultIcon = Bee::avatarForUser( u, Settings::instance().avatarIconSize(), Settings::instance().showUserPhoto() );
+          m_defaultIcon = Bee::avatarForUser( u, QSize( 48, 48 ), Settings::instance().showUserPhoto() );
         if( u.isStatusConnected() )
           online_users++;
       }
@@ -118,7 +114,16 @@ bool GuiChatItem::updateItem( const Chat& c )
     if( c.isGroup() )
     {
       chat_name = c.name();
-      m_defaultIcon = ShadowStyle::actionIcon( QStringLiteral("users-three") );
+      QPixmap groupAvatar( 48, 48 );
+      groupAvatar.fill( Qt::transparent );
+      QPainter painter( &groupAvatar );
+      painter.setRenderHint( QPainter::Antialiasing );
+      painter.setPen( Qt::NoPen );
+      painter.setBrush( QColor( "#7388F4" ) );
+      painter.drawEllipse( groupAvatar.rect().adjusted( 1, 1, -1, -1 ) );
+      painter.drawPixmap( 10, 10, ShadowStyle::tintedPixmap(
+        QStringLiteral( ":/images/shadowchat/icons/users-three.svg" ), QSize( 28, 28 ), Qt::white ) );
+      m_defaultIcon = QIcon( groupAvatar );
     }
     else
       chat_name = sl.isEmpty() ? c.name() : sl.first();
@@ -132,44 +137,71 @@ bool GuiChatItem::updateItem( const Chat& c )
   if( unsent_messages > 0 )
     tool_tip += QString( "\n[%1 %2]" ).arg( unsent_messages ).arg( QObject::tr( "unsent messages" ) );
 
-  if( c.unreadMessages() > 0 )
-    chat_name.prepend( QString( "(%1) " ).arg( c.unreadMessages() ) );
-
-  chat_name += " ";
   const ShadowConversationPreferences preferences;
   const bool pinned=preferences.pinned(c),muted=preferences.muted(c);
   setData(0,ChatPinned,pinned);setData(0,ChatMuted,muted);
-  if(pinned) {chat_name+=QStringLiteral(" · 置顶");tool_tip+=QStringLiteral("\n已置顶");}
-  if(muted) {chat_name+=QStringLiteral(" · 免打扰");tool_tip+=QStringLiteral("\n消息免打扰（被 @ 时仍提醒）");}
+  if(pinned) tool_tip+=QStringLiteral("\n已置顶");
+  if(muted) tool_tip+=QStringLiteral("\n消息免打扰（被 @ 时仍提醒）");
+  const bool pending = preferences.pending( c );
+  setData( 0, ChatPending, pending );
+  setData( 0, ChatQueued, unsent_messages );
+  QString preview;
+  QDateTime latestTimestamp = c.lastMessageTimestamp();
+  bool mentioned = false;
+  int unreadRemaining = c.unreadMessages();
+  const QList<ChatMessage>& messages = c.messages();
+  for( int index = messages.size() - 1; index >= 0; --index )
+  {
+    const ChatMessage& message = messages.at( index );
+    if( message.isHeader() || message.isSystemActivity() ) continue;
+    QTextDocument text;
+    text.setHtml( message.message() );
+    const QString plain = text.toPlainText().remove( QChar::ObjectReplacementCharacter ).simplified();
+    if( preview.isEmpty() )
+    {
+      if( message.timestamp().isValid() && (!latestTimestamp.isValid() || message.timestamp() > latestTimestamp) )
+        latestTimestamp = message.timestamp();
+      if( message.isImagePreview() ) preview = QStringLiteral( "[图片]" );
+      else if( message.isVoice() ) preview = QStringLiteral( "[语音]" );
+      else if( message.isFileTransfer() ) preview = QStringLiteral( "[文件] " ) + plain;
+      else preview = plain;
+      if( !preview.isEmpty() && !message.isFromSystem() )
+      {
+        if( message.isFromLocalUser() ) preview.prepend( QStringLiteral( "我：" ) );
+        else if( c.isGroup() )
+        {
+          const User sender = UserManager::instance().findUser( message.userId() );
+          if( sender.isValid() ) preview.prepend( sender.name() + QStringLiteral( "：" ) );
+        }
+      }
+    }
+    if( unreadRemaining > 0 && !message.isFromLocalUser() && !message.isFromSystem() )
+    {
+      mentioned = mentioned || shadowMentionsUser( plain, Settings::instance().localUser().name() );
+      --unreadRemaining;
+    }
+    if( !preview.isEmpty() && unreadRemaining <= 0 ) break;
+  }
+  if( preview.isEmpty() ) preview = QStringLiteral( "暂无消息" );
+  if( unsent_messages > 0 ) preview.prepend( QStringLiteral( "[待发送] " ) );
+  setData( 0, ChatPreview, preview.left( 240 ) );
+  setData( 0, ChatMentioned, mentioned );
+  if( pending ) tool_tip += QStringLiteral( "\n待处理" );
+  tool_tip += QStringLiteral( "\n" ) + preview.left( 240 );
   setText( 0, chat_name );
   setToolTip( 0, tool_tip );
   setData( 0, ChatUnreadMessages, c.unreadMessages() );
   setData( 0, ChatMessages, c.messages().size() + ChatManager::instance().savedChatSize( c.name() ) );
   setData( 0, ChatOnlineUsers, online_users );
-  if( c.lastMessageTimestamp().isValid() )
-    setData( 0, ChatLastMessageTimestamp, c.lastMessageTimestamp() );
+  setData( 0, ChatLastMessageTimestamp, latestTimestamp );
   if( m_defaultIcon.isNull() )
     m_defaultIcon = IconManager::instance().icon( "chat.png" );
 
-  if( !c.isDefault() )
-  {
-    if( !Settings::instance().localUser().isStatusConnected() || online_users == 0 )
-      m_defaultIcon = Bee::convertToGrayScale( m_defaultIcon, Settings::instance().avatarIconSize() );
-  }
-
   setIcon( 0, m_defaultIcon );
-  onTickEvent( 2 );
+  setForeground( 0, QBrush( QColor( "#243044" ) ) );
+  QFont labelFont = ShadowStyle::applicationFont();
+  labelFont.setBold( c.unreadMessages() > 0 && !muted );
+  setFont( 0, labelFont );
 
   return true;
-}
-
-void GuiChatItem::onTickEvent( int ticks )
-{
-  if( unreadMessages() > 0 && !data(0,ChatMuted).toBool() )
-  {
-    if( ticks % 2 == 0 )
-      setIcon( 0, ShadowStyle::actionIcon( QStringLiteral( "chats-circle" ) ) );
-    else
-      setIcon( 0, m_defaultIcon );
-  }
 }

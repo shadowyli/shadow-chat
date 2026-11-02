@@ -23,6 +23,7 @@
 
 #ifndef BEEBEEP_VERSION_H
 #define BEEBEEP_VERSION_H
+#include "ShadowBuild.h"
 
 const char BEEBEEP_NAME[] = "ShadowChat";
 const char BEEBEEP_ORGANIZATION[] = "shadowyli";
@@ -43,7 +44,7 @@ const char BEEBEEP_GA_TRACKING_ID[] = "UA-57878696-4";
 const char BEEBEEP_GA_URL[] = "https://www.google-analytics.com/collect";
 const char BEEBEEP_GA_EVENT_VERSION[] = "1";
 const char HUNSPELL_VERSION[] = "1.7.0";
-const char BEEBEEP_VERSION[] = "1.1.1";
+const char BEEBEEP_VERSION[] = "1.1.6";
 const int BEEBEEP_PROTO_VERSION = 95;
 const int BEEBEEP_SETTINGS_VERSION = 18;
 const int BEEBEEP_BUILD = 1556;

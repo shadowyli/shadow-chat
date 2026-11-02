@@ -1,16 +1,16 @@
 #ifndef SHADOWDIALOGSTYLE_H
 #define SHADOWDIALOGSTYLE_H
 #include <QtWidgets>
+#include "ShadowStyle.h"
 
 class ShadowDialogStyle
 {
 public:
-  static void apply(QWidget* widget)
+  static QString styleSheet()
   {
-    widget->setProperty("shadowDialog",true);
-    widget->setFont(QFont(QStringLiteral("Microsoft YaHei UI"),10));
-    widget->setStyleSheet(QStringLiteral(
+    return QStringLiteral(
       "QWidget{font-family:'Microsoft YaHei UI';font-size:13px;}"
+      "QDialog,QMessageBox{background:#ffffff;color:#17243b;}"
       "QWidget[shadowDialog=true]{background:#ffffff;color:#17243b;}"
       "QLabel{color:#34445e;background:transparent;}"
       "QLabel[role=title]{font-size:22px;font-weight:600;color:#14213a;}"
@@ -30,7 +30,61 @@ public:
       "QTreeWidget,QListWidget{background:#ffffff;border:1px solid #e3e9f2;border-radius:8px;color:#17243b;outline:0;selection-background-color:#eaf1ff;selection-color:#1c4fb0;}"
       "QTreeWidget::item,QListWidget::item{min-height:32px;padding:3px;}"
       "QHeaderView::section{background:#f4f7fc;color:#697b94;border:0;padding:8px;}"
-      "QCheckBox{color:#34445e;spacing:8px;}"));
+      "QCheckBox{color:#34445e;spacing:8px;}"
+      "QMenu{background:#ffffff;color:#243044;border:1px solid #e1e6ed;border-radius:8px;padding:5px;}"
+      "QMenu::item{min-height:24px;padding:6px 28px 6px 12px;border-radius:5px;}"
+      "QMenu::item:selected{background:#edf3fc;color:#2457b8;}"
+      "QMenu::separator{height:1px;background:#edf0f4;margin:4px 7px;}"
+      "QTabWidget::pane{border:1px solid #e3e9f2;border-radius:8px;background:#ffffff;}"
+      "QTabBar::tab{background:#f5f7fa;border:0;padding:9px 15px;color:#697b94;}"
+      "QTabBar::tab:selected{background:#ffffff;color:#2463eb;}"
+      "QToolBar{background:#ffffff;border:0;spacing:6px;padding:4px;}"
+      "QToolButton{background:transparent;color:#5f6b7a;border:0;border-radius:6px;padding:6px;}"
+      "QToolButton:hover{background:#edf3fc;}"
+      "QProgressBar{background:#edf1f6;border:0;border-radius:4px;text-align:center;}"
+      "QProgressBar::chunk{background:#528aeb;border-radius:4px;}"
+      "QSpinBox,QDoubleSpinBox{background:#f7f9fc;border:1px solid #dce4f0;border-radius:6px;padding:6px;}")+ShadowStyle::comboBoxStyleSheet();
+  }
+
+  static void apply(QWidget* widget)
+  {
+    widget->setProperty("shadowDialog",true);
+    widget->setFont(QFont(QStringLiteral("Microsoft YaHei UI"),10));
+    widget->setStyleSheet(styleSheet());
+  }
+
+  static bool confirm(QWidget* parent,const QString& title,const QString& text,const QString& action)
+  {
+    QDialog dialog(parent);
+    dialog.setObjectName("ShadowConfirmationDialog");
+    dialog.setWindowTitle(title);
+    dialog.setMinimumWidth(400);
+    apply(&dialog);
+    QVBoxLayout* layout=new QVBoxLayout(&dialog);
+    layout->setContentsMargins(24,20,24,20);
+    layout->setSpacing(20);
+    QLabel* message=new QLabel(text,&dialog);
+    message->setObjectName("ShadowConfirmationText");
+    message->setTextFormat(Qt::PlainText);
+    message->setWordWrap(true);
+    layout->addWidget(message);
+    QHBoxLayout* buttons=new QHBoxLayout;
+    buttons->addStretch();
+    QPushButton* cancel=new QPushButton(QStringLiteral("取消"),&dialog);
+    cancel->setObjectName("ShadowConfirmationCancel");
+    cancel->setDefault(true);
+    QPushButton* accept=new QPushButton(action,&dialog);
+    accept->setObjectName("ShadowConfirmationAccept");
+    accept->setProperty("role","primary");
+    accept->setAutoDefault(false);
+    buttons->addWidget(cancel);
+    buttons->addWidget(accept);
+    layout->addLayout(buttons);
+    QObject::connect(cancel,&QPushButton::clicked,&dialog,&QDialog::reject);
+    QObject::connect(accept,&QPushButton::clicked,&dialog,&QDialog::accept);
+    dialog.adjustSize();
+    cancel->setFocus();
+    return dialog.exec()==QDialog::Accepted;
   }
 };
 #endif

@@ -27,6 +27,7 @@
 #include "GuiChatItem.h"
 #include "ui_GuiChatList.h"
 
+class QScrollArea;
 
 class GuiChatList : public QWidget, private Ui::GuiChatListWidget
 {
@@ -40,6 +41,7 @@ public:
   void updateChats();
   void updateBackground();
   void selectFirstChat();
+  void setActiveChat( VNumber );
 
 signals:
   void chatSelected( VNumber chat_id );
@@ -53,7 +55,6 @@ signals:
 public slots:
   void updateChat( const Chat& );
   void updateUser( const User& );
-  void onTickEvent( int );
 
 protected slots:
   void chatClicked( QTreeWidgetItem*, int );
@@ -69,6 +70,8 @@ protected slots:
   void togglePinSelected();
   void toggleMuteSelected();
   void hideChatSelected();
+  void togglePendingSelected();
+  void refreshQuickAccess();
 
 protected:
   GuiChatItem* itemFromChatId( VNumber );
@@ -80,6 +83,18 @@ private:
   VNumber m_chatSelected;
   bool m_blockShowChatRequest;
   QString m_filter;
+  VNumber m_activeChat;
+  QWidget* mp_quickArea;
+  QScrollArea* mp_quickScroll;
+  QGridLayout* mp_quickGrid;
+  QToolButton* mp_quickToggle;
+  QTabBar* mp_filters;
+  QLabel* mp_empty;
+  QTimer m_quickRefresh;
+  QByteArray m_quickSnapshot;
+  bool m_quickExpanded;
+  void updateItemVisibility( GuiChatItem* );
+  void updateEmptyState();
 
 };
 

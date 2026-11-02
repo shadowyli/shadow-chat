@@ -31,14 +31,16 @@ class Updater : public QObject
   Q_OBJECT
 
 public:
-  explicit Updater( QObject *parent = Q_NULLPTR, const QUrl& manifest_url = QUrl() );
+  explicit Updater( QObject *parent = Q_NULLPTR, const QUrl& manifest_url = QUrl(),
+                    const QString& test_channel = QString() );
 
   inline const QString& versionAvailable() const;
   inline const QString& downloadUrl() const;
   inline const QString& news() const;
   bool manifestValid() const { return m_manifestValid; }
   QString errorString() const { return m_error; }
-  bool allowsVersion( const QString& current ) const;
+  bool hasNewerVersion( const QString& current ) const;
+  bool isChecking() const { return m_checking; }
   static QUrl productionManifestUrl();
 
 signals:
@@ -59,6 +61,7 @@ private:
   bool m_manifestValid = false;
   bool m_checking = false;
   QString m_error;
+  QString m_channel;
 
 };
 

@@ -1,0 +1,8 @@
+/* Appended to the native ShadowStyle baseline only in explicit local dev mode.
+   Ctrl+Alt+R reloads; Ctrl+Alt+0 restores the in-memory baseline.
+   Change these three values to test font, color and padding without rebuilding. */
+QLabel#ShadowChatTitle {
+  font-size: 17px;
+  color: #172033;
+  padding: 0px;
+}

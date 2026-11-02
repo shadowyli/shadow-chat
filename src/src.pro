@@ -19,6 +19,7 @@ macx {
 message( Qt version: $$[QT_VERSION] )
 
 include(../beebeep.pri)
+include(utils/shadow-update-config.pri)
 
 message( Target folder: $$DESTDIR )
 
