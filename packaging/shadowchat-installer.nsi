@@ -85,11 +85,31 @@ Section "影聊" SEC_MAIN
     SetErrorLevel 2
     Abort
   ready_to_install:
+  ClearErrors
+  ReadRegDWORD $1 HKCU "Software\shadowyli\ShadowChat" "StartupEnabled"
+  IfErrors startup_legacy startup_selected
+  startup_legacy:
+    ReadRegStr $2 HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "ShadowChat"
+    StrCmp $2 "" 0 startup_default
+    ReadRegStr $2 HKCU "Software\shadowyli\ShadowChat" "InstallLocation"
+    StrCmp $2 "" startup_default
+    StrCpy $1 0
+    Goto startup_selected
+  startup_default:
+    StrCpy $1 1
+  startup_selected:
   SetOutPath "$INSTDIR"
   File /r "${PAYLOAD}\*.*"
 
   WriteUninstaller "$INSTDIR\卸载影聊.exe"
   WriteRegStr HKCU "Software\shadowyli\ShadowChat" "InstallLocation" "$INSTDIR"
+  WriteRegDWORD HKCU "Software\shadowyli\ShadowChat" "StartupEnabled" $1
+  StrCmp $1 0 startup_disabled
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "ShadowChat" '"$INSTDIR\${APP_EXE}"'
+    Goto startup_complete
+  startup_disabled:
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "ShadowChat"
+  startup_complete:
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat" "DisplayName" "影聊"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat" "DisplayVersion" "${APP_VERSION}"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat" "Publisher" "${APP_PUBLISHER}"
@@ -111,6 +131,7 @@ SectionEnd
 
 Section "Uninstall"
   SetShellVarContext current
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "ShadowChat"
   Delete "$DESKTOP\影聊.lnk"
   RMDir /r "$SMPROGRAMS\影聊"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat"
