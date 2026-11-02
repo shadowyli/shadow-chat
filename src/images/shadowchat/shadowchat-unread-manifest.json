@@ -1,0 +1,22 @@
+{
+  "source": "src/images/shadowchat/shadowchat-unread-source.png",
+  "source_sha256": "62b0336451868dbc018a7b857ace7a39bad6971d88c24b5a5c3a5f87a67235f2",
+  "source_dimensions": [
+    1080,
+    1080
+  ],
+  "operations": "Byte-preserved source; direct RGBA LANCZOS resize from source for each ICO frame; lossless PNG encoding only; no crop, redraw or recolor",
+  "pillow_version": "13.0.0",
+  "ico_sizes": [
+    16,
+    20,
+    24,
+    32,
+    40,
+    48,
+    64,
+    128,
+    256
+  ],
+  "ico_sha256": "12a40d2301ceb49f1e7179fcd02dcf252a32c8b51e4a571ca68e0dd1ff46570a"
+}

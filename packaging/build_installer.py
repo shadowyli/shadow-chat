@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import uuid
 from release_config import ENVIRONMENTS, artifact_name, channel as release_channel, output_directory, qt_directory, version as release_version
+from stage_video_runtime import stage_video_runtime
 
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
@@ -19,6 +20,7 @@ parser.add_argument('--makensis', type=Path, default=Path(os.environ.get('SHADOW
 parser.add_argument('--recovery-dir', type=Path, default=Path(os.environ.get('SHADOWCHAT_RECOVERY_DIR', str(root/'delivery-private'))))
 parser.add_argument('--crt-dir', type=Path)
 parser.add_argument('--tls-dir', type=Path, default=Path(os.environ.get('SHADOWCHAT_TLS_DIR', str(root/'dist/tls-runtime-x86'))))
+parser.add_argument('--video-cache', type=Path, default=Path(os.environ.get('SHADOWCHAT_VIDEO_CACHE', str(root/'dist/deps/vlc-3.0.24-win32'))))
 parser.add_argument('--environment', choices=ENVIRONMENTS, default='local')
 args = parser.parse_args()
 version = release_version()
@@ -131,6 +133,7 @@ shutil.copy2(shortcut_icon, payload/shortcut_icon_name)
 for name in tls_files:
     shutil.copy2(args.tls_dir/name, payload/name)
 shutil.copy2(seed, payload/seed.name)
+video_runtime = stage_video_runtime(args.video_cache, payload)
 inventory = {}
 for source in sorted(payload.rglob('*')):
     if source.is_file():
@@ -147,11 +150,12 @@ result = {
     'appLocalCrt': {dll.name: digest(dll) for dll in crt.glob('*.dll')},
     'crtSource': str(crt), 'tools': tools, 'qtDeployCommand': deploy_command,
     'payloadInventory': inventory,
-    'payloadPolicy': 'Fresh windeployqt deployment, fixed public resources, current executable, app-local CRT and verified x86 TLS runtime with license/provenance, validated existing salted recovery hash only; no old dist baseline',
+    'payloadPolicy': 'Fresh windeployqt deployment, fixed public resources, current executable, app-local CRT and verified x86 TLS runtime, pinned libVLC staged by prepare_video_runtime.py from verified official cache with source/license notices, validated existing salted recovery hash only; no old dist baseline',
     'plaintextRecoveryScanPassed': True, 'existingRecoverySeedValidated': True,
     'privateInputPolicy': 'Only existing shadowchat-recovery.ini is distributed; owner file is read locally to validate PBKDF2 and scan payload, never copied or printed',
     'environment': {'windows': platform.platform(), 'python': platform.python_version(), 'architecture': 'x86 application and CRT'},
     'tlsRuntime': tls,
+    'videoRuntime': video_runtime,
     'shortcutIcon': {'filename': shortcut_icon_name, 'sha256': digest(shortcut_icon), 'source': 'packaging/shadowchat.ico'},
     'productionBuild': build_configuration,
 }

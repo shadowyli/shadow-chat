@@ -113,7 +113,8 @@ class DialogChrome final : public QObject
 {
 public:
   explicit DialogChrome( QDialog* dialog )
-    : QObject( dialog ), m_dialog( dialog ), m_dragging( false ), m_dragMoved( false )
+    : QObject( dialog ), m_dialog( dialog ), m_updatingBounds( false ),
+      m_dragging( false ), m_dragMoved( false )
   {
     dialog->setProperty( decoratedProperty, true );
     const int chromeHeight = dialog->property( "shadowDialogTitleHidden" ).toBool() ? 44 : headerHeight;
@@ -146,6 +147,7 @@ public:
       "QWidget#shadowDialogSurface { background: #FFFFFF; border: 1px solid #CBD5E1;"
       " border-radius: 12px; }" ) );
     QWidget* body = new QWidget( m_surface );
+    m_body = body;
     body->setObjectName( QStringLiteral( "shadowDialogBody" ) );
     body->setContentsMargins( dialog->contentsMargins() );
     body->setStyleSheet( QStringLiteral(
@@ -196,11 +198,11 @@ public:
     outerLayout->addWidget( m_surface );
 
     const int frameSize = shadowPadding * 2 + 2;
+    m_minimumSize = minimumSize + QSize( frameSize, chromeHeight + frameSize );
     dialog->setMaximumSize( qMin( QWIDGETSIZE_MAX, qMax( maximumSize.width(), m_header->minimumSizeHint().width() ) + frameSize ),
                            qMin( QWIDGETSIZE_MAX, maximumSize.height() + chromeHeight + frameSize ) );
-    dialog->setMinimumSize( qMin( QWIDGETSIZE_MAX, minimumSize.width() + frameSize ),
-                           qMin( QWIDGETSIZE_MAX, minimumSize.height() + chromeHeight + frameSize ) );
     bodyLayout->activate();
+    updateMinimumSize();
     outerLayout->activate();
     if( wasResized )
       dialog->resize( qMin( QWIDGETSIZE_MAX, originalSize.width() + frameSize ),
@@ -211,6 +213,7 @@ public:
 
     dialog->installEventFilter( this );
     m_surface->installEventFilter( this );
+    m_body->installEventFilter( this );
     m_header->installEventFilter( this );
     m_title->installEventFilter( this );
     updateTitle();
@@ -230,6 +233,11 @@ protected:
 
     if( watched == m_surface && event->type() == QEvent::Resize )
       updateMask();
+
+    if( (watched == m_dialog || watched == m_surface || watched == m_body) &&
+        (event->type() == QEvent::LayoutRequest || event->type() == QEvent::StyleChange ||
+         event->type() == QEvent::FontChange) )
+      updateMinimumSize();
 
     if( watched == m_dialog )
     {
@@ -308,6 +316,23 @@ protected:
   }
 
 private:
+  void updateMinimumSize()
+  {
+    if( !m_dialog || !m_surface || !m_body || m_updatingBounds )
+      return;
+    m_updatingBounds = true;
+    const int padding = m_dialog->isMaximized() || m_dialog->isFullScreen() ? 0 : shadowPadding;
+    const QSize bodyMinimum = m_body->minimumSizeHint().expandedTo( m_body->minimumSize() );
+    const QSize headerMinimum = m_header->minimumSizeHint();
+    const QSize minimum( qMax( bodyMinimum.width(), headerMinimum.width() ) + padding * 2 + 2,
+      bodyMinimum.height() + m_header->height() + padding * 2 + 2 );
+    const QSize required = minimum.expandedTo( m_minimumSize ).boundedTo(
+      QSize( QWIDGETSIZE_MAX, QWIDGETSIZE_MAX ) );
+    if( m_dialog->minimumSize() != required )
+      m_dialog->setMinimumSize( required );
+    m_updatingBounds = false;
+  }
+
   void updateSizeGrips()
   {
     if( !m_dialog || !m_surface )
@@ -346,7 +371,9 @@ private:
       return;
     const bool expanded = m_dialog->isMaximized() || m_dialog->isFullScreen();
     const int padding = expanded ? 0 : shadowPadding;
-    m_dialog->layout()->setContentsMargins( padding, padding, padding, padding );
+    const QMargins margins( padding, padding, padding, padding );
+    if( m_dialog->layout()->contentsMargins() != margins )
+      m_dialog->layout()->setContentsMargins( margins );
     m_shadow->setGeometry( m_dialog->rect() );
     m_shadow->setVisible( !expanded );
     m_shadow->lower();
@@ -365,8 +392,11 @@ private:
   QPointer<QDialog> m_dialog;
   QPointer<DialogShadow> m_shadow;
   QPointer<QWidget> m_surface;
+  QPointer<QWidget> m_body;
   QPointer<QWidget> m_header;
   QPointer<QLabel> m_title;
+  QSize m_minimumSize;
+  bool m_updatingBounds;
   QPoint m_pressPosition;
   QPoint m_windowPosition;
   bool m_dragging;

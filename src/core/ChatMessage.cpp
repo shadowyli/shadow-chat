@@ -22,6 +22,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "ChatMessage.h"
+#include "ShadowRichText.h"
 #include "Message.h"
 #include "Protocol.h"
 
@@ -84,6 +85,15 @@ void ChatMessage::createFromMessage( const Message& m )
   else
     m_message = m.text();
   m_timestamp = m.timestamp();
+  if(!m.isSourceCode()&&m.type()!=Message::System)
+  {
+    const QString rich=Protocol::instance().dataFromChatMessage(m).richText();
+    if(!rich.isEmpty())
+    {
+      const QString safe=ShadowRichText::sanitize(rich);
+      if(!safe.isEmpty()&&ShadowRichText::plainText(safe)==ShadowRichText::plainText(m_message))m_message=safe;
+    }
+  }
   if( !m.isSourceCode() )
   {
     ChatMessageData cm_data = Protocol::instance().dataFromChatMessage( m );

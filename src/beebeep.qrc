@@ -1,8 +1,10 @@
 <RCC>
     <qresource prefix="/">
-    <file>images/shadowchat/icons/scissors.svg</file>
-        <file>images/beebeep.png</file>
+        <file alias="images/beebeep.png">images/shadowchat/shadowchat-mark-source.png</file>
         <file>images/shadowchat/shadowchat-mark-source.png</file>
+        <file alias="images/shadowchat/shadowchat-app.ico">beebeep.ico</file>
+        <file>images/shadowchat/shadowchat-unread-source.png</file>
+        <file>images/shadowchat/shadowchat-unread.ico</file>
         <file>images/shadowchat/icons/archive.svg</file>
         <file>images/shadowchat/icons/gear-six.svg</file>
         <file>images/shadowchat/icons/pencil-simple.svg</file>
@@ -14,6 +16,10 @@
         <file>images/shadowchat/icons/list.svg</file>
         <file>images/shadowchat/icons/x.svg</file>
         <file>images/shadowchat/icons/chevron-down.svg</file>
+        <file>images/shadowchat/icons/scissors.svg</file>
+        <file>images/shadowchat/icons/highlighter.svg</file>
+        <file>images/shadowchat/icons/record-circle.svg</file>
+        <file>images/shadowchat/icons/link.svg</file>
         <file>images/shadowchat/icons/arrow-left.svg</file>
         <file>images/shadowchat/icons/chats-circle.svg</file>
         <file>images/shadowchat/icons/dots-three-circle.svg</file>
@@ -102,7 +108,7 @@
         <file>images/file-image.png</file>
         <file>images/file-document.png</file>
         <file>images/star.png</file>
-        <file>images/beebeep-message.png</file>
+        <file alias="images/beebeep-message.png">images/shadowchat/shadowchat-unread-source.png</file>
         <file>images/file-beep.png</file>
         <file>images/play.png</file>
         <file>images/group-add.png</file>
@@ -192,10 +198,10 @@
         <file>images/reset-window.png</file>
         <file>images/message-create.png</file>
         <file>images/unsent-message.png</file>
-        <file>images/beebeep-tray.png</file>
+        <file alias="images/beebeep-tray.png">images/shadowchat/shadowchat-mark-source.png</file>
         <file>images/network-test.png</file>
         <file>images/file-compressed.png</file>
-        <file>images/beebeep-message-tray.png</file>
+        <file alias="images/beebeep-message-tray.png">images/shadowchat/shadowchat-unread-source.png</file>
         <file>images/interface.png</file>
         <file>images/colors.png</file>
         <file>images/quote.png</file>

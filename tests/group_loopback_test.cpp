@@ -72,11 +72,17 @@ static int peer( int argc, char** argv )
     if( !message.isFromLocalUser() && message.type() == ChatMessage::Chat && message.message().contains( "must-not-arrive" ) ) forbidden = true;
     if( !message.isFromLocalUser() && message.type() == ChatMessage::Chat && message.message().contains( "after-rejoin" ) ) received = true;
     if( !message.isFromLocalUser() && message.type() == ChatMessage::Chat && message.message().contains( "owner-offline-" ) ) received = true;
-    if( message.message().contains( QStringLiteral( "已送达 1/1 人" ) ) )
+    if( !message.isFromLocalUser() && message.type() == ChatMessage::Chat )
     {
-      if( message.type() == ChatMessage::Other && message.message().contains( "offline-group" ) ) textAck = true;
-      if( message.type() == ChatMessage::Other && message.message().contains( "after-rejoin" ) ) textAck = true;
-      if( message.type() == ChatMessage::FileTransfer && message.message().contains( "materials" ) ) fileAck = true;
+      const QString receipt = message.message().contains( "offline-group" ) ? "offline-group-received.txt" :
+        message.message().contains( "after-rejoin" ) ? "after-rejoin-received.txt" : QString();
+      if( !receipt.isEmpty() )
+      {
+        QSaveFile receivedText( QDir(root).filePath(receipt) );
+        const QByteArray content = message.message().toUtf8();
+        if( !receivedText.open(QIODevice::WriteOnly) || receivedText.write(content) != content.size() || !receivedText.commit() )
+          app.exit( 16 );
+      }
     }
   } );
   QObject::connect( &core, &Core::fileDownloadRequest, [&]( const User& user, const FileInfo& offered ) {
@@ -94,7 +100,12 @@ static int peer( int argc, char** argv )
   } );
   QObject::connect( &core, &Core::fileTransferMessage, [&]( VNumber, const User&, const FileInfo& file, const QString&, FileTransferPeer::TransferState state ) {
     if( file.isDownload() && state == FileTransferPeer::Completed ) ++receivedFiles;
-    if( !file.isDownload() && state == FileTransferPeer::Completed ) ++uploadedFiles;
+    if( !file.isDownload() && state == FileTransferPeer::Completed )
+    {
+      ++uploadedFiles;
+      if( name == "alpha" && phase == "resume" && (uploadedFiles == 503 || uploadedFiles == 1006) )
+        fileAck = true;
+    }
   } );
   QObject::connect( &core, &Core::chatRemoved, [&]( const Chat& chat ) { if( chat.isGroup() ) dissolved = true; } );
   if( !core.start() ) return 2;
@@ -103,6 +114,13 @@ static int peer( int argc, char** argv )
     if( name == "alpha" && phase != "queue" && core.connectedUsers() == 0 ) core.newPeerFound( QHostAddress::LocalHost, otherPort );
     if( phase == "invite" && name == "beta" && core.connectedUsers() == 0 ) core.newPeerFound( QHostAddress::LocalHost, otherPort );
     const Chat chat = project();
+    if( name == "alpha" && chat.isValid() && (phase == "resume" || (phase == "rejoin" && sent)) )
+    {
+      const QString expected = phase == "resume" ? "offline-group" : "after-rejoin";
+      QFile actualReceipt( QFileInfo(root).dir().filePath("beta/" + expected + "-received.txt") );
+      textAck = actualReceipt.open(QIODevice::ReadOnly) && actualReceipt.readAll().contains(expected.toUtf8()) &&
+        MessageManager::instance().countUnsentMessages(ID_INVALID,chat.id()) == 0;
+    }
     if( phase == "invite" )
     {
       if( name == "beta" && !sent && chat.isValid() && core.connectedUsers() > 0 )

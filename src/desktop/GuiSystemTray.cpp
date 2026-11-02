@@ -25,6 +25,9 @@
 #include "GuiSystemTray.h"
 #include "IconManager.h"
 #include "Settings.h"
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#endif
 
 
 GuiSystemTray::GuiSystemTray( QObject *parent )
@@ -78,11 +81,7 @@ void GuiSystemTray::setDefaultIcon()
 {
   if( m_iconStatus != GuiSystemTray::Default )
   {
-#if defined( Q_OS_UNIX ) && !defined( Q_OS_MACX )
-    setIcon( IconManager::instance().icon( "beebeep-tray.png" ) );
-#else
-    setIcon( IconManager::instance().icon( "beebeep.png" ) );
-#endif
+    setIcon( IconManager::instance().icon( "shadowchat.png" ) );
     m_iconStatus = GuiSystemTray::Default;
   }
 }
@@ -91,11 +90,7 @@ void GuiSystemTray::setMessageIcon()
 {
   if( m_iconStatus != GuiSystemTray::Message )
   {
-#if defined( Q_OS_UNIX ) && !defined( Q_OS_MACX )
-    setIcon( IconManager::instance().icon( "beebeep-message-tray.png" ) );
-#else
-    setIcon( IconManager::instance().icon( "beebeep-message.png" ) );
-#endif
+    setIcon( IconManager::instance().icon( "shadowchat-unread.png" ) );
     m_iconStatus = GuiSystemTray::Message;
   }
 }
@@ -110,9 +105,18 @@ void GuiSystemTray::showMessageInTray( const QString& msg, bool long_time )
       show_time = qMax( 10000, show_time * 4 );
 
  #if QT_VERSION >= 0x050900
-    showMessage( msg, Settings::instance().programName(), IconManager::instance().icon( "beebeep-message.png" ), show_time );
+    QIcon notification_icon = IconManager::instance().icon( "shadowchat.png" );
+  #ifdef Q_OS_WIN
+    QPixmap notification_pixmap( GetSystemMetrics( SM_CXICON ), GetSystemMetrics( SM_CYICON ) );
+    notification_pixmap.fill( Qt::transparent );
+    QPainter painter( &notification_pixmap );
+    notification_icon.paint( &painter, notification_pixmap.rect() );
+    painter.end();
+    notification_icon = QIcon( notification_pixmap );
+  #endif
+    showMessage( Settings::instance().programName(), msg, notification_icon, show_time );
  #else
-    showMessage( msg, Settings::instance().programName(), QSystemTrayIcon::Information, show_time );
+    showMessage( Settings::instance().programName(), msg, QSystemTrayIcon::NoIcon, show_time );
  #endif
   }
 }

@@ -35,6 +35,11 @@ IconManager::IconManager()
 
 QString IconManager::iconPath( const QString& icon_name ) const
 {
+  if( icon_name == "shadowchat.png" || icon_name == "beebeep.png" || icon_name == "beebeep-tray.png" )
+    return QStringLiteral( ":/images/shadowchat/shadowchat-app.ico" );
+  if( icon_name == "shadowchat-unread.png" || icon_name == "beebeep-message.png" || icon_name == "beebeep-message-tray.png" )
+    return QStringLiteral( ":/images/shadowchat/shadowchat-unread.ico" );
+
   static const QHash<QString, QString> modern_icons = {
     { "settings.png", "gear-six" }, { "chat-settings.png", "gear-six" },
     { "chat.png", "chats-circle" }, { "chat-list.png", "chats-circle" },

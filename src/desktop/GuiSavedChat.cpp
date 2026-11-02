@@ -48,6 +48,29 @@
 
 namespace
 {
+class HistoryEdge final : public QWidget
+{
+public:
+  explicit HistoryEdge( QWidget* parent ) : QWidget( parent )
+  {
+    setObjectName( QStringLiteral( "ShadowHistoryEdge" ) );
+    setFixedWidth( 7 );
+    setAttribute( Qt::WA_TransparentForMouseEvents );
+  }
+
+protected:
+  void paintEvent( QPaintEvent* ) override
+  {
+    QPainter painter( this );
+    painter.fillRect( rect(), Qt::white );
+    QLinearGradient shade( 0, 0, width() - 1, 0 );
+    shade.setColorAt( 0, QColor( 15, 23, 42, 0 ) );
+    shade.setColorAt( 1, QColor( 15, 23, 42, 15 ) );
+    painter.fillRect( rect().adjusted( 0, 0, -1, 0 ), shade );
+    painter.fillRect( width() - 1, 0, 1, height(), QColor( "#DFE5ED" ) );
+  }
+};
+
 enum HistoryRole
 {
   SenderRole = Qt::UserRole + 2,
@@ -55,8 +78,73 @@ enum HistoryRole
   PreviewRole,
   AvatarRole,
   ThumbnailRole,
-  ResultKeyRole
+  ResultKeyRole,
+  DateHeaderRole,
+  MediaRole,
+  VideoRole
 };
+
+class HistoryResults final : public QListWidget
+{
+public:
+  explicit HistoryResults( QWidget* parent ) : QListWidget(parent) {}
+
+  void doItemsLayout() override
+  {
+    if(m_positioning)return;
+    m_positioning=true;
+    QListWidget::doItemsLayout();
+    if(property("historyMedia").toBool())
+    {
+      const int width=viewport()->width();
+      const int cell=width/2;
+      const int cellHeight=(cell-12)*3/4+12;
+      int top=0;
+      int column=0;
+      for(int row=0;row<count();++row)
+      {
+        QListWidgetItem* entry=item(row);
+        if(entry->data(DateHeaderRole).toBool())
+        {
+          if(column){top+=cellHeight;column=0;}
+          setPositionForIndex(QPoint(0,top),indexFromItem(entry));
+          top+=32;
+        }
+        else
+        {
+          setPositionForIndex(QPoint(column*cell,top),indexFromItem(entry));
+          if(++column==2){column=0;top+=cellHeight;}
+        }
+      }
+      m_mediaHeight=top+(column?cellHeight:0);
+    }
+    m_positioning=false;
+    updateGeometries();
+  }
+
+protected:
+  void updateGeometries() override
+  {
+    if(m_positioning)return;
+    if(!property("historyMedia").toBool()){QListWidget::updateGeometries();return;}
+    verticalScrollBar()->setPageStep(viewport()->height());
+    verticalScrollBar()->setRange(0,qMax(0,m_mediaHeight-viewport()->height()));
+    horizontalScrollBar()->setRange(0,0);
+  }
+
+private:
+  bool m_positioning=false;
+  int m_mediaHeight=0;
+};
+
+QString currentHistoryHtml( const QString& chatName )
+{
+  QString html = ChatManager::instance().chatSavedText( chatName );
+  const Chat live = ChatManager::instance().findChatByName( chatName );
+  if( live.isValid() )
+    html += GuiChatMessage::chatToHtml( live, false, true, true, true, false, true );
+  return html;
+}
 
 struct HistoryReadingState
 {
@@ -83,6 +171,7 @@ HistoryReadingState readingState( QListWidget* results, QTextBrowser* source, QS
   for( int row = 0; row < results->count(); ++row )
   {
     QListWidgetItem* item = results->item( row );
+    if( item->data( DateHeaderRole ).toBool() ) continue;
     const QRect area = results->visualItemRect( item );
     if( !area.intersects( results->viewport()->rect() ) )
       continue;
@@ -135,6 +224,14 @@ public:
 
   QSize sizeHint( const QStyleOptionViewItem& option, const QModelIndex& index ) const override
   {
+    if( index.data( DateHeaderRole ).toBool() || index.data( MediaRole ).toBool() )
+    {
+      const QListWidget* list = qobject_cast<QListWidget*>( parent() );
+      const int width = list ? list->viewport()->width() : 280;
+      if( index.data( DateHeaderRole ).toBool() ) return QSize( width, 32 );
+      const int cell = width / 2;
+      return QSize( cell, (cell - 12) * 3 / 4 + 12 );
+    }
     if( !index.data( SenderRole ).isValid() )
       return QStyledItemDelegate::sizeHint( option, index );
     return QSize( 260, index.data( ThumbnailRole ).value<QPixmap>().isNull() ? 94 : 128 );
@@ -142,6 +239,58 @@ public:
 
   void paint( QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index ) const override
   {
+    if( index.data( DateHeaderRole ).toBool() )
+    {
+      painter->save();
+      painter->setPen( QColor( "#66768D" ) );
+      painter->drawText( option.rect.adjusted( 6, 0, -6, 0 ), Qt::AlignLeft | Qt::AlignVCenter,
+        index.data().toString() );
+      painter->restore();
+      return;
+    }
+    if( index.data( MediaRole ).toBool() )
+    {
+      painter->save();
+      painter->setRenderHint( QPainter::Antialiasing );
+      const QRect area = option.rect.adjusted( 5, 5, -5, -5 );
+      QPainterPath clip;
+      clip.addRoundedRect( area, 7, 7 );
+      painter->setClipPath( clip );
+      painter->fillRect( area, QColor( "#EDF2F8" ) );
+      const QPixmap thumbnail = index.data( ThumbnailRole ).value<QPixmap>();
+      if( !thumbnail.isNull() )
+      {
+        const QPixmap scaled = thumbnail.scaled( area.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation );
+        painter->drawPixmap( area.center() - QPoint( scaled.width() / 2, scaled.height() / 2 ), scaled );
+      }
+      if( index.data( VideoRole ).toBool() )
+      {
+        const QPointF center = area.center();
+        painter->setPen( Qt::NoPen );
+        painter->setBrush( QColor( 23, 36, 58, 155 ) );
+        painter->drawEllipse( center, 18, 18 );
+        QPainterPath play;
+        play.moveTo( center + QPointF( -4, -7 ) );
+        play.lineTo( center + QPointF( 8, 0 ) );
+        play.lineTo( center + QPointF( -4, 7 ) );
+        play.closeSubpath();
+        painter->fillPath( play, Qt::white );
+      }
+      else if( thumbnail.isNull() )
+      {
+        painter->setPen( QColor( "#66768D" ) );
+        painter->drawText( area, Qt::AlignCenter, QStringLiteral( "图片不可用" ) );
+      }
+      painter->setClipping( false );
+      if( option.state & (QStyle::State_Selected | QStyle::State_HasFocus) )
+      {
+        painter->setPen( QPen( QColor( "#2877EF" ), 2 ) );
+        painter->setBrush( Qt::NoBrush );
+        painter->drawRoundedRect( area.adjusted( 1, 1, -1, -1 ), 7, 7 );
+      }
+      painter->restore();
+      return;
+    }
     if( !index.data( SenderRole ).isValid() )
     {
       QStyledItemDelegate::paint( painter, option, index );
@@ -235,17 +384,14 @@ GuiSavedChat::GuiSavedChat( QWidget* parent, bool embedded )
     setMinimumWidth( 320 );
     setSizePolicy( QSizePolicy::Preferred, QSizePolicy::Expanding );
     setStyleSheet( QStringLiteral(
-      "GuiSavedChat { background:white; border-left:1px solid #E5EAF1; }"
+      "GuiSavedChat { background:white; border:0; }"
       "QWidget#ShadowHistorySurface { background:white; }"
       "QLabel { color:#66768D; background:transparent; }"
       "QLabel#ShadowHistoryTitle { color:#17243A; font-size:17px; font-weight:600; }"
-      "QLabel#ShadowHistoryConversation { color:#8A97A8; font-size:11px; }"
-      "QTabBar::tab { background:white; color:#52647F; padding:10px 8px; border:0; border-bottom:2px solid transparent; }"
-      "QTabBar::tab:selected { color:#2877EF; border-bottom-color:#2877EF; }"
       "QLineEdit { background:white; border:1px solid #DFE5ED; border-radius:6px; padding:7px 10px; min-height:18px; }"
       "QLineEdit:focus { border-color:#609BF3; }"
-      "QComboBox { background:white; color:#52647F; border:1px solid #DFE5ED; border-radius:5px; padding:5px 20px 5px 6px; min-width:0; min-height:18px; font-size:11px; }"
-      "QComboBox::drop-down { border:0; width:18px; }"
+      "QComboBox { background:white; color:#52647F; border:1px solid #DFE5ED; border-radius:5px; padding:5px 14px 5px 6px; min-width:0; min-height:18px; font-size:11px; }"
+      "QComboBox::drop-down { border:0; width:12px; }"
       "QListWidget { background:white; border:0; outline:0; padding:0; }"
       "QListWidget::item { border:0; padding:3px; border-radius:8px; }"
       "QListWidget::item:selected { color:#243247; background:#EAF2FF; }"
@@ -276,7 +422,7 @@ GuiSavedChat::GuiSavedChat( QWidget* parent, bool embedded )
   panel->setObjectName( QStringLiteral("ShadowHistorySurface") );
   QVBoxLayout* layout = new QVBoxLayout(panel);
   layout->setContentsMargins(m_embedded?14:24,16,m_embedded?14:24,m_embedded?10:24);
-  layout->setSpacing(12);
+  layout->setSpacing(m_embedded?8:12);
   QLabel* heading=new QLabel(QStringLiteral("聊天记录"),panel);heading->setProperty("role","title");
   heading->setObjectName( QStringLiteral("ShadowHistoryTitle") );
   QHBoxLayout* headingLayout = new QHBoxLayout;
@@ -303,16 +449,22 @@ GuiSavedChat::GuiSavedChat( QWidget* parent, bool embedded )
   connect(closeButton,&QToolButton::clicked,this,&QWidget::close);
   headingLayout->addWidget(closeButton);
   layout->addLayout(headingLayout);
-  QLabel* conversation = new QLabel(panel);
-  conversation->setObjectName(QStringLiteral("ShadowHistoryConversation"));
-  conversation->setVisible(m_embedded);
-  layout->addWidget(conversation);
   mp_categories = new QTabBar(panel);
+  mp_categories->setObjectName(QStringLiteral("ShadowHistoryTabs"));
+  mp_categories->setStyleSheet(QStringLiteral(
+    "QTabBar#ShadowHistoryTabs { background:white; border:0; border-bottom:1px solid #E5EAF1; }"
+    "QTabBar#ShadowHistoryTabs::tab { background:transparent; color:#52647F; font-size:13px;"
+    " min-width:0; min-height:0; padding:9px 0; margin:0 10px; border:0; border-bottom:2px solid transparent; }"
+    "QTabBar#ShadowHistoryTabs::tab:selected { color:#2877EF; border-bottom-color:#2877EF; }"
+    "QTabBar#ShadowHistoryTabs::tab:focus { background:#EDF3FC; }"));
   mp_categories->addTab(QString::fromUtf8("消息"));
   mp_categories->addTab(QString::fromUtf8("文件"));
   mp_categories->addTab(QString::fromUtf8("图片和视频"));
   mp_categories->addTab(QString::fromUtf8("链接"));
   mp_categories->setExpanding(false);
+  mp_categories->setDrawBase(false);
+  mp_categories->setElideMode(Qt::ElideNone);
+  mp_categories->setUsesScrollButtons(true);
   layout->addWidget(mp_categories);
   if( m_embedded )
   {
@@ -342,10 +494,12 @@ GuiSavedChat::GuiSavedChat( QWidget* parent, bool embedded )
   layout->addLayout(filters);
   mp_resultCount = new QLabel(panel);mp_resultCount->setProperty("role","hint");layout->addWidget(mp_resultCount);
   QSplitter* split = new QSplitter(Qt::Vertical,panel);
-  mp_results = new QListWidget(split); mp_results->setWordWrap(true);mp_results->setMinimumHeight(180);
+  mp_results = new HistoryResults(split); mp_results->setWordWrap(true);mp_results->setMinimumHeight(m_embedded?80:180);
   mp_results->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
   mp_results->setToolTip(QString::fromUtf8("选择结果，在下方定位原始聊天；点击原文中的文件或链接打开。"));
   mp_results->setObjectName(QStringLiteral("ShadowHistoryResults"));
+  mp_results->setItemDelegate(new HistoryResultDelegate(mp_results));
+  mp_results->installEventFilter(this);
   split->addWidget(mp_results);split->addWidget(mp_teSavedChat);split->setHandleWidth(12);
   if( m_embedded )
   {
@@ -362,35 +516,44 @@ GuiSavedChat::GuiSavedChat( QWidget* parent, bool embedded )
     resultsLayout->addWidget(mp_results,1);
     mp_results->setMouseTracking(true);
     mp_results->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    mp_results->setItemDelegate(new HistoryResultDelegate(mp_results));
-    mp_results->setToolTip(QStringLiteral("选择记录后可查看上下文；双击文件、图片或链接打开。"));
+    mp_results->setToolTip(QStringLiteral("选择记录后可跳转到主聊天；单击缩略图预览，双击文件或链接打开。"));
     mp_contextButton = new QPushButton(QStringLiteral("查看选中消息的上下文"),resultsPage);
     mp_contextButton->setObjectName(QStringLiteral("ShadowHistoryContext"));
     mp_contextButton->setEnabled(false);
     connect(mp_contextButton,&QPushButton::clicked,this,&GuiSavedChat::showHistoryContext);
     resultsLayout->addWidget(mp_contextButton);
-    QWidget* sourcePage = new QWidget(mp_resultsStack);
-    QVBoxLayout* sourceLayout = new QVBoxLayout(sourcePage);
-    sourceLayout->setContentsMargins(0,0,0,0);
-    QPushButton* back = new QPushButton(QStringLiteral("返回结果"),sourcePage);
-    back->setObjectName(QStringLiteral("ShadowHistoryBack"));
-    connect(back,&QPushButton::clicked,this,[this]() {mp_resultsStack->setCurrentIndex(0);});
-    sourceLayout->addWidget(back,0,Qt::AlignLeft);
-    sourceLayout->addWidget(mp_teSavedChat,1);
     mp_resultsStack->addWidget(resultsPage);
-    mp_resultsStack->addWidget(sourcePage);
+    mp_teSavedChat->setParent(this);
+    mp_teSavedChat->hide();
     layout->addWidget(mp_resultsStack,1);
     delete split;
   }
   else
     layout->addWidget(split);
-  setCentralWidget(panel);resize(850,700);
+  if( m_embedded )
+  {
+    QWidget* frame = new QWidget(this);
+    QHBoxLayout* frameLayout = new QHBoxLayout(frame);
+    frameLayout->setContentsMargins(0,0,0,0);
+    frameLayout->setSpacing(0);
+    frameLayout->addWidget(new HistoryEdge(frame));
+    frameLayout->addWidget(panel,1);
+    setCentralWidget(frame);
+  }
+  else
+    setCentralWidget(panel);
+  resize(850,700);
   connect(mp_categories,SIGNAL(currentChanged(int)),this,SLOT(filterHistory()));
   connect(mp_senderFilter,SIGNAL(currentIndexChanged(int)),this,SLOT(filterHistory()));
   connect(mp_dateFilter,SIGNAL(currentIndexChanged(int)),this,SLOT(filterHistory()));
   connect(mp_sortOrder,SIGNAL(currentIndexChanged(int)),this,SLOT(filterHistory()));
   connect(mp_results,SIGNAL(itemSelectionChanged()),this,SLOT(locateHistoryResult()));
+  connect(mp_results,&QListWidget::itemClicked,this,[this](QListWidgetItem* item) {
+    if(mp_categories->currentIndex()==2 && historyRecordIndex(item)>=0)
+      checkAnchorClicked(QUrl(item->data(Qt::UserRole+1).toString()));
+  });
   connect(mp_results,&QListWidget::itemDoubleClicked,this,[this](QListWidgetItem* item) {
+    if(mp_categories->currentIndex()==2 || historyRecordIndex(item)<0)return;
     if(!item->data(Qt::UserRole+1).toString().isEmpty()){checkAnchorClicked(QUrl(item->data(Qt::UserRole+1).toString()));return;}
     const HistoryRecord& record=m_records[item->data(Qt::UserRole).toInt()];
     const QStringList targets=mp_categories->currentIndex()==1?record.files:mp_categories->currentIndex()==2?record.media:record.links;
@@ -398,7 +561,7 @@ GuiSavedChat::GuiSavedChat( QWidget* parent, bool embedded )
   });
   mp_results->setContextMenuPolicy(Qt::CustomContextMenu);
   connect(mp_results,&QListWidget::customContextMenuRequested,this,[this](const QPoint& position) {
-    QListWidgetItem* item=mp_results->itemAt(position);if(!item)return;
+    QListWidgetItem* item=mp_results->itemAt(position);if(historyRecordIndex(item)<0)return;
     const HistoryRecord& record=m_records[item->data(Qt::UserRole).toInt()];
     const QStringList local=item->data(Qt::UserRole+1).toString().isEmpty()?record.files+record.media:QStringList()<<item->data(Qt::UserRole+1).toString();
     if(local.isEmpty()&&record.links.isEmpty())return;
@@ -494,29 +657,12 @@ void GuiSavedChat::showSavedChat( const QString& chat_name )
   m_savedChatName = chat_name;
   QString window_chat_title = chat_name == Settings::instance().defaultChatName() ? GuiChatItem::defaultChatName().toUpper() : chat_name;
   setWindowTitle( QString::fromUtf8("%1 - 聊天记录").arg(window_chat_title) );
-  findChild<QLabel*>("ShadowHistoryConversation")->setText(window_chat_title);
+  findChild<QLabel*>("ShadowHistoryTitle")->setToolTip(window_chat_title);
 
-  QString html_text = "";
-  if( ChatManager::instance().chatHasSavedText( chat_name ) )
-    html_text += ChatManager::instance().chatSavedText( chat_name );
-
-  const Chat liveChat=ChatManager::instance().findChatByName(chat_name);
-  if(liveChat.isValid()) html_text += GuiChatMessage::chatToHtml(liveChat,false,true,true,true,false,true);
+  QString html_text = currentHistoryHtml(chat_name);
 
   m_records = shadowChatHistoryRecords(html_text);
-  m_recordKeys.clear();
-  QHash<QString,int> occurrences;
-  for( const HistoryRecord& record : m_records )
-  {
-    QByteArray identity;
-    QDataStream stream( &identity, QIODevice::WriteOnly );
-    stream << record.sender << record.timestamp << record.album << record.html;
-    const QString digest = QString::fromLatin1(
-      QCryptographicHash::hash( identity, QCryptographicHash::Sha256 ).toHex() );
-    const int occurrence = occurrences.value( digest );
-    occurrences.insert( digest, occurrence + 1 );
-    m_recordKeys.append( digest + QLatin1Char(':') + QString::number( occurrence ) );
-  }
+  m_recordKeys = shadowHistoryRecordKeys(m_records);
   mp_senderFilter->blockSignals(true);mp_senderFilter->clear();mp_senderFilter->addItem(QString::fromUtf8("全部发送者"),QString());
   QStringList senders;
   QString indexed;
@@ -538,6 +684,30 @@ void GuiSavedChat::showSavedChat( const QString& chat_name )
   if( !changed )
     restoreReadingState( previousState, mp_results, mp_teSavedChat, mp_resultsStack, mp_contextButton );
   /* Performance issue: do not set the bar to maximum */
+}
+
+int GuiSavedChat::historyRecordIndex( const QListWidgetItem* item ) const
+{
+  if( !item || item->data( DateHeaderRole ).toBool() || !item->data( Qt::UserRole ).isValid() ) return -1;
+  const int index = item->data( Qt::UserRole ).toInt();
+  if( index < 0 || index >= m_recordKeys.size() ) return -1;
+  const QString key = item->data( ResultKeyRole ).toString();
+  return key == m_recordKeys[index] || key.startsWith( m_recordKeys[index] + QLatin1Char('\n') ) ? index : -1;
+}
+
+bool GuiSavedChat::eventFilter( QObject* watched, QEvent* event )
+{
+  if( watched == mp_results && event->type() == QEvent::KeyPress && mp_categories->currentIndex() == 2 )
+  {
+    QKeyEvent* key = static_cast<QKeyEvent*>(event);
+    if( key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter || key->key() == Qt::Key_Space )
+    {
+      QListWidgetItem* item = mp_results->currentItem();
+      if( historyRecordIndex(item) >= 0 ) checkAnchorClicked(QUrl(item->data(Qt::UserRole+1).toString()));
+      return true;
+    }
+  }
+  return QMainWindow::eventFilter(watched,event);
 }
 
 void GuiSavedChat::customContextMenu( const QPoint& )
@@ -618,7 +788,15 @@ void GuiSavedChat::checkAnchorClicked( const QUrl& url )
 
 void GuiSavedChat::filterHistory()
 {
+  const HistoryReadingState state=readingState(mp_results,mp_teSavedChat,mp_resultsStack);
   rebuildHistoryResults( true );
+  if(state.selectedKey.isEmpty())return;
+  for(int row=0;row<mp_results->count();++row)
+    if(mp_results->item(row)->data(ResultKeyRole).toString()==state.selectedKey)
+    {
+      restoreReadingState(state,mp_results,mp_teSavedChat,mp_resultsStack,mp_contextButton);
+      break;
+    }
 }
 
 void GuiSavedChat::rebuildHistoryResults( bool resetReadingState )
@@ -631,13 +809,20 @@ void GuiSavedChat::rebuildHistoryResults( bool resetReadingState )
   const QString keyword=mp_leFilter->text().trimmed();
   const QString sender=mp_senderFilter->currentData().toString();
   const int category=mp_categories->currentIndex();
+  mp_results->setProperty("historyMedia",category==2);
   mp_results->setViewMode(category==2?QListView::IconMode:QListView::ListMode);
   mp_results->setResizeMode(QListView::Adjust);
-  mp_results->setMovement(QListView::Static);
-  mp_results->setGridSize(category==2?QSize(180,175):QSize());
-  mp_results->setIconSize(category==2?QSize(128,88):QSize(32,32));
+  mp_results->setMovement(category==2?QListView::Free:QListView::Static);
+  mp_results->setDragEnabled(false);
+  mp_results->setAcceptDrops(false);
+  mp_results->setGridSize(QSize());
+  mp_results->setSpacing(0);
+  mp_results->setUniformItemSizes(false);
+  mp_results->setIconSize(QSize(32,32));
   const int days=mp_dateFilter->currentIndex()==1?0:mp_dateFilter->currentIndex()==2?6:29;
   int unknown=0;
+  int resultCount=0;
+  QString previousDay;
   QSet<QString> shownMedia;
   QList<int> recordOrder;
   for(int index=0;index<m_records.size();++index)recordOrder.append(index);
@@ -669,17 +854,36 @@ void GuiSavedChat::rebuildHistoryResults( bool resetReadingState )
         if(!keyword.isEmpty()&&!r.text.contains(keyword,Qt::CaseInsensitive)&&!target.contains(keyword,Qt::CaseInsensitive))continue;
         const QFileInfo file(QUrl(target).toLocalFile());
         const QString day=r.timestamp.isValid()?r.timestamp.toString("yyyy-MM-dd"):QString::fromUtf8("日期未记录");
-        QListWidgetItem* tile=new QListWidgetItem(day+"\n"+file.fileName()+"\n"+(file.exists()?QLocale().formattedDataSize(file.size()):QString::fromUtf8("本地文件已丢失")),mp_results);
+        if(day!=previousDay)
+        {
+          QListWidgetItem* header=new QListWidgetItem(day,mp_results);
+          header->setData(DateHeaderRole,true);
+          header->setData(Qt::UserRole,-1);
+          header->setFlags(Qt::ItemIsEnabled);
+          previousDay=day;
+        }
+        QListWidgetItem* tile=new QListWidgetItem(mp_results);
+        tile->setData(MediaRole,true);
+        const bool video=QStringList({"mp4","mov","avi","mkv","wmv"}).contains(file.suffix().toLower());
+        tile->setData(VideoRole,video);
         tile->setData(Qt::UserRole,i);tile->setData(Qt::UserRole+1,target);
         tile->setData(ResultKeyRole,m_recordKeys.at(i)+QLatin1Char('\n')+target);
-        tile->setToolTip(heading+"\n"+file.absoluteFilePath()+QString::fromUtf8("\n单击定位原文；双击查看。"));
-        QImageReader reader(file.absoluteFilePath());const QSize size=reader.size();if(size.isValid())reader.setScaledSize(size.scaled(128,88,Qt::KeepAspectRatio));
-        const QImage thumbnail=reader.read();tile->setIcon(thumbnail.isNull()?style()->standardIcon(QStyle::SP_MediaPlay):QIcon(QPixmap::fromImage(thumbnail)));
+        tile->setData(Qt::AccessibleTextRole,video?QStringLiteral("预览视频"):QStringLiteral("预览图片"));
+        tile->setToolTip(heading+"\n"+file.absoluteFilePath()+QString::fromUtf8("\n单击预览；查看上下文可跳转到主聊天。"));
+        if(!video)
+        {
+          QImageReader reader(file.absoluteFilePath());
+          reader.setAutoTransform(true);
+          const QSize size=reader.size();
+          if(size.isValid())reader.setScaledSize(size.scaled(400,300,Qt::KeepAspectRatio));
+          tile->setData(ThumbnailRole,QPixmap::fromImage(reader.read()));
+        }
+        ++resultCount;
       }
       continue;
     }
     QString detail=category==0?r.text:targets.join("\n");
-    if(category==1 || category==2) {
+    if(category==1) {
       QStringList descriptions;
       foreach(const QString& address,targets) {
         QFileInfo file(QUrl(address).toLocalFile());
@@ -690,8 +894,9 @@ void GuiSavedChat::rebuildHistoryResults( bool resetReadingState )
     if(category==3 && !r.text.isEmpty())detail=r.text+"\n"+detail;
     if(detail.isEmpty() && !r.media.isEmpty()) detail=QString::fromUtf8("[图片和视频] %1").arg(QFileInfo(QUrl(r.media.first()).toLocalFile()).fileName());
     if(detail.size()>650) detail=detail.left(650)+QString::fromUtf8("…");
-    const QString caption=category==2?(r.timestamp.isValid()?r.timestamp.toString("yyyy-MM-dd"):QString::fromUtf8("日期未记录"))+"\n"+detail:heading+"\n"+detail;
+    const QString caption=heading+"\n"+detail;
     QListWidgetItem* item=new QListWidgetItem(caption,mp_results);
+    ++resultCount;
     item->setData(Qt::UserRole,i);item->setToolTip(QString::fromUtf8("点击定位原始消息"));
     item->setData(ResultKeyRole,m_recordKeys.at(i));
     if( m_embedded )
@@ -729,13 +934,8 @@ void GuiSavedChat::rebuildHistoryResults( bool resetReadingState )
         item->setData(ThumbnailRole,QPixmap::fromImage(reader.read()));
       }
     }
-    if(category==2 && !targets.isEmpty()) {
-      QPixmap thumbnail(QUrl(targets.first()).toLocalFile());
-      if(!thumbnail.isNull()) item->setIcon(QIcon(thumbnail.scaled(100,80,Qt::KeepAspectRatio,Qt::SmoothTransformation)));
-      else item->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
-    }
   }
-  mp_resultCount->setText(QString::fromUtf8("%1 条结果%2").arg(mp_results->count()).arg(unknown?QString::fromUtf8(" · 部分旧记录没有完整发送者或时间信息"):QString()));
+  mp_resultCount->setText(QString::fromUtf8("%1 条结果%2").arg(resultCount).arg(unknown?QString::fromUtf8(" · 部分旧记录没有完整发送者或时间信息"):QString()));
   mp_resultCount->setWordWrap(true);
   if(mp_emptyState)
   {
@@ -755,16 +955,32 @@ void GuiSavedChat::rebuildHistoryResults( bool resetReadingState )
 
 void GuiSavedChat::locateHistoryResult()
 {
-  if(!mp_results->currentItem()) return;
+  const int index=historyRecordIndex(mp_results->currentItem());
+  if(mp_contextButton)mp_contextButton->setEnabled(index>=0);
+  if(index<0 || m_embedded)return;
   if(mp_contextButton) mp_contextButton->setEnabled(true);
   mp_teSavedChat->scrollToAnchor(QString("history-%1").arg(mp_results->currentItem()->data(Qt::UserRole).toInt()));
 }
 
 void GuiSavedChat::showHistoryContext()
 {
-  if(!mp_results->currentItem()&&mp_results->count()>0)mp_results->setCurrentRow(0);
-  if(!mp_results->currentItem())return;
-  if(mp_resultsStack)mp_resultsStack->setCurrentIndex(1);
+  const int index=historyRecordIndex(mp_results->currentItem());
+  if(index<0)return;
+  if(m_embedded)
+  {
+    const QString key=m_recordKeys.at(index);
+    const QList<HistoryRecord> current=shadowChatHistoryRecords(currentHistoryHtml(m_savedChatName));
+    const QStringList keys=shadowHistoryRecordKeys(current);
+    const int currentIndex=keys.indexOf(key);
+    if(currentIndex>=0 && current.at(currentIndex).html==m_records.at(index).html)
+    {
+      emit contextRequested(m_savedChatName,key);
+      return;
+    }
+    mp_contextButton->setEnabled(false);
+    mp_resultCount->setText(QStringLiteral("选中的原始消息已不可用，请刷新记录后重试。"));
+    return;
+  }
   locateHistoryResult();
 }
 

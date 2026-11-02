@@ -4,6 +4,7 @@ QT += gui-private
 
 HEADERS += core/Broadcaster.h \
   core/ShadowStickerStore.h \
+  core/ShadowStickerMedia.h \
   core/ShadowTransferQueue.h \
   core/ShadowGroupPolicy.h \
   core/ShadowPeerAvatars.h \

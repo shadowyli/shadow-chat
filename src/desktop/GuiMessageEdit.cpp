@@ -26,6 +26,7 @@
 #include "HistoryManager.h"
 #include "IconManager.h"
 #include "Settings.h"
+#include "ShadowRichText.h"
 #ifdef BEEBEEP_USE_HUNSPELL
   #include "SpellChecker.h"
   #include "SpellCheckerHighlighter.h"
@@ -55,6 +56,7 @@ GuiMessageEdit::GuiMessageEdit( QWidget* parent )
   connect( mp_timer, SIGNAL( timeout() ), this, SLOT( checkWriting() ) );
   connect( this, SIGNAL( undoAvailable( bool ) ), this, SLOT( setUndoAvailable( bool ) ) );
   connect( this, SIGNAL( redoAvailable( bool ) ), this, SLOT( setRedoAvailable( bool ) ) );
+  connect(this,&QTextEdit::textChanged,this,[this]() {m_messageChanged=true;});
 }
 
 void GuiMessageEdit::createMessageToSend()
@@ -69,6 +71,7 @@ void GuiMessageEdit::createMessageToSend()
   }
   else
     text = toPlainText();
+  text.remove(QChar::ObjectReplacementCharacter);
   while( !text.isEmpty() && text.endsWith( " " ) )
     text.chop( 1 );
   if( text.endsWith( "\n" ) )
@@ -83,6 +86,88 @@ QString GuiMessageEdit::message()
     createMessageToSend();
 
   return m_currentMessage;
+}
+
+QString GuiMessageEdit::richText() const
+{
+  bool formatted=false;
+  const QString html=ShadowRichText::serialize(document(),&formatted);
+  return formatted?html:QString();
+}
+
+GuiMessageEdit::Draft GuiMessageEdit::draft() const
+{
+  Draft saved;
+  saved.html=toHtml();
+  saved.emoticons=m_emoticonsAdded;
+  for(const auto& image:draftImages())saved.images.insert(image.first,image.second);
+  return saved;
+}
+
+void GuiMessageEdit::setDraft(const Draft& saved)
+{
+  clearMessage();
+  m_draftImages=saved.images;
+  m_emoticonsAdded=saved.emoticons;
+  for(auto image=m_draftImages.constBegin();image!=m_draftImages.constEnd();++image)
+    document()->addResource(QTextDocument::ImageResource,QUrl(image.key()),image.value());
+  setHtml(saved.html);
+  m_messageChanged=true;
+}
+
+void GuiMessageEdit::addDraftImage(const QImage& image)
+{
+  if(image.isNull())return;
+  if(image.width()>8192||image.height()>8192||qint64(image.width())*image.height()>16*1024*1024||draftImages().size()>=12)
+  {
+    emit inputError(QStringLiteral("单张图片最多 1600 万像素，一次最多放入 12 张图片。"));
+    return;
+  }
+  const QString name="shadowdraft:"+QUuid::createUuid().toString(QUuid::WithoutBraces);
+  m_draftImages.insert(name,image);
+  document()->addResource(QTextDocument::ImageResource,QUrl(name),image);
+  const QSize size=image.size().scaled(120,90,Qt::KeepAspectRatio);
+  QTextImageFormat format;
+  format.setName(name);
+  format.setWidth(size.width());
+  format.setHeight(size.height());
+  textCursor().insertImage(format);
+  m_messageChanged=true;
+}
+
+QList<QPair<QString,QImage>> GuiMessageEdit::draftImages() const
+{
+  QList<QPair<QString,QImage>> images;
+  QSet<QString> included;
+  for(QTextBlock block=document()->begin();block.isValid();block=block.next())
+    for(QTextBlock::iterator iterator=block.begin();!iterator.atEnd();++iterator)
+    {
+      const QTextFragment fragment=iterator.fragment();
+      const QString name=fragment.charFormat().toImageFormat().name();
+      if(m_draftImages.contains(name)&&!included.contains(name))
+      {
+        images.append(qMakePair(name,m_draftImages.value(name)));
+        included.insert(name);
+      }
+    }
+  return images;
+}
+
+void GuiMessageEdit::removeDraftImage(const QString& name)
+{
+  QList<int> positions;
+  for(QTextBlock block=document()->begin();block.isValid();block=block.next())
+    for(QTextBlock::iterator iterator=block.begin();!iterator.atEnd();++iterator)
+      if(iterator.fragment().charFormat().toImageFormat().name()==name)positions.prepend(iterator.fragment().position());
+  for(int position:positions)
+  {
+    QTextCursor cursor(document());
+    cursor.setPosition(position);
+    cursor.movePosition(QTextCursor::NextCharacter,QTextCursor::KeepAnchor);
+    cursor.removeSelectedText();
+  }
+  m_draftImages.remove(name);
+  m_messageChanged=true;
 }
 
 void GuiMessageEdit::addPasted( const QMimeData* source_data )
@@ -171,6 +256,7 @@ void GuiMessageEdit::clearMessage()
   m_messageChanged = true;
   clear();
   m_emoticonsAdded.clear();
+  m_draftImages.clear();
   setTextColor( QColor( Settings::instance().chatFontColor() ) );
   setFont( Settings::instance().chatFont() );
 }
@@ -307,15 +393,19 @@ void GuiMessageEdit::keyPressEvent( QKeyEvent* e )
 
   if( e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter )
   {
-    if( m_forceCRonEnterClicked || !Settings::instance().useReturnToSendMessage() || mods & Qt::ControlModifier || mods & Qt::ShiftModifier )
+    const bool formatting=property("shadowFormattingMode").toBool();
+    const bool send= formatting ? bool(mods&Qt::ControlModifier)&&!(mods&Qt::ShiftModifier) :
+      !m_forceCRonEnterClicked&&Settings::instance().useReturnToSendMessage()&&!(mods&(Qt::ControlModifier|Qt::ShiftModifier));
+    if(!send)
     {
-      insertPlainText( "\n" );
+      QKeyEvent newline(e->type(),e->key(),mods&~Qt::ControlModifier,e->text(),e->isAutoRepeat(),e->count());
+      QTextEdit::keyPressEvent(&newline);
     }
     else
     {
       if( mp_timer->isActive() )
         mp_timer->stop();
-      if( !message().isEmpty() )
+      if( !message().isEmpty() || !draftImages().isEmpty() )
         emit returnPressed();
     }
 
@@ -399,6 +489,32 @@ void GuiMessageEdit::contextMenuEvent( QContextMenuEvent *event )
   act->setEnabled( canPaste() );
   mp_menuContext->addSeparator();
   mp_menuContext->addAction( IconManager::instance().icon( "select-all.png" ), tr( "Select all" ), this, SLOT( selectAll() ), QKeySequence::SelectAll );
+  const QTextCursor clicked=cursorForPosition(event->pos());
+  QImage favorite;
+  for(int position:QList<int>{clicked.position(),clicked.position()-1})
+  {
+    if(position<0||position>=document()->characterCount()-1)continue;
+    QTextCursor imageCursor(document());
+    imageCursor.setPosition(position);
+    const QRect imageStart=cursorRect(imageCursor);
+    imageCursor.movePosition(QTextCursor::NextCharacter,QTextCursor::KeepAnchor);
+    const QTextImageFormat imageFormat=imageCursor.charFormat().toImageFormat();
+    if(!imageFormat.isValid()||imageFormat.name().isEmpty())continue;
+    const QRect imageEnd=cursorRect(imageCursor);
+    const QRect imageBounds(qMin(imageStart.left(),imageEnd.left()),imageStart.top(),
+      qAbs(imageEnd.left()-imageStart.left()),qMax(imageStart.height(),imageEnd.height()));
+    if(!imageBounds.contains(event->pos()))continue;
+    const QVariant resource=document()->resource(QTextDocument::ImageResource,QUrl(imageFormat.name()));
+    favorite=resource.value<QImage>();
+    if(favorite.isNull())favorite=resource.value<QPixmap>().toImage();
+    if(!favorite.isNull())break;
+  }
+  if(!favorite.isNull())
+  {
+    QAction* add=mp_menuContext->addAction(QStringLiteral("添加到表情"));
+    add->setObjectName("ComposerFavoriteStickerAction");
+    connect(add,&QAction::triggered,this,[this,favorite]() {emit favoriteImageRequested(favorite);});
+  }
   mp_menuContext->addSeparator();
   if( !m_actionsToContextMenu.isEmpty() )
   {

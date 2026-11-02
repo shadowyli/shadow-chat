@@ -64,7 +64,7 @@ public:
   Message helpAnswerMessage( const QString& help_answer ) const;
   bool isTestAnswerMessage( const Message& ) const;
   inline Message systemMessage( const QString& ) const;
-  Message chatMessage( const Chat&, const QString& );
+  Message chatMessage( const Chat&, const QString&, const QString& rich_text = QString() );
   Message chatReadMessage( const Chat& );
   Message receivedMessage( const Message& ) const;
   Message groupChatRequestMessage_obsolete( const Chat&, const User& to_user );

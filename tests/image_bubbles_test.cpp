@@ -10,6 +10,7 @@
 #include "ShadowStyle.h"
 #include "UserManager.h"
 #include <QtWidgets>
+#include <QTest>
 #include <QTextTable>
 #include <cstdio>
 
@@ -126,6 +127,11 @@ int main( int argc, char** argv )
   ShadowChatTranscript* transcript = dynamic_cast<ShadowChatTranscript*>(
     chat->findChild<QTextBrowser*>( "GuiChatViewer" ) );
   CHECK( transcript && transcript->bubbleCount() == 3 );
+  std::fprintf(stdout,"Transcript viewport=%dx%d dpi=%dx%d deviceRatio=%.2f scale=%s\n",
+    transcript->viewport()->width(),transcript->viewport()->height(),
+    transcript->viewport()->logicalDpiX(),transcript->viewport()->logicalDpiY(),
+    transcript->viewport()->devicePixelRatioF(),qgetenv("QT_SCALE_FACTOR").constData());
+  std::fflush(stdout);
   QList<ImageBubble> bubbles = imageBubbles( transcript );
   CHECK( bubbles.size() == 3 );
   CHECK( bubbles.at( 0 ).frame->format().alignment().testFlag( Qt::AlignRight ) );
@@ -150,6 +156,7 @@ int main( int argc, char** argv )
       if( !fragment.isValid() || !fragment.charFormat().isImageFormat() ) continue;
       const QTextImageFormat image = fragment.charFormat().toImageFormat();
       if( image.name().contains( "chat-avatar-" ) ) { ++avatarCount; continue; }
+      if( QUrl(image.name()).scheme()=="shadowtransfer" ) continue;
       ++mediaCount;
       const QUrl link( image.anchorHref() );
       const QStringList originals = shadowAlbumPaths( link );
@@ -166,6 +173,8 @@ int main( int argc, char** argv )
         if( frame->frameFormat().hasProperty( ShadowChatTranscript::BubbleColorProperty ) ) { inside = true; break; }
         frame = frame->parentFrame();
       }
+      if(!inside)std::fprintf(stderr,"Image outside bubble: source=%s position=%d\n",
+        qPrintable(image.name()),fragment.position());
       CHECK( inside );
     }
   CHECK( mediaCount == 11 && avatarCount == 3 && fullAlbumLinked );
@@ -173,6 +182,10 @@ int main( int argc, char** argv )
   for( int index = 0; index < rectangles.size(); ++index )
   {
     const QRectF area = rectangles.at( index );
+    std::fprintf(stdout,"Image bubble %d: x=%.1f y=%.1f width=%.1f height=%.1f\n",
+      index,area.left(),area.top(),area.width(),area.height());
+    std::fflush(stdout);
+    if(area.width()>560||area.width()<=40)host.grab().save(QDir::currentPath()+"/image-bubble-failure.png");
     CHECK( area.width() <= 560 && area.width() > 40 );
     transcript->verticalScrollBar()->setValue( qMax( 0, int( area.top() ) - 20 ) );
     application.processEvents();
@@ -193,15 +206,22 @@ int main( int argc, char** argv )
   host.grab().save( QDir::currentPath() + "/image-bubbles-wide.png" );
   int largeRemovals = 0;
   QObject::connect( transcript->document(), &QTextDocument::contentsChange, &host,
-    [&]( int, int removed, int ) { if( removed > 64 ) ++largeRemovals; } );
+    [&]( int position, int removed, int added ) {
+      if( removed > 64 ) {
+        ++largeRemovals;
+        std::fprintf(stdout,"Large document change: position=%d removed=%d added=%d\n",position,removed,added);
+      }
+    } );
   const ChatMessage appended = photo( local, portraitPath );
   conversation.addMessage( appended );
   CHECK( chat->appendChatMessage( conversation, appended ) );
-  application.processEvents();
+  for(int attempt=0;attempt<100&&transcript->bubbleCount()!=4;++attempt)QTest::qWait(10);
+  std::fprintf(stdout,"After image append: bubbles=%d largeRemovals=%d\n",transcript->bubbleCount(),largeRemovals);
+  std::fflush(stdout);
   CHECK( transcript->bubbleCount() == 4 && largeRemovals == 0 );
   chat->resize( 550, 720 );
   host.resize( 550, 720 );
-  application.processEvents();
+  QTest::qWait(100);
   CHECK( transcript->horizontalScrollBar()->maximum() == 0 );
   for( const QRectF& area : transcript->bubbleFrameRects() )
     CHECK( area.right() <= transcript->viewport()->width() + 1 );

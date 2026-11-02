@@ -3,6 +3,8 @@
 #include "Config.h"
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QCryptographicHash>
+#include <QDataStream>
 #include <QRegularExpression>
 #include <QTextDocument>
 
@@ -11,6 +13,9 @@ struct HistoryRecord
   QString html, text, sender, album;
   QDateTime timestamp;
   QStringList files, media, links;
+  int type = -1;
+  bool hasDirection = false;
+  bool outgoing = false;
 };
 
 inline QList<HistoryRecord> shadowChatHistoryRecords(const QString& html)
@@ -42,6 +47,9 @@ inline QList<HistoryRecord> shadowChatHistoryRecords(const QString& html)
       r.sender=metadata[mi].value("sender").toString();
       r.album=metadata[mi].value("album").toString();
       r.timestamp=QDateTime::fromString(metadata[mi].value("time").toString(), Qt::ISODate);
+      r.type=metadata[mi].value("type").toInt(-1);
+      r.hasDirection=metadata[mi].value("outgoing").isBool();
+      r.outgoing=metadata[mi].value("outgoing").toBool();
     } else {
       QRegularExpressionMatch sender=QRegularExpression("<b>([^<]+)</b>").match(r.html);
       if(sender.hasMatch()) { QTextDocument name; name.setHtml(sender.captured(1)); r.sender=name.toPlainText(); }
@@ -68,7 +76,8 @@ inline QList<HistoryRecord> shadowChatHistoryRecords(const QString& html)
       if(url.scheme()=="http" || url.scheme()=="https") r.links << address;
       else if(url.isLocalFile()) {
         const QString extension=QFileInfo(url.toLocalFile()).suffix().toLower();
-        if(QStringList({"jpg","jpeg","png","gif","bmp","webp","mp4","mov","avi","mkv","wmv"}).contains(extension)) r.media << address;
+        if(QStringList({"jpg","jpeg","png","gif","bmp","webp","mp4","m4v","webm","mkv",
+          "avi","mov","wmv","mpg","mpeg","m2v","m2ts","mts","ts","3gp","3g2","ogv","flv"}).contains(extension)) r.media << address;
         else r.files << address;
       }
     }
@@ -79,5 +88,35 @@ inline QList<HistoryRecord> shadowChatHistoryRecords(const QString& html)
     records << r;
   }
   return records;
+}
+
+inline QStringList shadowHistoryRecordKeys(const QList<HistoryRecord>& records)
+{
+  QStringList keys;
+  QHash<QString,int> occurrences;
+  for(const HistoryRecord& record:records)
+  {
+    QByteArray identity;
+    QDataStream stream(&identity,QIODevice::WriteOnly);
+    stream<<record.sender<<record.timestamp<<record.album<<record.html;
+    const QString digest=QString::fromLatin1(QCryptographicHash::hash(identity,QCryptographicHash::Sha256).toHex());
+    const int occurrence=occurrences.value(digest);
+    occurrences.insert(digest,occurrence+1);
+    keys.append(digest+QLatin1Char(':')+QString::number(occurrence));
+  }
+  return keys;
+}
+
+inline QString shadowHistoryRecordHtml(const HistoryRecord& record,const QString& key)
+{
+  QJsonObject metadata;
+  metadata.insert("sender",record.sender);
+  if(record.timestamp.isValid())metadata.insert("time",record.timestamp.toString(Qt::ISODate));
+  if(!record.album.isEmpty())metadata.insert("album",record.album);
+  if(record.type>=0)metadata.insert("type",record.type);
+  if(record.hasDirection)metadata.insert("outgoing",record.outgoing);
+  return QStringLiteral("<!--shadow-record:%1-->%2%3").arg(
+    QString::fromLatin1(QJsonDocument(metadata).toJson(QJsonDocument::Compact).toBase64()),
+    key.isEmpty()?QString():QStringLiteral("<!--shadow-context:%1-->").arg(key),record.html);
 }
 #endif
