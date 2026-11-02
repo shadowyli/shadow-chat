@@ -47,9 +47,10 @@ void Updater::checkForNewVersion()
   const bool local = (url.scheme() == QLatin1String("http") || url.scheme() == QLatin1String("https")) &&
     (url.host() == QLatin1String("localhost") || url.host() == QLatin1String("127.0.0.1") ||
      url.host() == QLatin1String("::1"));
+  const bool githubResponse = github || (local && url.path() == QLatin1String("/repos/shadowyli/shadow-chat/releases"));
   if(!url.isValid() || (!m_manifestUrl.isEmpty() && !local) ||
      !url.userInfo().isEmpty() || url.hasQuery() || url.hasFragment() ||
-     (!github && url.path() != QLatin1String("/updates/shadowchat.json")))
+     (!githubResponse && url.path() != QLatin1String("/updates/shadowchat.json")))
   {
     m_error = QStringLiteral("更新源无效：仅允许固定发布地址或测试构造器指定的本机地址。");
     emit jobCompleted();
@@ -68,11 +69,12 @@ void Updater::checkForNewVersion()
   request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
   request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
   request.setAttribute(QNetworkRequest::CacheSaveControlAttribute, false);
-  request.setRawHeader("Accept", "application/json");
+  request.setRawHeader("Accept", githubResponse ? "application/vnd.github+json" : "application/json");
   request.setRawHeader("User-Agent", "ShadowChat");
   request.setRawHeader("Cache-Control", "no-cache, no-store");
   QNetworkReply* reply = manager->get(request);
-  reply->setReadBufferSize(65537);
+  const qint64 maximumBytes = githubResponse ? 1024 * 1024 : 65536;
+  reply->setReadBufferSize(maximumBytes + 1);
   QTimer* timeout = new QTimer(reply);
   timeout->setSingleShot(true);
   connect(timeout, &QTimer::timeout, reply, [reply]() {
@@ -80,14 +82,14 @@ void Updater::checkForNewVersion()
     reply->abort();
   });
   timeout->start(8000);
-  connect(reply, &QNetworkReply::readyRead, reply, [reply]() {
-    if(reply->bytesAvailable() > 65536)
+  connect(reply, &QNetworkReply::readyRead, reply, [reply, maximumBytes]() {
+    if(reply->bytesAvailable() > maximumBytes)
     {
       reply->setProperty("shadowOversized", true);
       reply->abort();
     }
   });
-  connect(reply, &QNetworkReply::finished, this, [this, reply, manager]() {
+  connect(reply, &QNetworkReply::finished, this, [this, reply, manager, githubResponse]() {
     if(reply->property("shadowTimedOut").toBool())
       m_error = QStringLiteral("版本校验超时，请检查网络后重试。");
     else if(reply->property("shadowOversized").toBool())
@@ -99,7 +101,7 @@ void Updater::checkForNewVersion()
     else
     {
       QByteArray data = reply->readAll();
-      if(ShadowGitHubRelease::isSource(reply->url()))
+      if(githubResponse)
         data = ShadowGitHubRelease::manifest(data, m_channel, QString::fromLatin1(ShadowBuild::environment()));
       m_manifestValid = ShadowUpdateManifest::parse(data, reply->url(), &m_versionAvailable, &m_downloadUrl, m_channel);
       if(!m_manifestValid)

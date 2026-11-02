@@ -185,7 +185,7 @@ void ShadowUpdateController::createDialog()
       if(QDesktopServices::openUrl(QUrl(m_updater->downloadUrl())))
         m_dialog->close();
       else
-        m_status->setText(QStringLiteral("无法打开下载页面，请稍后重试。聊天和文件传输不受影响。"));
+        m_status->setText(QStringLiteral("无法开始下载安装包，请稍后重试。聊天和文件传输不受影响。"));
     }
   });
   connect(m_dialog, &QDialog::finished, this, [this]() {
