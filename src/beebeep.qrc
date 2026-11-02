@@ -1,5 +1,6 @@
 <RCC>
     <qresource prefix="/">
+    <file>images/shadowchat/icons/scissors.svg</file>
         <file>images/beebeep.png</file>
         <file>images/shadowchat/shadowchat-mark-source.png</file>
         <file>images/shadowchat/icons/archive.svg</file>

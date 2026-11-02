@@ -16,7 +16,7 @@ bool runLogin( const QString& root, const std::function<void(QDialog*)>& interac
                QString* selected, QString* folder )
 {
   ShadowLocalAccounts(root).logout();
-  QTimer::singleShot(0,[&](){
+  QTimer::singleShot(100,[&](){
     QDialog* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget());
     if(!dialog) {QTest::qFail("Local login dialog missing",__FILE__,__LINE__);return;}
     QTimer::singleShot(3000,dialog,[](){
@@ -38,15 +38,12 @@ private slots:
     QTest::addColumn<QString>("input");
     QTest::addColumn<QString>("domain");
     QTest::addColumn<QString>("expected");
-    QTest::newRow("bare-name") << "alice" << "corp.netease.com" << "alice@corp.netease.com";
-    QTest::newRow("trailing-at") << "alice@" << "corp.netease.com" << "alice@corp.netease.com";
-    QTest::newRow("partial-domain") << "alice@corp.ne" << "corp.netease.com" << "alice@corp.netease.com";
-    QTest::newRow("complete-email") << "alice@qq.com" << "corp.netease.com" << "alice@corp.netease.com";
-    QTest::newRow("switch-from-corp") << "alice@corp.netease.com" << "163.com" << "alice@163.com";
-    QTest::newRow("reselect-same-domain") << "alice@qq.com" << "qq.com" << "alice@qq.com";
-    QTest::newRow("repeated-at") << "alice@@qq.com" << "outlook.com" << "alice@outlook.com";
-    QTest::newRow("trim-input") << " Alice+team@Example.org " << "gmail.com" << "Alice+team@gmail.com";
-    QTest::newRow("empty-input") << "" << "corp.netease.com" << "@corp.netease.com";
+    QTest::newRow("bare-name") << "alice" << "corp.netease.com" << "alice";
+    QTest::newRow("complete-email") << "alice@qq.com" << "corp.netease.com" << "alice";
+    QTest::newRow("switch-from-corp") << "alice@corp.netease.com" << "163.com" << "alice";
+    QTest::newRow("reselect-same-domain") << "alice@qq.com" << "qq.com" << "alice";
+    QTest::newRow("trim-input") << " Alice+team@qq.com " << "gmail.com" << "Alice+team";
+    QTest::newRow("empty-input") << "" << "corp.netease.com" << "";
   }
 
   void suffixSelection()
@@ -65,7 +62,7 @@ private slots:
       address->setText(input);
       QVERIFY(activateDomain(domains,domain));
       QCOMPARE(address->text(),expected);
-      QCOMPARE(address->text().count('@'),1);
+      QCOMPARE(address->text().count('@'),0);
       QCOMPARE(domains->currentData().toString(),domain);
       QCOMPARE(address->cursorPosition(),input.isEmpty() ? 0 : expected.size());
       dialog->reject();
@@ -86,7 +83,27 @@ private slots:
       QVERIFY(!address->isReadOnly());
       QVERIFY(qobject_cast<QListView*>(domains->view()));
       QVERIFY(!QIcon(":/images/shadowchat/icons/chevron-down.svg").pixmap(14,14).isNull());
-      QVERIFY(domains->itemText(domains->findData("corp.netease.com")).contains(QString::fromUtf8("corp 邮箱")));
+      QCOMPARE(domains->count(),19);
+      QVERIFY(!domains->isEditable());
+      QCOMPARE(domains->findData(QString()),-1);
+      QCOMPARE(domains->itemData(domains->findData("corp.netease.com"),Qt::ToolTipRole).toString(),QString::fromUtf8("corp 邮箱"));
+      QVERIFY(!dialog->findChild<QPushButton*>("LoginCreateAccount"));
+      QVERIFY(!dialog->findChild<QLabel*>("LoginHint"));
+      QPushButton* signIn=dialog->findChild<QPushButton*>("LoginPrimary");
+      QLabel* autoCreateHint=dialog->findChild<QLabel*>("LoginAutoCreateHint");
+      QVERIFY(signIn);
+      QVERIFY(autoCreateHint);
+      QCOMPARE(signIn->text(),QString::fromUtf8("一键登录"));
+      QCOMPARE(autoCreateHint->text(),QString::fromUtf8("未创建的账号将自动创建"));
+      QVERIFY(autoCreateHint->mapTo(dialog,QPoint()).y()>=signIn->mapTo(dialog,QPoint(0,signIn->height())).y());
+      QCOMPARE(address->mapTo(dialog,QPoint()).y(),domains->mapTo(dialog,QPoint()).y());
+      QVERIFY(address->width()>=120);
+      QVERIFY(domains->mapTo(dialog,QPoint()).x()>address->mapTo(dialog,QPoint(address->width(),0)).x());
+      QStyleOptionComboBox domainStyle;
+      domainStyle.initFrom(domains);
+      const QRect domainText=domains->style()->subControlRect(QStyle::CC_ComboBox,&domainStyle,QStyle::SC_ComboBoxEditField,domains);
+      QVERIFY2(domainText.width()>=domains->fontMetrics().horizontalAdvance(QStringLiteral("@corp.netease.com")),
+        qPrintable(QString("combo=%1 textRect=%2 text=%3").arg(domains->width()).arg(domainText.width()).arg(domains->fontMetrics().horizontalAdvance(QStringLiteral("@corp.netease.com")))));
       const QStringList common=QStringList() << "163.com" << "126.com" << "qq.com" << "foxmail.com" << "yeah.net"
         << "netease.com" << "gmail.com" << "outlook.com" << "hotmail.com" << "icloud.com"
         << "vip.qq.com" << "yahoo.com" << "live.com" << "sina.com" << "sohu.com" << "139.com" << "189.cn" << "aliyun.com";
@@ -95,22 +112,25 @@ private slots:
         const int index=domains->findData(domain);
         QVERIFY(index>0);
         QCOMPARE(domains->itemText(index),"@"+domain);
-        address->setText("alice@previous.example.org");
+        address->setText("alice");
         QVERIFY(activateDomain(domains,domain));
-        QCOMPARE(address->text(),"alice@"+domain);
-        QCOMPARE(address->text().count('@'),1);
+        QCOMPARE(address->text(),QString("alice"));
+        QCOMPARE(address->text().count('@'),0);
         address->setText("bob@"+domain.toUpper());
         QCOMPARE(domains->currentData().toString(),domain);
       }
       QVERIFY(!dialog->styleSheet().contains("gradient",Qt::CaseInsensitive));
       QVERIFY(dialog->rect().contains(QRect(domains->mapTo(dialog,QPoint()),domains->size())));
       address->clear();
+      domains->setCurrentIndex(0);
       domains->setFocus();
       QTest::keyClick(domains,Qt::Key_Down);
-      QCOMPARE(address->text(),QString("@corp.netease.com"));
+      QCOMPARE(domains->currentData().toString(),QString("163.com"));
+      QVERIFY(address->text().isEmpty());
       QCOMPARE(address->cursorPosition(),0);
       QTest::keyClicks(address,"alice");
-      QCOMPARE(address->text(),QString("alice@corp.netease.com"));
+      QCOMPARE(address->text(),QString("alice"));
+      domains->setCurrentIndex(0);
       const QString proofs=qEnvironmentVariable("SHADOWCHAT_EMAIL_TEST_ARTIFACTS");
       if(!proofs.isEmpty())
       {
@@ -124,7 +144,7 @@ private slots:
     },&selected,&folder));
   }
 
-  void completeAndCustomAddresses()
+  void rejectsCustomAddresses()
   {
     QTemporaryDir temporary;
     QVERIFY(temporary.isValid());
@@ -135,27 +155,29 @@ private slots:
       QVERIFY(address);
       QVERIFY(domains);
       address->setText(" Alice@CORP.NETEASE.COM ");
-      QCOMPARE(address->text(),QString(" Alice@CORP.NETEASE.COM "));
+      QCOMPARE(address->text(),QString("Alice"));
       QCOMPARE(domains->currentData().toString(),QString("corp.netease.com"));
-      address->setText("alice@studio.example.org");
-      QCOMPARE(domains->currentIndex(),0);
-      QCOMPARE(address->text(),QString("alice@studio.example.org"));
-      address->setText("alice@qq.com");
-      QVERIFY(activateDomain(domains,QString()));
-      QCOMPARE(address->selectedText(),QString("qq.com"));
-      QTest::keyClicks(address,"studio.example.org");
-      QCOMPARE(address->text(),QString("alice@studio.example.org"));
-      address->setText("alice");
-      QVERIFY(activateDomain(domains,QString()));
-      QCOMPARE(address->text(),QString("alice@"));
-      QTest::keyClicks(address,"custom.example.org");
-      QCOMPARE(address->text(),QString("alice@custom.example.org"));
-      QVERIFY(activateDomain(domains,"163.com"));
+      QLineEdit* password=dialog->findChild<QLineEdit*>("LoginPassword");
+      QPushButton* signIn=dialog->findChild<QPushButton*>("LoginPrimary");
+      QVERIFY(password);
+      QVERIFY(signIn);
+      password->setText("local-secret");
+      ShadowLocalAccounts accounts(temporary.path());
+      const QStringList rejected=QStringList()<<"alice@studio.example.org"<<"alice@@qq.com"<<"alice@"<<"../alice";
+      for(const QString& value : rejected)
+      {
+        address->setText(value);
+        signIn->click();
+        QVERIFY(dialog->isVisible());
+        QVERIFY(!dialog->findChild<QLabel*>("LoginError")->text().isEmpty());
+        QVERIFY(!accounts.exists("alice@studio.example.org"));
+        QVERIFY(accounts.autoLoginEmail().isEmpty());
+      }
       address->selectAll();
-      QApplication::clipboard()->setText("other@private.example.org");
+      QApplication::clipboard()->setText("other@qq.com");
       address->paste();
-      QCOMPARE(address->text(),QString("other@private.example.org"));
-      QCOMPARE(domains->currentIndex(),0);
+      QCOMPARE(address->text(),QString("other"));
+      QCOMPARE(domains->currentData().toString(),QString("qq.com"));
       address->clear();
       dialog->findChild<QPushButton*>("LoginPrimary")->click();
       QVERIFY(dialog->isVisible());
@@ -169,9 +191,9 @@ private slots:
     QTest::addColumn<QString>("input");
     QTest::addColumn<QString>("domain");
     QTest::addColumn<QString>("expected");
-    QTest::newRow("corp") << "Alice@" << "corp.netease.com" << "alice@corp.netease.com";
-    QTest::newRow("common") << "Alice@partial" << "qq.com" << "alice@qq.com";
-    QTest::newRow("custom") << " Alice@Studio.Example.org " << "" << "alice@studio.example.org";
+    QTest::newRow("corp") << "Alice" << "corp.netease.com" << "alice@corp.netease.com";
+    QTest::newRow("common") << "Alice" << "qq.com" << "alice@qq.com";
+    QTest::newRow("complete-supported") << " Alice@Gmail.com " << "gmail.com" << "alice@gmail.com";
   }
 
   void localRegistrationAndLogin()
@@ -191,9 +213,7 @@ private slots:
       address->setText(input);
       if(!domain.isEmpty()) QVERIFY(activateDomain(domains,domain));
       dialog->findChild<QLineEdit*>("LoginPassword")->setText("local-secret");
-      QPushButton* signIn=dialog->findChild<QPushButton*>("LoginPrimary");
-      QVERIFY(signIn);
-      signIn->click();
+      dialog->findChild<QPushButton*>("LoginPrimary")->click();
     },&selected,&folder));
     QCOMPARE(selected,expected);
     QCOMPARE(folder,accounts.profileFolder(expected));
@@ -293,6 +313,18 @@ int main( int argc, char** argv )
 #ifdef Q_OS_WIN
   QFontDatabase::addApplicationFont(QDir(qEnvironmentVariable("WINDIR","C:/Windows")).filePath("Fonts/msyh.ttc"));
 #endif
+  if(app.arguments().contains("--preview-login"))
+  {
+    QTemporaryDir temporary;
+    if(!temporary.isValid())return 1;
+    QTimer::singleShot(0,[](){
+      if(QDialog* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()))
+        dialog->setWindowTitle(QString::fromUtf8("影聊 · 登录预览"));
+    });
+    QString email,folder;
+    ShadowLocalAccounts::login(&email,&folder,temporary.path());
+    return 0;
+  }
   LoginEmailDomainsTest test;
   return QTest::qExec(&test,argc,argv);
 }

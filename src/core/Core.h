@@ -117,6 +117,7 @@ public:
 
   /* CoreFileTransfer */
   void processPendingFileTransfers();
+  QVariantList outgoingFileTransferStates( VNumber chat_id );
   void cancelPendingFileTransfers( VNumber user_id, VNumber chat_id );
   bool sendFile( VNumber user_id, const QString& file_path, const QString& share_folder, bool to_share_box, VNumber chat_id );
   int sendFilesFromChat( VNumber chat_id, const QStringList& file_path_list );

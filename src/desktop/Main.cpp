@@ -229,14 +229,11 @@ int main( int argc, char *argv[] )
     return 0;
   }
   Settings::instance().setAccountDataFolder( account_folder );
-  if( profile_argument < 0 )
+  if( !dev_preview_mode && profile_argument < 0 )
   {
     QSettings startup_settings( QDir( ShadowLocalAccounts().root() ).filePath( "session.ini" ), QSettings::IniFormat );
-    if( !startup_settings.value( "startupConfigured", false ).toBool() )
-    {
-      if( Settings::instance().addStartOnSystemBoot() )
-        startup_settings.setValue( "startupConfigured", true );
-    }
+    if( Settings::instance().configureStartOnSystemBoot( startup_settings.value( "startupConfigured", false ).toBool() ) )
+      startup_settings.setValue( "startupConfigured", true );
   }
 #endif
   {

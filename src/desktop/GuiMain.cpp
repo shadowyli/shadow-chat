@@ -92,6 +92,7 @@
 #include "ShadowConversationPreferences.h"
 #include "ShadowWindowShape.h"
 #include "ShadowWindowResize.h"
+#include "ShadowWindowShadow.h"
 #include "ShadowDevPreview.h"
 #include "UserManager.h"
 #ifdef Q_OS_WIN
@@ -294,6 +295,7 @@ void GuiMain::initShortcuts()
 
 void GuiMain::setupChatConnections( GuiChat* gui_chat )
 {
+  connect(gui_chat,&GuiChat::showFileTransfersRequest,this,&GuiMain::showModernTransfers);
   connect( gui_chat, &GuiChat::openSavedChatRequest, this, [this]( VNumber chat_id ) {
     showSavedChatSelected( ChatManager::instance().chatName( chat_id ) );
   });
@@ -2134,7 +2136,7 @@ void GuiMain::createModernShell()
   network_layout->addWidget( mp_modernNetworkDot, 0, Qt::AlignTop );
   network_layout->addWidget( mp_modernNetworkText, 1 );
   network_layout->addWidget( mp_modernNetworkAction, 0, Qt::AlignVCenter );
-  list_layout->addWidget( mp_modernNetworkStrip );
+  mp_modernNetworkStrip->hide();
 
   mp_modernConversationPanel = new QWidget( mp_modernRoot );
   mp_modernConversationPanel->setObjectName( "ShadowConversationPanel" );
@@ -2342,6 +2344,7 @@ void GuiMain::createModernShell()
   updateModernListState();
   updateModernResponsiveLayout();
   new ShadowWindowResize( this );
+  new ShadowWindowShadow( this );
 }
 
 void GuiMain::applyModernStyle()
@@ -2459,6 +2462,16 @@ void GuiMain::showShadowSettings()
   message_layout->addWidget( preview_check );
   message_layout->addWidget( enter_check );
   root_layout->addWidget( message_card );
+#ifdef Q_OS_WIN
+  QCheckBox* startup_check = new QCheckBox( QStringLiteral( "登录 Windows 后自动启动影聊" ), message_card );
+  startup_check->setObjectName( "ShadowStartupCheck" );
+  const bool startup_enabled = Settings::instance().hasStartOnSystemBoot();
+  startup_check->setChecked( startup_enabled );
+  startup_check->setEnabled( !ShadowDevPreview::active() &&
+    qApp->property( "shadowAccountRoot" ).toString().isEmpty() &&
+    !qApp->arguments().contains( "--profile-root" ) );
+  message_layout->addWidget( startup_check );
+#endif
 
   QFrame* file_card = new QFrame( &dialog );
   file_card->setObjectName( "ShadowOnboardingCard" );
@@ -2532,6 +2545,15 @@ void GuiMain::showShadowSettings()
   if( dialog.exec() != QDialog::Accepted )
     return;
 
+#ifdef Q_OS_WIN
+  if( startup_check->isEnabled() && startup_check->isChecked() != startup_enabled )
+  {
+    const bool saved = startup_check->isChecked() ? Settings::instance().addStartOnSystemBoot()
+                                                : Settings::instance().removeStartOnSystemBoot();
+    if( !saved )
+      QMessageBox::warning( this, QStringLiteral( "开机启动" ), QStringLiteral( "无法保存开机启动设置，请检查当前用户权限后重试。" ) );
+  }
+#endif
   Settings::instance().setBeepOnNewMessageArrived( sound_check->isChecked() );
   Settings::instance().setShowChatMessageOnTray( preview_check->isChecked() );
   Settings::instance().setUseReturnToSendMessage( enter_check->isChecked() );
@@ -2647,6 +2669,7 @@ void GuiMain::updateModernNetworkState()
 {
   if( !mp_modernNetworkStrip || !mp_modernNetworkText || !mp_modernNetworkAction )
     return;
+  mp_modernNetworkStrip->hide();
 
   QString state;
   if( beeCore->devPreviewIsolated() )

@@ -12,4 +12,4 @@ INCLUDEPATH += $$SHADOWCHAT_PREVIEW_BUILD/generated
 objects = $$files($$SHADOWCHAT_PREVIEW_BUILD/objects/*.obj)
 objects -= $$SHADOWCHAT_PREVIEW_BUILD/objects/Main.obj
 PRE_TARGETDEPS += $$objects
-LIBS += $$objects user32.lib wtsapi32.lib shell32.lib
+LIBS += $$objects user32.lib wtsapi32.lib shell32.lib gdi32.lib

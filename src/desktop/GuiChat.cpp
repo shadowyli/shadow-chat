@@ -46,6 +46,8 @@
 #include "Protocol.h"
 #include "Settings.h"
 #include "ShadowStyle.h"
+#include "ShadowChatTranscript.h"
+#include "ShadowTransferQueue.h"
 #include "ShortcutManager.h"
 #ifdef BEEBEEP_USE_HUNSPELL
   #include "SpellChecker.h"
@@ -88,6 +90,22 @@ GuiChat::GuiChat( QWidget *parent )
   mp_splitter->setSizes( widget_sizes );
   mp_modernAttachButton = Q_NULLPTR;
   mp_sendFeedback = Q_NULLPTR;
+  mp_sendFeedbackTimer = new QTimer(this);
+  mp_sendFeedbackTimer->setObjectName("ShadowSendFeedbackTimer");
+  mp_sendFeedbackTimer->setSingleShot(true);
+  mp_sendFeedbackTimer->setInterval(5000);
+  mp_transferRefreshTimer=new QTimer(this);
+  mp_transferRefreshTimer->setObjectName("ShadowTransferRefreshTimer");
+  mp_transferRefreshTimer->setInterval(500);
+  connect(mp_transferRefreshTimer,&QTimer::timeout,this,&GuiChat::refreshTransferIndicators);
+  connect(mp_sendFeedbackTimer,&QTimer::timeout,this,[this]() {
+    if(mp_sendFeedback&&!mp_sendFeedback->property("failed").toBool())
+    {
+      mp_sendFeedback->hide();
+      mp_sendFeedback->clear();
+      m_feedbackDrafts.remove(m_chatId);
+    }
+  });
   mp_replyBar = Q_NULLPTR;
   mp_replyPreview = Q_NULLPTR;
   m_fileSendAccepted = false;
@@ -302,7 +320,7 @@ void GuiChat::setModernMode( bool enabled )
     screenshotButton->setObjectName("ShadowComposerAction");
     screenshotButton->setText(QStringLiteral("截图"));screenshotButton->setToolTip(QStringLiteral("框选截图并发送（Ctrl+Alt+A）"));
     screenshotButton->setAccessibleName( QStringLiteral( "截图" ) );
-    screenshotButton->setIcon( ShadowStyle::actionIcon( QStringLiteral( "images-square" ) ) );
+    screenshotButton->setIcon( ShadowStyle::actionIcon( QStringLiteral( "scissors" ) ) );
     connect(screenshotButton,SIGNAL(clicked()),this,SLOT(captureRegionScreenshot()));quickActions->addWidget(screenshotButton);
     QToolButton* mentionButton=new QToolButton(mp_frameMessage);mentionButton->setText(QStringLiteral("@"));
     mentionButton->setToolTip( QStringLiteral( "提及同事" ) );
@@ -736,13 +754,15 @@ void GuiChat::sendMessage()
 
 void GuiChat::showSendFeedback( const QString& feedback, bool failed )
 {
+  mp_sendFeedbackTimer->stop();
   if( mp_sendFeedback )
   {
     mp_sendFeedback->setProperty( "failed", failed );
     mp_sendFeedback->setText( feedback );
     mp_sendFeedback->style()->unpolish( mp_sendFeedback );
     mp_sendFeedback->style()->polish( mp_sendFeedback );
-    mp_sendFeedback->show();
+    mp_sendFeedback->setVisible(!feedback.isEmpty());
+    if(!failed&&!feedback.isEmpty())mp_sendFeedbackTimer->start(5000);
   }
   else if( failed )
     QMessageBox::warning( this, QStringLiteral( "未发送" ), feedback );
@@ -852,6 +872,11 @@ void GuiChat::checkWriting()
 
 void GuiChat::checkAnchorClicked( const QUrl& url )
 {
+  if(url.scheme()=="shadowtransfer")
+  {
+    emit showFileTransfersRequest();
+    return;
+  }
   if(url.scheme()=="shadowimage") {
     const QStringList originals=shadowAlbumPaths(url);const int selected=url.fragment().toInt();
     if(!originals.isEmpty()){ShadowImageViewer viewer(originals,originals.value(selected,originals.first()),this);viewer.exec();}return;
@@ -883,6 +908,7 @@ QString GuiChat::chatMessageToText( const ChatMessage& cm )
 
   if( !messageCanBeShowed( cm ) )
     return s;
+  if(m_modernMode&&cm.isFileTransfer())return modernFileMessageToText(cm);
 
   if( m_modernMode && !cm.isFromSystem() && !cm.isFileTransfer() && !cm.isImagePreview() )
     return modernChatMessageToText( cm );
@@ -975,18 +1001,20 @@ QString GuiChat::modernMessageId( const ChatMessage& cm ) const
 
 QString GuiChat::modernChatMessageToText( const ChatMessage& cm )
 {
-  User user = UserManager::instance().findUser( cm.userId() );
-  const bool from_local_user = cm.isFromLocalUser() || (user.isValid() && user.isLocal());
+  bool from_local_user = false;
+  const User user = modernMessageSender( cm, &from_local_user );
   QString message_body = cm.message();
 
   if( cm.isSourceCode() )
     message_body = QStringLiteral( "<code>%1</code>" ).arg( message_body.toHtmlEscaped().replace( QLatin1Char( '\n' ), QLatin1String( "<br>" ) ) );
-  const QRegularExpression quoteExpression(QStringLiteral("<span\\s+class=['\"]bee-quote['\"]>(.*?)</span>"),QRegularExpression::DotMatchesEverythingOption);
+  const QRegularExpression quoteExpression(QStringLiteral(
+    "<span\\s+class=['\"]bee-quote['\"]>(.*?)</span>|<blockquote>(.*?)</blockquote>"),
+    QRegularExpression::DotMatchesEverythingOption);
   const QRegularExpressionMatch quote=quoteExpression.match(message_body);
   if(quote.hasMatch())
   {
     QTextDocument reference;
-    reference.setHtml(quote.captured(1));
+    reference.setHtml(quote.captured(1).isEmpty()?quote.captured(2):quote.captured(1));
     QString quotedText=reference.toPlainText().trimmed().toHtmlEscaped();
     quotedText.replace('\n',"<br>");
     message_body.replace(quote.capturedStart(),quote.capturedLength(),
@@ -1015,6 +1043,35 @@ QString GuiChat::modernChatMessageToText( const ChatMessage& cm )
   return modernBubbleHtml( message_body, user, from_local_user, cm.timestamp(), textWidth + 24, modernMessageId(cm) );
 }
 
+User GuiChat::modernMessageSender( const ChatMessage& message, bool* outgoing ) const
+{
+  const User local = Settings::instance().localUser();
+  const QString hint = QRegularExpression( "<!--shadow-sender:([A-Za-z0-9+/=]+)-->" )
+    .match( message.message() ).captured( 1 );
+  const QString name = QString::fromUtf8( QByteArray::fromBase64( hint.toLatin1() ) );
+  const QRegularExpressionMatch direction = QRegularExpression( "<!--shadow-outgoing:([01])-->" )
+    .match( message.message() );
+  *outgoing = direction.hasMatch() ? direction.captured( 1 ) == "1"
+    : message.isFromLocalUser() || (!name.isEmpty() &&
+      (name == local.name() || name == Bee::userNameToShow( local, true ) ||
+       name == local.accountName() || name == local.accountPath() ||
+       name == QStringLiteral( "我" ) || name == "You" || name == tr( "You" )));
+  if( *outgoing )
+    return local;
+  User sender = UserManager::instance().findUser( message.userId() );
+  if( !name.isEmpty() )
+  {
+    for( const User& candidate : UserManager::instance().userList().toList() )
+      if( !candidate.isLocal() &&
+          (name == candidate.name() || name == Bee::userNameToShow( candidate, true )) )
+        return candidate;
+    sender = User( ID_SYSTEM_MESSAGE );
+    sender.setName( name );
+    sender.setColor( "#83909F" );
+  }
+  return sender;
+}
+
 QString GuiChat::modernBubbleHtml( const QString& body, const User& user, bool outgoing,
   const QDateTime& sentAt, int preferredWidth, const QString& sourceId )
 {
@@ -1038,8 +1095,10 @@ QString GuiChat::modernBubbleHtml( const QString& body, const User& user, bool o
     .arg( QString::number( bubbleWidth ), heading, bubble_color,
       sourceId.isEmpty()?body:QStringLiteral("<a name=\"shadow-message-%1\"></a>%2").arg(sourceId,body) );
   const QString avatarCell = QStringLiteral( "<td width=\"38\" valign=\"top\" align=\"center\">%1</td>" ).arg( avatarHtml );
-  const QString timeCell = QStringLiteral( "<td width=\"44\" valign=\"bottom\" align=\"center\"><font color=\"#9BA4AE\" style=\"font-size:10px\">%1</font></td>" )
-    .arg( timestamp );
+  const bool transfer=m_transferBubbles.contains(sourceId);
+  const QString indicator=transfer?QStringLiteral("<a href=\"shadowtransfer:%1\"><img src=\"shadowtransfer:%1\" width=\"12\" height=\"12\"></a>&nbsp;").arg(sourceId):QString();
+  const QString timeCell = QStringLiteral( "<td width=\"%1\" valign=\"bottom\" align=\"center\">%2<font color=\"#9BA4AE\" style=\"font-size:10px\">%3</font></td>" )
+    .arg(transfer?64:44).arg(indicator,timestamp);
   const QString cells = outgoing ? timeCell + bubble + avatarCell : avatarCell + bubble + timeCell;
   return QStringLiteral( "<table align=\"%1\" width=\"%2\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin-top:8px;margin-bottom:16px\"><tr>%3</tr></table>" )
     .arg( alignment, QString::number( bubbleWidth + 82 ), cells );
@@ -1088,23 +1147,167 @@ void GuiChat::updateUserAvatar( const User& user )
   mp_teChat->setTextCursor(selection);mp_teChat->verticalScrollBar()->setValue(scroll);
 }
 
+QString GuiChat::modernHistoryHtml( const QString& html, int maximumMessages, int* missedMessages )
+{
+  const QList<ShadowChatTranscript::HistoryEntry> records = ShadowChatTranscript::historyEntries( html );
+  const int first = maximumMessages < 0 ? 0 : qMax( 0, records.size() - maximumMessages );
+  if( missedMessages )
+    *missedMessages = first;
+  QString visible;
+  QDate lastDate;
+  for( int index = first; index < records.size(); ++index )
+  {
+    const ShadowChatTranscript::HistoryEntry& record = records.at( index );
+    if( record.timestamp.isValid() && record.timestamp.date() != lastDate )
+    {
+      lastDate = record.timestamp.date();
+      visible += QStringLiteral( "<p align=\"center\"><font color=\"#8A95A3\">%1</font></p>" )
+        .arg( lastDate.toString( "yyyy-MM-dd" ) );
+    }
+    if( record.alreadyBubbled )
+    {
+      visible += record.html;
+      continue;
+    }
+    QString body = record.html;
+    if( !record.sender.isEmpty() )
+      body.prepend( QStringLiteral( "<!--shadow-sender:%1-->" )
+        .arg( QString::fromLatin1( record.sender.toUtf8().toBase64() ) ) );
+    if( record.hasDirection )
+      body.prepend( QStringLiteral( "<!--shadow-outgoing:%1-->" ).arg( record.outgoing ? 1 : 0 ) );
+    if( !record.album.isEmpty() )
+      body.prepend( QStringLiteral( "<!--shadow-album:%1-->" ).arg( record.album ) );
+    Message archived = Protocol::instance().systemMessage( body );
+    archived.setTimestamp( record.timestamp );
+    const ChatMessage message( ID_SYSTEM_MESSAGE, archived, ChatMessage::Type(
+      record.type >= 0 && record.type < ChatMessage::NumTypes ? record.type : ChatMessage::Chat ), true );
+    const bool hasImages = body.contains( QRegularExpression( "<img\\b", QRegularExpression::CaseInsensitiveOption ) );
+    if( hasImages )
+    {
+      QStringList images{ body };
+      while( !record.album.isEmpty() && index + 1 < records.size() )
+      {
+        const ShadowChatTranscript::HistoryEntry& next = records.at( index + 1 );
+        if( next.alreadyBubbled || next.album != record.album || next.sender != record.sender ||
+            next.hasDirection != record.hasDirection || next.outgoing != record.outgoing ||
+            !next.html.contains( QRegularExpression( "<img\\b", QRegularExpression::CaseInsensitiveOption ) ) )
+          break;
+        images.append( next.html );
+        ++index;
+      }
+      visible += modernImageAlbumHtml( images, message );
+    }
+    else if( record.type == ChatMessage::FileTransfer )
+      visible += modernFileMessageToText( message );
+    else if( record.sender.isEmpty() && record.type >= 0 && record.type != ChatMessage::Chat &&
+             record.type != ChatMessage::Autoresponder && record.type != ChatMessage::Voice &&
+             record.type != ChatMessage::FileTransfer )
+    {
+      visible += QStringLiteral( "<p style=\"margin-top:8px;margin-bottom:12px\"><font color=\"#8A95A3\">%1%2</font></p>" )
+        .arg( record.timestamp.isValid() ? record.timestamp.toString( "HH:mm:ss " ) : QString(), body );
+    }
+    else
+      visible += modernChatMessageToText( message );
+  }
+  return visible;
+}
+
+QString GuiChat::modernFileMessageToText( const ChatMessage& message )
+{
+  if(message.message().contains("<!--shadow-transfer-log-->"))return QString();
+  const bool attachment=message.message().contains("<!--shadow-attachment-->");
+  if(!attachment&&(!message.canBeSaved()||!message.message().contains(FileInfo::urlSchemeShowFileInFolder())))return QString();
+  const QList<HistoryRecord> records=shadowChatHistoryRecords(message.message());
+  QStringList paths;
+  QString batch;
+  for(const HistoryRecord& record:records)
+  {
+    paths+=record.files+record.media;
+    if(batch.isEmpty())batch=record.album;
+  }
+  QStringList files;
+  for(const QString& target:paths)
+  {
+    const QString path=QUrl(target).toLocalFile();
+    if(!path.isEmpty())files.append(path);
+  }
+  files.removeDuplicates();
+  if(files.isEmpty())return QString();
+  bool outgoing = false;
+  const User sender = modernMessageSender( message, &outgoing );
+  QStringList body;
+  QString caption=message.message();
+  caption.remove(QRegularExpression("<a\\b[^>]*>[\\s\\S]*?</a\\s*>",QRegularExpression::CaseInsensitiveOption));
+  QTextDocument captionDocument;
+  captionDocument.setHtml(caption);
+  const QString captionText=captionDocument.toPlainText().trimmed();
+  if(!captionText.isEmpty())body.append(captionText.toHtmlEscaped().replace('\n',"<br>"));
+  for(const QString& path:files)
+  {
+    const QFileInfo file(path);
+    body.append(QStringLiteral("<a href=\"%1\">%2</a><br><font color=\"#83909F\" style=\"font-size:11px\">%3</font>")
+      .arg(QUrl::fromLocalFile(path).toString().toHtmlEscaped(),file.fileName().toHtmlEscaped(),
+        file.exists()?QLocale().formattedDataSize(file.size()):QStringLiteral("本地文件已移动或删除")));
+  }
+  if(outgoing)
+  {
+    TransferBubble transfer;
+    transfer.paths=files;
+    transfer.batch=batch;
+    m_transferBubbles.insert(modernMessageId(message),transfer);
+  }
+  return modernBubbleHtml(body.join("<br>"),sender,outgoing,message.timestamp(),260,modernMessageId(message));
+}
+
+void GuiChat::refreshTransferIndicators()
+{
+  if(!m_modernMode)return;
+  applyTransferIndicators(beeCore->outgoingFileTransferStates(m_chatId));
+}
+
+void GuiChat::applyTransferIndicators( const QVariantList& tasks )
+{
+  QHash<QString,QPair<int,QString>> states;
+  bool pending=false;
+  for(auto bubble=m_transferBubbles.constBegin();bubble!=m_transferBubbles.constEnd();++bubble)
+  {
+    int indicator=ShadowChatTranscript::NoIndicator;
+    QString details;
+    for(const QVariant& task:tasks)
+    {
+      const QVariantMap state=task.toMap();
+      if(!bubble->batch.isEmpty()&&state.value("batch").toString()!=bubble->batch)continue;
+      bool matches=false;
+      for(const QString& path:bubble->paths)
+        matches=matches||ShadowTransferQueue::canonicalPath(path).compare(state.value("path").toString(),Qt::CaseInsensitive)==0;
+      if(!matches)continue;
+      const QString status=state.value("state").toString();
+      const int candidate=status=="failed"?ShadowChatTranscript::FailedIndicator:
+        status=="offered"?ShadowChatTranscript::SendingIndicator:
+        status=="pending"?ShadowChatTranscript::QueuedIndicator:ShadowChatTranscript::NoIndicator;
+      if(candidate>indicator)
+      {
+        indicator=candidate;
+        details=status=="failed"?QStringLiteral("发送失败：%1；点击查看传输详情").arg(state.value("error").toString()):
+          status=="offered"?QStringLiteral("正在发送；点击查看传输进度"):QStringLiteral("等待双方在线后发送；点击查看队列");
+      }
+      pending=pending||candidate==ShadowChatTranscript::SendingIndicator||candidate==ShadowChatTranscript::QueuedIndicator;
+    }
+    if(indicator!=ShadowChatTranscript::NoIndicator)states.insert(bubble.key(),qMakePair(indicator,details));
+  }
+  mp_teChat->setTransferIndicators(states);
+  if(pending)
+  {
+    if(!mp_transferRefreshTimer->isActive())mp_transferRefreshTimer->start();
+  }
+  else mp_transferRefreshTimer->stop();
+}
+
 QString GuiChat::modernImageAlbumHtml( const QStringList& preview_messages, const ChatMessage& message )
 {
   QString combined = preview_messages.join( QStringLiteral( " " ) );
-  const User localUser = Settings::instance().localUser();
-  const QRegularExpressionMatch senderHint = QRegularExpression( "<!--shadow-sender:([A-Za-z0-9+/=]+)-->" ).match( combined );
-  const QString senderName = senderHint.hasMatch()
-    ? QString::fromUtf8( QByteArray::fromBase64( senderHint.captured( 1 ).toLatin1() ) ) : QString();
-  const bool outgoing = message.isFromLocalUser() || (!senderName.isEmpty() &&
-    (senderName == localUser.name() || senderName == Bee::userNameToShow( localUser, true )));
-  User sender = outgoing ? localUser : UserManager::instance().findUser( message.userId() );
-  if( !sender.isValid() && !senderName.isEmpty() )
-    for( const User& candidate : UserManager::instance().userList().toList() )
-      if( senderName == candidate.name() || senderName == Bee::userNameToShow( candidate, true ) )
-      {
-        sender = candidate;
-        break;
-      }
+  bool outgoing = false;
+  const User sender = modernMessageSender( message, &outgoing );
   QStringList image_links;
   QRegExp image_link_expression( QStringLiteral( "(<a[^>]*>\\s*<img[^>]*>\\s*</a>)" ) );
   image_link_expression.setMinimal( true );
@@ -1125,6 +1328,13 @@ QString GuiChat::modernImageAlbumHtml( const QStringList& preview_messages, cons
 
   QString visible_html;
   const QStringList originals=shadowAlbumOriginals(combined);
+  if(outgoing&&!originals.isEmpty())
+  {
+    TransferBubble transfer;
+    transfer.paths=originals;
+    transfer.batch=QRegularExpression("<!--shadow-album:([{}A-Za-z0-9-]+)-->").match(combined).captured(1);
+    m_transferBubbles.insert(modernMessageId(message),transfer);
+  }
   const int visibleCount=qMin(9,image_links.size());
   const int columns=qMin(3,qMax(1,visibleCount));
   visible_html=QString( "<table cellspacing=\"%1\" cellpadding=\"0\" border=\"0\">" ).arg( visibleCount == 1 ? 0 : 6 );
@@ -1136,15 +1346,19 @@ QString GuiChat::modernImageAlbumHtml( const QStringList& preview_messages, cons
     if(!originals.isEmpty()) {
       image_link.replace(QRegularExpression("href\\s*=\\s*[\"'][^\"']+[\"']"),QString("href=\"%1\"").arg(shadowAlbumUrl(originals,qMin(imageIndex,originals.size()-1)).toString().toHtmlEscaped()));
     }
-    image_link.replace( QRegExp( QStringLiteral( "\\s+(width|height)=\"[^\"]*\"" ) ), QString() );
+    image_link.remove( QRegularExpression( QStringLiteral(
+      "\\s+(?:width|height)\\s*=\\s*(?:\"[^\"]*\"|'[^']*'|[^\\s>]+)" ),
+      QRegularExpression::CaseInsensitiveOption ) );
     const QSize maximum=visibleCount==1?QSize(360,260):QSize(144,110);
     QSize thumbnailSize=maximum;
     const QRegularExpressionMatch source=QRegularExpression("src\\s*=\\s*[\"']([^\"']+)[\"']").match(image_link);
     if(source.hasMatch()) {
-      QImageReader reader(QUrl(source.captured(1)).toLocalFile());const QSize actual=reader.size();
+      const QString address = QTextDocumentFragment::fromHtml( source.captured( 1 ) ).toPlainText();
+      QImageReader reader(QUrl(address).toLocalFile());const QSize actual=reader.size();
       if(actual.isValid())thumbnailSize=actual.scaled(maximum,Qt::KeepAspectRatio);
     }
-    image_link.replace(QStringLiteral("<img"),QString("<img width=\"%1\" height=\"%2\"").arg(thumbnailSize.width()).arg(thumbnailSize.height()));
+    image_link.replace( QRegularExpression( "<img\\b", QRegularExpression::CaseInsensitiveOption ),
+      QString( "<img width=\"%1\" height=\"%2\"" ).arg( thumbnailSize.width() ).arg( thumbnailSize.height() ) );
     preferredWidth = qMax( preferredWidth, thumbnailSize.width() * columns + (columns - 1) * 6 + 20 );
     if(imageIndex%columns==0)visible_html+="<tr>";
     visible_html+="<td align=\"center\" valign=\"middle\">"+image_link+"</td>";
@@ -1162,7 +1376,7 @@ QString GuiChat::modernImageAlbumHtml( const QStringList& preview_messages, cons
   captionDocument.setHtml( caption );
   const QString captionText = captionDocument.toPlainText().trimmed();
   if( extractedImages && !captionText.isEmpty() )
-    visible_html += QStringLiteral( "<br>%1" ).arg( captionText.toHtmlEscaped().replace( '\n', "<br>" ) );
+    visible_html += QStringLiteral( "<br>%1" ).arg( caption );
   return modernBubbleHtml( visible_html, sender, outgoing, message.timestamp(), preferredWidth, modernMessageId(message) );
 }
 
@@ -1205,7 +1419,8 @@ bool GuiChat::setChat( const Chat& c )
   if(m_chatId!=c.id())
   {
     m_messageDrafts.insert(m_chatId,mp_teMessage->message());
-    if(mp_sendFeedback&&mp_sendFeedback->isVisible())
+    mp_sendFeedbackTimer->stop();
+    if(mp_sendFeedback&&!mp_sendFeedback->isHidden()&&mp_sendFeedback->property("failed").toBool())
       m_feedbackDrafts.insert(m_chatId,qMakePair(mp_sendFeedback->text(),mp_sendFeedback->property("failed").toBool()));
     else m_feedbackDrafts.remove(m_chatId);
     m_chatId=c.id();
@@ -1216,9 +1431,14 @@ bool GuiChat::setChat( const Chat& c )
       const auto feedback=m_feedbackDrafts.value(m_chatId);
       showSendFeedback(feedback.first,feedback.second);
     }
-    else if(mp_sendFeedback)mp_sendFeedback->hide();
+    else if(mp_sendFeedback)
+    {
+      mp_sendFeedback->hide();
+      mp_sendFeedback->clear();
+    }
   }
   updateReplyPreview();
+  m_transferBubbles.clear();
   m_avatarUrls.clear();
 
   int missed_lines = -1;
@@ -1233,12 +1453,14 @@ bool GuiChat::setChat( const Chat& c )
     if( !ChatManager::instance().chatHasSavedText( c.name() ) )
     {
       if( c.isPrivate() && c.name().contains( "@" ) && ChatManager::instance().chatHasSavedText( User::nameFromPath( c.name() ) ) )
-        html_text += ChatManager::instance().chatSavedText( User::nameFromPath( c.name() ), history_lines, &missed_lines );
+        html_text += ChatManager::instance().chatSavedText( User::nameFromPath( c.name() ), m_modernMode ? -1 : history_lines, &missed_lines );
     }
     else
-      html_text += ChatManager::instance().chatSavedText( c.name(), history_lines, &missed_lines );
+      html_text += ChatManager::instance().chatSavedText( c.name(), m_modernMode ? -1 : history_lines, &missed_lines );
   }
 
+  if( m_modernMode )
+    html_text = modernHistoryHtml( html_text, history_lines, &missed_lines );
   if( missed_lines < 0 )
     missed_lines = qMax( 0, num_messages - msg_lines );
 
@@ -1304,6 +1526,7 @@ bool GuiChat::setChat( const Chat& c )
   setChatStylesheet( text_document );
   mp_teChat->setDocument( text_document );
   mp_teChat->setHtml( html_text );
+  refreshTransferIndicators();
   mp_teChat->setUpdatesEnabled( updates_is_enabled );
   setLastMessageTimestamp( c.lastMessageTimestamp() );
   ensureLastMessageVisible();
@@ -1380,6 +1603,7 @@ bool GuiChat::appendChatMessage( const Chat& c, const ChatMessage& cm )
     QTextCursor cursor( mp_teChat->textCursor() );
     cursor.movePosition( QTextCursor::End );
     cursor.insertHtml( text_message );
+    refreshTransferIndicators();
     if( m_modernMode )
       mp_teChat->normalizeBubbles();
     mp_teChat->setUpdatesEnabled( updates_enabled );
@@ -1624,7 +1848,9 @@ bool GuiChat::submitImage( const QImage& image )
     return false;
   }
   QString image_initial_path = imageFolder +
-                                    QString( "/beeimgtmp-%1." ).arg( Bee::dateTimeStringSuffix( QDateTime::currentDateTime() ) )
+                                    QString( "/ShadowChat-Screenshot-%1-%2." )
+                                      .arg( QDateTime::currentDateTime().toString( "yyyyMMdd-HHmmss-zzz" ),
+                                            QUuid::createUuid().toString( QUuid::WithoutBraces ) )
                                     + image_format;
   QString file_path = Bee::uniqueFilePath( image_initial_path, false );
   qDebug() << "Sending the dropped image as a file:" << file_path;

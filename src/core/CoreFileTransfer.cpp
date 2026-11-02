@@ -111,6 +111,28 @@ void Core::processPendingFileTransfers()
   }
 }
 
+QVariantList Core::outgoingFileTransferStates( VNumber chat_id )
+{
+  QVariantList states;
+  const Chat chat=ChatManager::instance().chat(chat_id);
+  if(!chat.isValid()||m_devPreviewIsolated||!shadowOutbox.open(Settings::instance().dataFolder()))return states;
+  foreach(const ShadowTransferQueue::Task& task,shadowOutbox.tasks())
+  {
+    if(task.chat!=chat.privateId())continue;
+    foreach(const QJsonValue& value,task.files)
+    {
+      const QString path=value.toObject()["path"].toString();
+      QVariantMap state;
+      state.insert("path",path);
+      state.insert("batch",task.batch);
+      state.insert("state",task.completed.contains(path)||task.state=="completed"?"completed":task.state);
+      state.insert("error",task.error);
+      states.append(state);
+    }
+  }
+  return states;
+}
+
 
 void Core::cancelPendingFileTransfers( VNumber user_id, VNumber chat_id )
 {
@@ -396,6 +418,7 @@ bool Core::showFilesUploadPreviewInChat( const Chat& c, const QStringList& file_
     return false;
 
   QStringList preview_list;
+  bool filePreview=false;
   foreach( QString file_path, file_paths )
   {
     QFileInfo fi( file_path );
@@ -416,8 +439,18 @@ bool Core::showFilesUploadPreviewInChat( const Chat& c, const QStringList& file_
     }
   }
 
+  foreach(const QString& filePath,file_paths)
+  {
+    const QFileInfo file(filePath);
+    if(Bee::isFileTypeImage(file.suffix()))continue;
+    QString message=QStringLiteral("<!--shadow-attachment--><a href=\"%1\">%2</a>")
+      .arg(QUrl::fromLocalFile(file.absoluteFilePath()).toString().toHtmlEscaped(),file.fileName().toHtmlEscaped());
+    if(!shadowTransferBatch.isEmpty())message.prepend(QStringLiteral("<!--shadow-album:%1-->").arg(shadowTransferBatch));
+    dispatchSystemMessage(c.id(),ID_LOCAL_USER,message,DispatchToChat,ChatMessage::FileTransfer,true);
+    filePreview=true;
+  }
   if( preview_list.isEmpty() )
-    return false;
+    return filePreview;
 
   QString preview_msg = "<br><div align=center>";
   foreach( QString preview_item , preview_list)
@@ -573,7 +606,7 @@ bool Core::sendFileToUser( const User&u, const QString& file_path, const QString
         file_url.setScheme( FileInfo::urlSchemeShowFileInFolder() );
         msg += QString( " " );
         msg += tr( "Open %1." ).arg( QString( "<a href=\"%1\">%2</a>" ).arg( file_url.toString(), tr( "folder" ) ) );
-        dispatchSystemMessage( chat_selected.isValid() ? chat_selected.id() : ID_DEFAULT_CHAT, u.id(), msg,
+        dispatchSystemMessage( chat_selected.isValid() ? chat_selected.id() : ID_DEFAULT_CHAT, u.id(), QStringLiteral("<!--shadow-transfer-log-->")+msg,
                                chat_selected.isValid() ? DispatchToChat : DispatchToDefaultAndPrivateChat, ChatMessage::FileTransfer, true );
       }
     }

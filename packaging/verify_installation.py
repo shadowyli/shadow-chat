@@ -34,6 +34,25 @@ before={str(p.relative_to(profile)):hash_file(p) for p in profile.rglob('*') if 
 # NSIS registers a per-user install even with an isolated /D. Preserve the real
 # user's pre-existing application registration and shortcuts around this test.
 keys=[r'Software\shadowyli\ShadowChat',r'Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat']
+run_key=r'Software\Microsoft\Windows\CurrentVersion\Run'
+try:
+ with winreg.OpenKey(winreg.HKEY_CURRENT_USER,run_key) as key:
+  saved_startup=winreg.QueryValueEx(key,'ShadowChat')
+except FileNotFoundError:saved_startup=None
+startup_checks=[]
+def startup_value():
+ try:
+  with winreg.OpenKey(winreg.HKEY_CURRENT_USER,run_key) as key:return winreg.QueryValueEx(key,'ShadowChat')[0]
+ except FileNotFoundError:return None
+def startup_preference(enabled):
+ with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER,keys[0],0,winreg.KEY_ALL_ACCESS|winreg.KEY_WOW64_32KEY) as key:
+  winreg.SetValueEx(key,'StartupEnabled',0,winreg.REG_DWORD,int(enabled))
+def check_startup(enabled,phase):
+ expected='"'+str(install/'ShadowChat.exe')+'"' if enabled else None
+ if startup_value()!=expected:raise SystemExit('Startup command mismatch: '+phase)
+ with winreg.OpenKey(winreg.HKEY_CURRENT_USER,keys[0],0,winreg.KEY_READ|winreg.KEY_WOW64_32KEY) as key:
+  if winreg.QueryValueEx(key,'StartupEnabled')[0]!=int(enabled):raise SystemExit('Startup preference mismatch: '+phase)
+ startup_checks.append({'phase':phase,'enabled':enabled,'quotedInstalledExecutable':not enabled or startup_value()==expected})
 registrations={}
 for name in keys:
  try:
@@ -60,15 +79,29 @@ def verify_icons():
   if winreg.QueryValueEx(key,'URLInfoAbout')[0]!=metadata['downloadPage']:raise SystemExit('Installed download page does not match selected environment')
  icon_verifications.append({'shortcuts':rows,'displayIcon':location,'icoSha256':hash_file(icon)})
 try:
+ for name in keys:
+  try:winreg.DeleteKeyEx(winreg.HKEY_CURRENT_USER,name,winreg.KEY_WOW64_32KEY,0)
+  except FileNotFoundError:pass
+ with winreg.CreateKey(winreg.HKEY_CURRENT_USER,run_key) as key:
+  try:winreg.DeleteValue(key,'ShadowChat')
+  except FileNotFoundError:pass
+ first=subprocess.run([str(installer),'/S','/D='+str(install)],timeout=120)
+ if first.returncode:raise SystemExit('Fresh install failed')
+ check_startup(True,'fresh install defaults enabled')
+ startup_preference(False)
+ with winreg.OpenKey(winreg.HKEY_CURRENT_USER,run_key,0,winreg.KEY_SET_VALUE) as key:winreg.DeleteValue(key,'ShadowChat')
  previous_installed=False
  if previous.is_file():
   prior=subprocess.run([str(previous),'/S','/D='+str(install)],timeout=120)
   if prior.returncode:raise SystemExit('Previous-version installation failed')
   if hash_file(install/'ShadowChat.exe')!=previous_receipt['sourceExecutableSha256']:raise SystemExit('Previous-version payload mismatch')
   previous_installed=True
+  with winreg.OpenKey(winreg.HKEY_CURRENT_USER,keys[0],0,winreg.KEY_SET_VALUE|winreg.KEY_WOW64_32KEY) as key:
+   winreg.DeleteValue(key,'StartupEnabled')
  for attempt in range(2):
   result=subprocess.run([str(installer),'/S','/D='+str(install)],timeout=120)
   if result.returncode:raise SystemExit(f'Installer run {attempt} failed: {result.returncode}')
+  check_startup(False,'upgrade preserves disabled preference '+str(attempt))
   if hash_file(install/'ShadowChat.exe')!=metadata['sourceExecutableSha256']:raise SystemExit('Installed executable differs from current source build')
   for name,digest in metadata['appLocalCrt'].items():
    if hash_file(install/name)!=digest:raise SystemExit('Installed app-local runtime mismatch: '+name)
@@ -107,18 +140,28 @@ try:
  if probe.returncode!=1:raise SystemExit('Installed executable dependency/argument-guard probe failed')
  snapshot=fixture/'verified-installed-payload.json'
  snapshot.write_text(json.dumps({name:hash_file(install/name) for name in metadata['payloadInventory']},ensure_ascii=False,indent=2),encoding='utf-8')
+ startup_preference(True)
+ with winreg.CreateKey(winreg.HKEY_CURRENT_USER,run_key) as key:
+  winreg.SetValueEx(key,'ShadowChat',0,winreg.REG_SZ,'"'+str(install/'ShadowChat.exe')+'"')
  uninstall=subprocess.run([str(install/'卸载影聊.exe'),'/S','_?='+str(install)],timeout=120)
  if uninstall.returncode:raise SystemExit('Silent uninstall failed')
  deadline=time.monotonic()+30
  while (install/'ShadowChat.exe').exists() and time.monotonic()<deadline:time.sleep(0.2)
  if (install/'ShadowChat.exe').exists():raise SystemExit('Uninstaller left application executable')
  if before!={str(p.relative_to(profile)):hash_file(p) for p in profile.rglob('*') if p.is_file()}:raise SystemExit('Uninstall altered external data')
+ if startup_value() is not None:raise SystemExit('Uninstall left startup entry')
  result=subprocess.run([str(installer),'/S','/D='+str(install)],timeout=120)
  if result.returncode:raise SystemExit('Reinstall after uninstall failed')
+ check_startup(True,'reinstall defaults enabled')
  for name,entry in metadata['payloadInventory'].items():
   if hash_file(install/name)!=entry['sha256']:raise SystemExit('Reinstalled payload mismatch: '+name)
  verify_icons()
 finally:
+ with winreg.CreateKey(winreg.HKEY_CURRENT_USER,run_key) as key:
+  if saved_startup is None:
+   try:winreg.DeleteValue(key,'ShadowChat')
+   except FileNotFoundError:pass
+  else:winreg.SetValueEx(key,'ShadowChat',0,saved_startup[1],saved_startup[0])
  for name,values in registrations.items():
   if values is None:
    try:winreg.DeleteKeyEx(winreg.HKEY_CURRENT_USER,name,winreg.KEY_WOW64_32KEY,0)
@@ -139,6 +182,7 @@ finally:
 report={'installer':str(installer),'installDirectory':str(install),'installAndOverwritePassed':True,'installedExecutableMatchesBuild':True,'allPayloadFilesMatchBuild':True,'externalFixtureDataUnchanged':True,'recoverySeedMatchesOwnerKey':True,'lockedExecutableInstallRejected':True,'sanitizedPathDependencyProbePassed':True,'silentUninstallPreservesExternalFixture':True,'reinstallAfterUninstallPassed':True,
  'version':metadata['version'],'releaseEnvironment':metadata['releaseEnvironment'],'channel':metadata['channel'],'installerSha256':metadata['sha256'],'externalQueueFixtureUnchanged':True,
  'installedBuildIdentity':identity,
+ 'startupDefaultsEnabled':True,'startupDisabledPreferenceSurvivesUpgrade':True,'startupUninstallCleanup':True,'startupVerification':startup_checks,
  'versionedShortcutIconsVerified':True,'shortcutIconVerification':icon_verifications,
  'previousVersionInstalledBeforeUpgrade':previous_installed,
  'previousVersion':previous_receipt['version'],'previousInstallerSha256':previous_receipt['sha256'],

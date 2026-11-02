@@ -490,6 +490,7 @@ public:
   bool addStartOnSystemBoot();
   bool removeStartOnSystemBoot();
   bool hasStartOnSystemBoot() const;
+  bool configureStartOnSystemBoot( bool legacyConfigured );
 
   inline void setSaveGroupList( bool );
   inline bool saveGroupList() const;
