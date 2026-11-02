@@ -1,0 +1,22 @@
+name: 使用求助 / Help
+description: 安装、使用和文档方面的疑问
+title: "[Help] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先阅读 [使用指南](https://github.com/shadowyli/shadow-chat/blob/main/docs/GETTING-STARTED.md) 和 [常见问题](https://github.com/shadowyli/shadow-chat/blob/main/docs/FAQ.md)。
+        这里是公开空间，请勿上传个人资料或备份。请求安全联系渠道时只填写联络请求，不附漏洞详情。
+        Chinese and English questions are welcome.
+  - type: input
+    id: environment
+    attributes:
+      label: 版本与系统 / Version and system
+      description: 普通使用问题请填写；仅请求安全联系渠道时可留空。
+  - type: textarea
+    id: question
+    attributes:
+      label: 想完成的操作与疑问 / Task and question
+      description: 请说明看过哪些说明、已尝试哪些步骤，以及遇到的提示。
+    validations:
+      required: true

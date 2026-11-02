@@ -1,51 +1,70 @@
-# 影聊（ShadowChat）
+<p align="center">
+  <img src="branding/generated/shadowchat-128.png" width="80" height="80" alt="影聊图标">
+</p>
 
-影聊是由 **shadowyli** 个人维护的开源局域网通讯工具，提供私聊、群聊、图片与文件传输、
-本地聊天记录和账号资料管理。
+<h1 align="center">影聊 · ShadowChat</h1>
+<p align="center">同一局域网，直接沟通。</p>
 
-## 下载与版本
+<p align="center">
+  <a href="LICENSE.txt"><img src="https://img.shields.io/badge/license-GPLv3-blue" alt="许可证 GPLv3"></a>
+  <img src="https://img.shields.io/badge/platform-Windows%2010%20%2F%2011-0078D4" alt="Windows 10 和 11">
+  <img src="https://img.shields.io/badge/status-preview-d97706" alt="测试版阶段">
+</p>
 
-测试版本：**1.1.7**，支持 Windows 10/11（x86 应用）。
-安装包、源码、版本说明和校验信息统一在本仓库的 **Releases** 发布。
-其他网站可以提供下载镜像，版本记录以本仓库已发布的 Release 为准。
+<p align="center">
+  <a href="https://github.com/shadowyli/shadow-chat/releases">下载</a> ·
+  <a href="docs/GETTING-STARTED.md">使用指南</a> ·
+  <a href="CONTRIBUTING.md">参与贡献</a> ·
+  <a href="README.en.md">English</a>
+</p>
 
-本版提供 `local / test` 安装包，默认从本仓库 Releases 查询对应通道和环境的版本。
-点击“立即下载”直接获取安装包，不需要运行维护者的本机网页。
-每个版本保留对应源码、安装包、发布说明、SHA-256 和构建信息。
-本轮更新见 [1.1.7 版本说明](docs/releases/1.1.7-test.md)；
-维护与交接见 [版本发布规则](docs/VERSION-RELEASE-POLICY.md)。
+影聊是面向办公内网和同网段小团队的开源 Windows 通讯工具。
+无需部署中央聊天服务器，即可在局域网内进行私聊、群聊和文件传输，
+聊天记录与账号资料保存在本机。
 
-## 功能
+项目由 **shadowyli** 个人维护，基于 **BeeBEEP r1557**，
+使用 C++ / Qt 改进会话组织、消息展示和日常操作体验。
 
-- 局域网私聊、群聊，支持图片、文件和文件夹传输。
-- 圆角聊天气泡、通讯录分类、全局搜索、常用会话和静态未读提醒。
-- 本地账号与数据隔离，聊天记录分类检索、导出及迁移。
-- 个人资料、头像、签名、电话号码及工作状态管理。
-- 截图预览、消息发送反馈、离线消息与待发送队列。
-- 建议更新：只有发现更高版本才提醒，每天最多一次；最新版不自动弹窗。
-- 更新服务不可用不影响启动、登录、聊天和文件传输。
+## 项目特点
 
-## 安装与升级
+- **局域网沟通**：设备间直接通信，支持私聊、群聊、@ 和引用。
+- **顺手传资料**：支持图片、文件及文件夹，多张图片统一预览和发送。
+- **本地整理信息**：常用会话、静态未读提醒、全局搜索与聊天记录分类检索。
+- **保留与迁移资料**：本地账号资料隔离，支持工作区导出、导入及换机。
 
-从 Releases 下载适合的安装包；先退出托盘中的影聊，再运行安装程序。
-覆盖安装保留安装目录外的账号、聊天记录和接收文件，重要资料请提前备份。
-本地账号不提供云端历史同步或邮箱所有权验证。
+## 快速开始
 
-## 构建
+当前提供 **Windows 10/11 x86 测试版**，安装包包含运行所需组件。
 
-构建工具：Windows、Visual Studio 2022 x86 工具链、Qt 5.15.2 MSVC2019 x86、
-Python 3 和 NSIS 3.12。配置相应工具后运行：
+1. 从 [Releases](https://github.com/shadowyli/shadow-chat/releases) 下载 `*-setup.exe`，
+   阅读该版说明，并按 `SHA256SUMS.txt` 核对文件。
+2. 运行安装包并创建本地账号；覆盖升级前先从系统托盘退出影聊。
+3. 在另一台同一局域网电脑启动影聊，等待发现对方后开始聊天。
 
-```bat
-scripts\release-windows.cmd build --environment local
-scripts\release-windows.cmd test --environment local
-python packaging\build_installer.py --environment local
-```
+完整步骤见 [使用指南](docs/GETTING-STARTED.md)。
+版本变化、验证范围及已知限制以对应 Release 为准；当前测试包未进行商业代码签名。
 
-私密恢复资料与本机构建目录不得提交到 Git。构建回执记录实际版本、
-源码身份、程序摘要和验证结果，详见 [发布规则](docs/VERSION-RELEASE-POLICY.md)。
+使用前需确认网络允许设备间通信。邮箱仅作本地账号标识，项目不提供中央身份认证或云端历史同步；
+本地资料与备份未加密，请妥善保管。更多信息见 [安全说明](SECURITY.md)。
 
-## 许可证
+## 文档
 
-项目遵循 GPLv3。原有版权声明、许可证及实际使用的组件许可随源码和安装包保留，
-详见 [LICENSE.txt](LICENSE.txt) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+| 内容 | 入口 |
+| --- | --- |
+| 安装、升级、备份与换机 | [使用指南](docs/GETTING-STARTED.md) |
+| 账号、离线消息与网络排障 | [常见问题](docs/FAQ.md) |
+| Windows 源码构建、测试与打包 | [构建指南](docs/BUILDING.md) |
+| 问题反馈与使用求助 | [支持说明](SUPPORT.md) |
+
+## 参与贡献
+
+欢迎文档纠错、翻译、问题复现和代码贡献。请先阅读 [贡献指南](CONTRIBUTING.md)，
+通过 [Issues](https://github.com/shadowyli/shadow-chat/issues) 反馈问题或讨论建议。
+社区协作遵循 [行为准则](CODE_OF_CONDUCT.md)。
+
+## 许可证与致谢
+
+项目采用 [GNU GPLv3](LICENSE.txt)，保留上游版权声明。
+感谢 **Marco Mastroddi** 与 [BeeBEEP](https://www.beebeep.net/) 贡献者提供局域网通讯基础，
+以及 Qt、Phosphor Icons 等组件。第三方归属见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，
+运行库版本及许可随对应 Release 附件提供。
