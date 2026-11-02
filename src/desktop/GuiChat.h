@@ -66,8 +66,11 @@ public:
   void updateChatColors();
   bool updateChat( const Chat& );
   void updateUserAvatar( const User& );
+  void previewScreenshot( const QPixmap& );
+  void setMessageSendResult( const QString& message, bool accepted, const QString& feedback );
+  void setFileSendResult( bool accepted, const QString& feedback );
+  void showSendFeedback( const QString& feedback, bool failed );
 
-  void onTickEvent( int );
 
 #ifdef BEEBEEP_USE_VOICE_CHAT
   GuiVoicePlayer* guiVoicePlayer();
@@ -151,6 +154,8 @@ private slots:
   void findPreviousTextInChat();
   void openSelectedTextAsUrl();
   void quoteSelectedText();
+  void replyToMessage( const QPoint& );
+  void updateReplyPreview();
   void changeBackgroundColorInSelectedText();
   void resetChatFontToDefault();
   void operationCompleted();
@@ -169,10 +174,13 @@ protected:
   void updateChat();
   void setChatStylesheet( QTextDocument* );
   QString modernChatMessageToText( const ChatMessage& );
-  QString modernImageAlbumHtml( const QStringList&, bool from_local_user ) const;
+  QString modernImageAlbumHtml( const QStringList&, const ChatMessage& );
+  QString modernBubbleHtml( const QString& body, const User&, bool outgoing, const QDateTime&, int preferredWidth, const QString& sourceId = QString() );
   QString modernMessageId( const ChatMessage& ) const;
+  QPair<QString,QString> replyTargetAt( const QPoint& ) const;
   QString avatarUrlForUser( const User& );
   void updateFilterMessagesButton();
+  bool submitImage( const QImage& );
 
 private:
   VNumber m_chatId;
@@ -203,7 +211,16 @@ private:
 
   QSplitter* mp_splitter;
   QToolButton* mp_modernAttachButton;
-  QLabel* mp_modernComposerHint;
+  QLabel* mp_sendFeedback;
+  QString m_pendingMessage;
+  QString m_pendingDraftMessage;
+  QHash<VNumber,QPair<QString,QString>> m_replyDrafts;
+  QHash<VNumber,QString> m_messageDrafts;
+  QHash<VNumber,QPair<QString,bool>> m_feedbackDrafts;
+  QWidget* mp_replyBar;
+  QLabel* mp_replyPreview;
+  QString m_fileSendFeedback;
+  bool m_fileSendAccepted;
   bool m_modernMode;
   QSet<QString> m_expandedMessageIds;
   QHash<VNumber,QString> m_avatarUrls;

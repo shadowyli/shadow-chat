@@ -99,6 +99,7 @@ bool GuiGroupItem::updateChat( const Chat& c )
 
   setIcon( 0, ShadowStyle::actionIcon( QStringLiteral("users-three") ) );
   setGroupName( c.name(), c.unreadMessages() );
+  setForeground( 0, QBrush( QColor( "#243044" ) ) );
 
   QList<QTreeWidgetItem*> group_children = takeChildren();
   qDeleteAll( group_children );
@@ -115,15 +116,4 @@ bool GuiGroupItem::updateChat( const Chat& c )
   }
 
   return true;
-}
-
-void GuiGroupItem::onTickEvent( int ticks )
-{
-  if( isGroup() && m_unreadMessages > 0 )
-  {
-    if( ticks % 2 == 0 )
-      setIcon( 0, ShadowStyle::actionIcon( QStringLiteral("chats-circle") ) );
-    else
-      setIcon( 0, ShadowStyle::actionIcon( QStringLiteral("users-three") ) );
-  }
 }

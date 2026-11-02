@@ -16,6 +16,10 @@ int main(int argc,char** argv)
   QFontDatabase::addApplicationFont("C:/Windows/Fonts/msyh.ttc");
   QTemporaryDir temporary;
   VERIFY(temporary.isValid());
+  app.setProperty("shadowAccountRoot", temporary.path());
+  ShadowLocalAccounts selected;
+  VERIFY(selected.root()==temporary.path());
+  app.setProperty("shadowAccountRoot", QVariant());
   ShadowLocalAccounts accounts(temporary.path());
   QString error;
   VERIFY(ShadowLocalAccounts::normalizeEmail(" Alice@Example.com ")=="alice@example.com");

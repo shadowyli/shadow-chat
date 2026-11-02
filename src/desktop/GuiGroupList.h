@@ -41,7 +41,6 @@ public:
   void updateUser( const User& );
   void updateChat( const Chat& );
 
-  void onTickEvent( int );
 
   void updateBackground();
 

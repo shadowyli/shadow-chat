@@ -51,7 +51,6 @@ public:
 public slots:
   void setDefaultIcon();
   void setMessageIcon();
-  void onTickEvent( int );
 
 protected:
   void showMessageInTray( const QString&, bool );

@@ -4,14 +4,35 @@ Unicode true
 
 !define APP_NAME "影聊"
 !define APP_EXE "ShadowChat.exe"
-!define APP_VERSION "1.1.1"
+!ifndef APP_VERSION
+!error "APP_VERSION must be supplied by build_installer.py from src/core/Version.h"
+!endif
+!ifndef APP_CHANNEL
+!error "APP_CHANNEL must be supplied by the selected build profile"
+!endif
+!ifndef APP_ENVIRONMENT
+!error "APP_ENVIRONMENT must be supplied by the selected build profile"
+!endif
+!if "${APP_CHANNEL}" == "stable"
+!define APP_LABEL "正式版"
+!else
+!define APP_LABEL "测试版"
+!endif
+!define APP_ICON "shadowchat-${APP_VERSION}.ico"
 !define APP_PUBLISHER "shadowyli"
-!define APP_WEB "https://flowx.gz/tools/shadowchat"
+!ifndef APP_WEB
+!error "APP_WEB must be supplied from the selected build update source"
+!endif
 !define ROOT "${__FILEDIR__}\.."
-!define PAYLOAD "${ROOT}\dist\影聊-1.1.1-test-x86"
+!ifndef PAYLOAD
+!define PAYLOAD "${ROOT}\dist\${APP_ENVIRONMENT}\影聊-${APP_VERSION}-${APP_CHANNEL}-x86"
+!endif
+!ifndef OUTPUT
+!define OUTPUT "${ROOT}\dist\${APP_ENVIRONMENT}\影聊-${APP_VERSION}-${APP_CHANNEL}-x86-安装包.exe"
+!endif
 
-Name "${APP_NAME} ${APP_VERSION} 测试版"
-OutFile "${ROOT}\dist\影聊-1.1.1-test-x86-安装包.exe"
+Name "${APP_NAME} ${APP_VERSION} ${APP_LABEL} (${APP_ENVIRONMENT})"
+OutFile "${OUTPUT}"
 InstallDir "$LOCALAPPDATA\Programs\ShadowChat"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
@@ -22,7 +43,7 @@ BrandingText "影聊 · 局域网办公通讯"
 ShowInstDetails nevershow
 ShowUninstDetails nevershow
 
-VIProductVersion "1.1.1.0"
+VIProductVersion "${APP_VERSION}.0"
 VIAddVersionKey /LANG=2052 "ProductName" "影聊"
 VIAddVersionKey /LANG=2052 "ProductVersion" "${APP_VERSION}"
 VIAddVersionKey /LANG=2052 "FileVersion" "${APP_VERSION}"
@@ -73,15 +94,19 @@ Section "影聊" SEC_MAIN
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat" "DisplayVersion" "${APP_VERSION}"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat" "Publisher" "${APP_PUBLISHER}"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat" "URLInfoAbout" "${APP_WEB}"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat" "DisplayIcon" "$INSTDIR\${APP_EXE}"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat" "DisplayIcon" "$INSTDIR\${APP_ICON},0"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat" "UninstallString" '"$INSTDIR\卸载影聊.exe"'
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat" "NoModify" 1
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat" "NoRepair" 1
 
   CreateDirectory "$SMPROGRAMS\影聊"
-  CreateShortcut "$SMPROGRAMS\影聊\影聊.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0
-  CreateShortcut "$SMPROGRAMS\影聊\卸载影聊.lnk" "$INSTDIR\卸载影聊.exe"
-  CreateShortcut "$DESKTOP\影聊.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0
+  CreateShortcut "$SMPROGRAMS\影聊\影聊.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_ICON}" 0
+  CreateShortcut "$SMPROGRAMS\影聊\卸载影聊.lnk" "$INSTDIR\卸载影聊.exe" "" "$INSTDIR\${APP_ICON}" 0
+  CreateShortcut "$DESKTOP\影聊.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_ICON}" 0
+  System::Call 'shell32::SHChangeNotify(i 0x00002000, i 0x1005, w "$DESKTOP\影聊.lnk", p 0)'
+  System::Call 'shell32::SHChangeNotify(i 0x00002000, i 0x1005, w "$SMPROGRAMS\影聊\影聊.lnk", p 0)'
+  System::Call 'shell32::SHChangeNotify(i 0x00002000, i 0x1005, w "$SMPROGRAMS\影聊\卸载影聊.lnk", p 0)'
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0x1000, p 0, p 0)'
 SectionEnd
 
 Section "Uninstall"

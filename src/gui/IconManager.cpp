@@ -22,6 +22,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "IconManager.h"
+#include <QHash>
 
 
 IconManager* IconManager::mp_instance = Q_NULLPTR;
@@ -34,6 +35,27 @@ IconManager::IconManager()
 
 QString IconManager::iconPath( const QString& icon_name ) const
 {
+  static const QHash<QString, QString> modern_icons = {
+    { "settings.png", "gear-six" }, { "chat-settings.png", "gear-six" },
+    { "chat.png", "chats-circle" }, { "chat-list.png", "chats-circle" },
+    { "message-create.png", "chats-circle" }, { "unsent-message.png", "chats-circle" },
+    { "search.png", "magnifying-glass" }, { "find.png", "magnifying-glass" },
+    { "send-file.png", "paperclip" }, { "file-transfer.png", "paperclip" },
+    { "file-transfer-progress.png", "paperclip" }, { "send-folder.png", "folder-open" },
+    { "group.png", "users-three" }, { "group-list.png", "users-three" },
+    { "group-create.png", "users-three" }, { "group-edit.png", "users-three" },
+    { "user-list.png", "user-circle" }, { "profile-edit.png", "user-circle" },
+    { "vcard.png", "user-circle" }, { "user.png", "user-circle" },
+    { "folder.png", "folder-open" }, { "folder-open.png", "folder-open" },
+    { "saved-chat.png", "archive" }, { "save.png", "archive" },
+    { "history.png", "archive" }, { "log.png", "archive" },
+    { "emoticon.png", "smiley" }, { "send.png", "paper-plane-tilt" },
+    { "clear.png", "x" }, { "delete.png", "x" },
+    { "remove.png", "x" }, { "close.png", "x" }
+  };
+  const auto modern = modern_icons.constFind( icon_name );
+  if( modern != modern_icons.constEnd() )
+    return QStringLiteral( ":/images/shadowchat/icons/%1.svg" ).arg( modern.value() );
   if( hasDefaultIcons() )
     return defaulIconPath( icon_name );
 

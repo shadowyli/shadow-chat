@@ -33,8 +33,8 @@
 #include "NetworkManager.h"
 #include "Protocol.h"
 #include "UserManager.h"
-#include "Updater.h"
 #include "GAnalytics.h"
+#include "ShadowBuild.h"
 #ifdef BEEBEEP_USE_MULTICAST_DNS
   #include "MDnsManager.h"
 #endif
@@ -52,6 +52,10 @@ Core::Core( QObject* parent )
  : QObject( parent ), m_connections()
 {
   mp_instance = this;
+  m_devPreviewIsolated = false;
+#if defined(SHADOWCHAT_BUILD_LOCAL) && !defined(SHADOWCHAT_BUILD_MAIN) && !defined(SHADOWCHAT_BUILD_DEV)
+  m_devPreviewIsolated = qApp->property( "shadowDevPreview" ).toBool();
+#endif
   setObjectName( "BeeCore" );
   qRegisterMetaType<VNumber>( "VNumber" );
 
@@ -187,8 +191,17 @@ bool Core::checkSavingPaths()
 
 bool Core::start()
 {
-  if( m_updateBlocked )
-    return false;
+  if( m_devPreviewIsolated )
+  {
+    if( !mp_listener->isListening() && !mp_listener->listen( QHostAddress::LocalHost, 0 ) )
+      return false;
+    Settings::instance().setLocalUserHost( QHostAddress::LocalHost, mp_listener->serverPort() );
+    Settings::instance().setLocalUserStatus( User::Online );
+    qDebug() << "Native preview isolated on loopback" << mp_listener->serverPort()
+             << "; broadcast, Hive, mDNS and file transport disabled";
+    emit connected();
+    return true;
+  }
   if( isConnected() )
   {
     qDebug() << "Core is already connected to" << qPrintable( Settings::instance().programName() ) << "network";
@@ -311,7 +324,6 @@ bool Core::start()
       Settings::instance().setLocalUserStatus( static_cast<User::Status>(previous_local_user_status) );
   }
 
-  showUserVCardChanged( Settings::instance().localUser(), VCard() );
   emit userChanged( Settings::instance().localUser() );
 
   qDebug() << "Local user current path:" << qPrintable( Settings::instance().localUser().path() );
@@ -344,6 +356,7 @@ bool Core::start()
 #ifdef BEEBEEP_USE_MULTICAST_DNS
 void Core::startDnsMulticasting()
 {
+  if( m_devPreviewIsolated ) return;
   if( dnsMulticastingIsActive() )
     return;
 
@@ -388,18 +401,6 @@ void Core::onMulticastDnsServiceRegistered()
     sendDnsMulticastingMessage();
 }
 #endif
-
-void Core::blockForUpdate()
-{
-  if( m_updateBlocked )
-    return;
-  m_updateBlocked = true;
-  const bool resume_transfers = Settings::instance().resumeFileTransfer();
-  Settings::instance().setResumeFileTransfer( true );
-  stop();
-  Settings::instance().setResumeFileTransfer( resume_transfers );
-  Settings::instance().save();
-}
 
 void Core::stop()
 {
@@ -447,8 +448,6 @@ void Core::stop()
 
 void Core::restart()
 {
-  if( m_updateBlocked )
-    return;
   showMessage( tr( "Disconnecting" ), 3000 );
   qDebug() << "Restarting network core...";
   mp_broadcaster->stopBroadcasting();
@@ -487,6 +486,7 @@ bool Core::restartConnection()
 #ifdef BEEBEEP_USE_MULTICAST_DNS
 void Core::sendDnsMulticastingMessage()
 {
+  if( m_devPreviewIsolated ) return;
   if( !Settings::instance().useMulticastDns() )
     return;
 
@@ -519,12 +519,14 @@ void Core::sendDnsMulticastingMessage()
 
 void Core::updateUsersAddedManually()
 {
+  if( m_devPreviewIsolated ) return;
   qDebug() << "Updating users added manually to broadcaster:" << Settings::instance().networkAddressList().size();
   mp_broadcaster->updateUsersAddedManually();
 }
 
 void Core::sendBroadcastMessage()
 {
+  if( m_devPreviewIsolated ) return;
   if( !isConnected() )
     return;
 
@@ -588,82 +590,9 @@ void Core::checkNetworkInterface()
   }
 }
 
-void Core::checkNewVersion()
-{
-  if( !NetworkManager::instance().isMainInterfaceUp() )
-    return;
-
-  const QDateTime now = QDateTime::currentDateTimeUtc();
-  if( Settings::instance().lastVersionCheckAt().isValid() &&
-      Settings::instance().lastVersionCheckAt().secsTo( now ) < 7 * 24 * 60 * 60 )
-  {
-    qDebug() << "Version check skipped: the last check was less than seven days ago";
-    return;
-  }
-  Settings::instance().setLastVersionCheckAt( now );
-  Settings::instance().save();
-
-  qDebug() << "Checking for new version...";
-  Updater* updater = new Updater;
-  connect( updater, SIGNAL( jobCompleted() ), this, SLOT( onUpdaterJobCompleted() ) );
-  if( beeApp )
-    beeApp->addJob( updater );
-  QMetaObject::invokeMethod( updater, "checkForNewVersion", Qt::QueuedConnection );
-}
-
-void Core::onUpdaterJobCompleted()
-{
-  Updater *updater = qobject_cast<Updater*>( sender() );
-  if( !updater )
-  {
-    qWarning() << "Core received a signal from invalid Updater instance";
-    return;
-  }
-
-  if( beeApp )
-    beeApp->removeJob( updater );
-
-  QString latest_version = updater->versionAvailable();
-  QString download_url = updater->downloadUrl().isEmpty() ? Settings::instance().downloadWebSite() : updater->downloadUrl();
-  QString news = updater->news();
-
-  updater->deleteLater();
-
-  if( !news.isEmpty() )
-    emit newsAvailable( news );
-
-  if( latest_version.isEmpty() )
-    return;
-
-  QString my_version = Settings::instance().version( false, false, false );
-  int latest_suffix = 0;
-  int current_suffix = 0;
-  const QVersionNumber latest_number = QVersionNumber::fromString( latest_version, &latest_suffix );
-  const QVersionNumber current_number = QVersionNumber::fromString( my_version, &current_suffix );
-
-  if( latest_number.isNull() || current_number.isNull() || latest_suffix != latest_version.size() || current_suffix != my_version.size() )
-  {
-    qWarning() << "Invalid version string in ShadowChat update manifest:" << qPrintable( latest_version );
-    return;
-  }
-
-  if( QVersionNumber::compare( current_number, latest_number ) >= 0 )
-  {
-    qDebug() << "Latest version on the website is" << qPrintable( latest_version ) << "(update is not needed)";
-    return;
-  }
-
-  qDebug() << "Latest version on website is" << qPrintable( latest_version ) << "(update is recommended)";
-
-  QString html_msg = QString( "%1 <b>%2</b>. <a href=\"%3\">%4</a>." ).arg( IconManager::instance().toHtml( "update.png", "*!*" ),
-                                                           tr( "New version is available" ), download_url.toHtmlEscaped(),
-                                                           tr( "Click here to download" ) );
-
-  dispatchSystemMessage( ID_DEFAULT_CHAT, ID_LOCAL_USER, html_msg, DispatchToChat, ChatMessage::System, false );
-}
-
 void Core::postUsageStatistics()
 {
+  if( m_devPreviewIsolated ) return;
   if( !NetworkManager::instance().isMainInterfaceUp() )
     return;
 
@@ -736,7 +665,7 @@ void Core::onTickEvent( int ticks )
     }
 
     processPendingFileTransfers();
-    mp_broadcaster->onTickEvent( ticks );
+    if( !m_devPreviewIsolated ) mp_broadcaster->onTickEvent( ticks );
 
     if( Settings::instance().tickIntervalBroadcasting() > 0 && (ticks % Settings::instance().tickIntervalBroadcasting() == 0) )
       sendBroadcastMessage();
