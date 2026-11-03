@@ -252,7 +252,7 @@ ShadowPopup::ShadowPopup( QWidget* parent )
   qApp->installEventFilter( this );
 
   setStyleSheet( QStringLiteral(
-    "QWidget#ShadowPopupContent{background:transparent;color:#34445E;font-family:'Microsoft YaHei UI';font-size:12px;}"
+    "QWidget#ShadowPopupContent{background:transparent;color:#34445E;font-size:12px;}"
     "QLabel{background:transparent;color:#34445E;}"
     "QToolButton{background:transparent;border:1px solid transparent;border-radius:6px;color:#5F6B7A;padding:4px;}"
     "QToolButton:hover{background:#EDF3FC;color:#1D4ED8;}"
