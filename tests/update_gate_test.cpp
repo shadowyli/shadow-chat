@@ -1,5 +1,12 @@
 #include "ShadowUpdateController.h"
 #include "Updater.h"
+#include "BeeApplication.h"
+#include "Core.h"
+#include "GuiMain.h"
+#include "Settings.h"
+#include "ShadowStyle.h"
+#include "ShadowDialogChrome.h"
+#include "Random.h"
 #include <QtTest>
 #include <QtWidgets>
 #include <QTcpServer>
@@ -16,6 +23,7 @@ class UpdateSuggestionTest : public QObject
   int m_opened = 0;
   int m_delay = 0;
   QUrl m_openedUrl;
+  QTemporaryDir m_profile;
 
   QByteArray manifest(const QString& version = "1.1.3", const QString& channel = "test")
   {
@@ -54,6 +62,13 @@ class UpdateSuggestionTest : public QObject
 private slots:
   void initTestCase()
   {
+    QVERIFY(m_profile.isValid());
+    qApp->setProperty("shadowAccountRoot", m_profile.path());
+    Random::init();
+    Settings::instance().setDefaultFolders();
+    Settings::instance().createLocalUser("synthetic-update-test");
+    Settings::instance().setAccountDataFolder(m_profile.path());
+    Settings::instance().load();
     QVERIFY(m_server.listen(QHostAddress::LocalHost));
     connect(&m_server, &QTcpServer::newConnection, this, [this]() {
       while(m_server.hasPendingConnections())
@@ -156,6 +171,47 @@ private slots:
     QCOMPARE(shown.count(), 0);
     QVERIFY(!QFile::exists(temporary.filePath("reminders.ini")));
   }
+  void concurrentControllersAndChannels()
+  {
+    QTemporaryDir temporary;
+    const QString file = temporary.filePath("reminders.ini");
+    ShadowUpdateController first("1.1.2", nullptr, source(), file);
+    ShadowUpdateController second("1.1.2", nullptr, source(), file);
+    QSignalSpy firstShown(&first, &ShadowUpdateController::promptShown);
+    QSignalSpy secondShown(&second, &ShadowUpdateController::promptShown);
+    QSignalSpy firstFinished(&first, &ShadowUpdateController::checkFinished);
+    QSignalSpy secondFinished(&second, &ShadowUpdateController::checkFinished);
+    first.checkAutomatically();
+    second.checkAutomatically();
+    QTRY_COMPARE(firstFinished.count(), 1);
+    QTRY_COMPARE(secondFinished.count(), 1);
+    QCOMPARE(firstShown.count() + secondShown.count(), 1);
+    if(first.dialog()) first.dialog()->close();
+    if(second.dialog()) second.dialog()->close();
+    m_body = manifest("1.1.3", "stable");
+    ShadowUpdateController stable("1.1.2", nullptr, source(), file, "stable");
+    QSignalSpy stableShown(&stable, &ShadowUpdateController::promptShown);
+    check(stable);
+    QCOMPARE(stableShown.count(), 1);
+    QSettings settings(file, QSettings::IniFormat);
+    QVERIFY(settings.contains("test/lastReminderDate"));
+    QVERIFY(settings.contains("stable/lastReminderDate"));
+  }
+  void failedClaimCanRetry()
+  {
+    QTemporaryDir temporary;
+    const QString file = temporary.filePath("reminders.ini");
+    QLockFile lock(file + ".claim.lock");
+    QVERIFY(lock.tryLock());
+    ShadowUpdateController controller("1.1.2", nullptr, source(), file);
+    QSignalSpy shown(&controller, &ShadowUpdateController::promptShown);
+    check(controller);
+    QCOMPARE(shown.count(), 0);
+    QVERIFY(!QFile::exists(file));
+    lock.unlock();
+    check(controller);
+    QCOMPARE(shown.count(), 1);
+  }
   void errorsDoNotConsumeOpportunity()
   {
     QTemporaryDir temporary;
@@ -169,6 +225,7 @@ private slots:
     QVERIFY(controller.dialog()->findChild<QLabel*>("updateStatus")->text().contains(QStringLiteral("不受影响")));
     screenshot(controller, "manual-update-error");
     QVERIFY(controller.dialog()->findChild<QPushButton*>("retryUpdate")->isVisible());
+    QVERIFY(!QFile::exists(temporary.filePath("reminders.ini")));
     m_body = manifest();
     QSignalSpy finished(&controller, &ShadowUpdateController::checkFinished);
     controller.dialog()->findChild<QPushButton*>("retryUpdate")->click();
@@ -321,6 +378,224 @@ private slots:
     QVERIFY(controller.dialog()->findChild<QPushButton*>("downloadUpdate")->isVisible());
     QVERIFY(!controller.dialog()->findChild<QLabel*>("updateStatus")->text().contains(QStringLiteral("正在检查")));
   }
+  void inlineReplacesVisiblePrompt()
+  {
+    QTemporaryDir temporary;
+    ShadowUpdateController controller("1.1.2", nullptr, source(), temporary.filePath("reminders.ini"));
+    check(controller, true);
+    QVERIFY(controller.dialog()->isVisible());
+    m_body = "invalid";
+    QSignalSpy finished(&controller, &ShadowUpdateController::checkFinished);
+    controller.checkManuallyInline();
+    QVERIFY(controller.isChecking());
+    QVERIFY(!controller.dialog()->isVisible());
+    QTRY_COMPARE(finished.count(), 1);
+    QVERIFY(!controller.statusCanDownload());
+    QVERIFY(controller.statusCanRetry());
+    QVERIFY(controller.statusText().contains(QStringLiteral("暂时无法检查")));
+    QVERIFY(!controller.statusText().contains(QStringLiteral("已是最新")));
+  }
+  void abandonedInlineDoesNotClaim()
+  {
+    QTemporaryDir temporary;
+    m_delay = 100;
+    const QString file = temporary.filePath("reminders.ini");
+    ShadowUpdateController controller("1.1.2", nullptr, source(), file);
+    QSignalSpy finished(&controller, &ShadowUpdateController::checkFinished);
+    controller.checkManuallyInline();
+    controller.cancelInlinePresentation();
+    QTRY_COMPARE(finished.count(), 1);
+    QVERIFY(!QFile::exists(file));
+    QVERIFY(!controller.dialog());
+    QSignalSpy shown(&controller, &ShadowUpdateController::promptShown);
+    check(controller);
+    QCOMPARE(shown.count(), 1);
+  }
+  void modalDefersWithoutClaim()
+  {
+    QTemporaryDir temporary;
+    const QString file = temporary.filePath("reminders.ini");
+    QWidget window;
+    window.show();
+    ShadowUpdateController controller("1.1.2", &window, source(), file);
+    QDialog modal(&window);
+    modal.setWindowModality(Qt::ApplicationModal);
+    modal.show();
+    QTRY_COMPARE(QApplication::activeModalWidget(), &modal);
+    QSignalSpy shown(&controller, &ShadowUpdateController::promptShown);
+    check(controller);
+    QCOMPARE(shown.count(), 0);
+    QVERIFY(!QFile::exists(file));
+    modal.reject();
+    controller.presentPending();
+    QCOMPARE(shown.count(), 1);
+    QVERIFY(QFile::exists(file));
+  }
+  void settingsModalIntegration_data()
+  {
+    QTest::addColumn<QString>("result");
+    QTest::newRow("newer-long-notes") << "newer";
+    QTest::newRow("current") << "current";
+    QTest::newRow("failure-retry") << "failure";
+    QTest::newRow("close-in-flight") << "abandon";
+    QTest::newRow("existing-result") << "existing-result";
+    QTest::newRow("existing-inflight") << "existing-inflight";
+  }
+  void settingsModalIntegration()
+  {
+    QFETCH(QString, result);
+    QTemporaryDir temporary;
+    const QString file = temporary.filePath("reminders.ini");
+    Core core;
+    GuiMain window;
+    window.loadStyle();
+    window.resize(1000, 720);
+    window.show();
+    auto* controller = new ShadowUpdateController("1.1.2", &window, source(), file);
+    window.setUpdateController(controller);
+    m_delay = 100;
+    if(result == "current")
+      m_body = manifest("1.1.2");
+    else if(result == "failure")
+      m_body = "invalid";
+    else
+    {
+      QJsonObject object = QJsonDocument::fromJson(manifest()).object();
+      object["notes"] = QString(2000, QChar(0x66f4));
+      m_body = QJsonDocument(object).toJson();
+    }
+    const int initialRequests = m_requests;
+    if(result == "existing-result")
+    {
+      const QByteArray response = m_body;
+      m_body = "invalid";
+      check(*controller, true);
+      QVERIFY(controller->dialog()->isVisible());
+      m_body = response;
+    }
+    if(result == "existing-inflight")
+    {
+      controller->checkManually();
+      QVERIFY(controller->isChecking());
+      QVERIFY(controller->dialog()->isVisible());
+    }
+    QSignalSpy shown(controller, &ShadowUpdateController::promptShown);
+    QSignalSpy finished(controller, &ShadowUpdateController::checkFinished);
+    const int opened = m_opened;
+    bool entered = false;
+    QTimer::singleShot(50, &window, [&]() {
+      auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+      QVERIFY(dialog);
+      entered = true;
+      QTimer::singleShot(6000, dialog, &QDialog::reject);
+      QCOMPARE(dialog->windowTitle(), QStringLiteral("影聊设置"));
+      qInfo() << "UPDATE_UI" << result << QApplication::platformName()
+        << "DPR" << dialog->devicePixelRatioF() << "dialog" << dialog->size()
+        << "available" << dialog->screen()->availableGeometry().size();
+      QVERIFY(dialog->frameGeometry().height() <= dialog->screen()->availableGeometry().height());
+      auto* checkButton = dialog->findChild<QPushButton*>("checkUpdateFromSettings");
+      auto* download = dialog->findChild<QPushButton*>("downloadUpdateFromSettings");
+      auto* status = dialog->findChild<QLabel*>("ShadowUpdateSettingsStatus");
+      auto* notes = dialog->findChild<QPlainTextEdit*>("ShadowUpdateSettingsNotes");
+      auto* scroll = dialog->findChild<QScrollArea*>();
+      QVERIFY(checkButton && download && status && notes && scroll);
+      if(result == "existing-inflight")
+      {
+        QVERIFY(!checkButton->isEnabled());
+        QVERIFY(controller->dialog() && !controller->dialog()->isVisible());
+      }
+      else
+      {
+        QVERIFY(checkButton->isEnabled());
+        scroll->ensureWidgetVisible(checkButton);
+        QTest::mouseClick(checkButton, Qt::LeftButton);
+      }
+      QVERIFY(controller->isChecking());
+      QVERIFY(status->text().contains(QStringLiteral("正在检查")));
+      QVERIFY(!checkButton->isEnabled());
+      QVERIFY(!download->isVisible());
+      QVERIFY(!controller->dialog() || !controller->dialog()->isVisible());
+      if(result == "abandon")
+      {
+        dialog->reject();
+        return;
+      }
+      QTRY_COMPARE(finished.count(), 1);
+      QCOMPARE(m_requests, initialRequests + (result == "existing-result" ? 2 : 1));
+      QVERIFY(checkButton->isEnabled());
+      QCOMPARE(QApplication::activeModalWidget(), dialog);
+      QVERIFY(!controller->dialog() || !controller->dialog()->isVisible());
+      if(result == "failure")
+      {
+        QVERIFY(status->text().contains(QStringLiteral("暂时无法检查")));
+        QVERIFY(!status->text().contains(QStringLiteral("已是最新")));
+        QVERIFY(!download->isVisible());
+        QVERIFY(!QFile::exists(file));
+        m_body = manifest();
+        scroll->ensureWidgetVisible(checkButton);
+        QTest::mouseClick(checkButton, Qt::LeftButton);
+        QTRY_COMPARE(finished.count(), 2);
+      }
+      if(result == "current")
+      {
+        QVERIFY(status->text().contains(QStringLiteral("当前已是最新版本")));
+        QVERIFY(!download->isVisible());
+        QVERIFY(!notes->isVisible());
+        QVERIFY(!QFile::exists(file));
+      }
+      else
+      {
+        QVERIFY(status->text().contains(QStringLiteral("1.1.3")));
+        QVERIFY(download->isVisible() && download->isEnabled());
+        QVERIFY(notes->isVisible() && notes->height() <= 100);
+        QVERIFY(status->height() < 100);
+        scroll->ensureWidgetVisible(download);
+        QApplication::processEvents();
+        const QRect downloadRect(download->mapTo(scroll->viewport(), QPoint()), download->size());
+        QVERIFY(scroll->viewport()->rect().contains(downloadRect));
+        QTest::mouseClick(download, Qt::LeftButton);
+        QCOMPARE(m_opened, opened + 1);
+        QVERIFY(QFile::exists(file));
+      }
+      scroll->ensureWidgetVisible(status);
+      QApplication::processEvents();
+      const QRect statusRect(status->mapTo(scroll->viewport(), QPoint()), status->size());
+      QVERIFY(scroll->viewport()->rect().contains(statusRect));
+      const QString folder = qEnvironmentVariable("SHADOW_UPDATE_SCREENSHOT_DIR");
+      if(!folder.isEmpty())
+        QVERIFY(dialog->grab().save(QDir(folder).filePath("settings-modal-" + result + ".png")));
+      auto* buttons = dialog->findChild<QDialogButtonBox*>();
+      QVERIFY(buttons);
+      scroll->ensureWidgetVisible(buttons->button(QDialogButtonBox::Cancel));
+      QApplication::processEvents();
+      QTest::mouseClick(buttons->button(QDialogButtonBox::Cancel), Qt::LeftButton);
+    });
+    QVERIFY(QMetaObject::invokeMethod(&window, "showShadowSettings", Qt::DirectConnection));
+    QVERIFY(entered);
+    QCOMPARE(shown.count(), 0);
+    if(result == "abandon")
+    {
+      QTRY_COMPARE(finished.count(), 1);
+      QVERIFY(!QFile::exists(file));
+    }
+    controller->shutdown();
+  }
+  void parentWindowDestruction()
+  {
+    QTemporaryDir temporary;
+    QPointer<QWidget> window = new QWidget;
+    window->show();
+    QPointer<ShadowUpdateController> controller = new ShadowUpdateController(
+      "1.1.2", window, source(), temporary.filePath("reminders.ini"));
+    check(*controller, true);
+    QPointer<QDialog> dialog = controller->dialog();
+    QVERIFY(dialog && dialog->isVisible());
+    delete window.data();
+    QVERIFY(window.isNull());
+    QVERIFY(controller.isNull());
+    QVERIFY(dialog.isNull());
+    QApplication::processEvents();
+  }
   void manualClosePersists_data()
   {
     QTest::addColumn<QString>("action");
@@ -387,5 +662,14 @@ private slots:
   }
   void cleanupTestCase() { QDesktopServices::unsetUrlHandler("http"); QDesktopServices::unsetUrlHandler("https"); }
 };
-QTEST_MAIN(UpdateSuggestionTest)
+int main(int argc, char** argv)
+{
+  QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+  QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
+  BeeApplication application(argc, argv);
+  application.setFont(ShadowStyle::applicationFont());
+  ShadowDialogChrome::install(&application);
+  UpdateSuggestionTest test;
+  return QTest::qExec(&test, argc, argv);
+}
 #include "update_gate_test.moc"

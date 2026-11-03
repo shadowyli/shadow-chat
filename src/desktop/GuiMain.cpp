@@ -2490,7 +2490,9 @@ void GuiMain::showShadowSettings()
   dialog.setWindowTitle( QStringLiteral( "影聊设置" ) );
   dialog.setModal( true );
   dialog.setMinimumWidth( 620 );
-  dialog.setMinimumHeight( 620 );
+  const QRect settings_available = screen() ? screen()->availableGeometry() :
+    QApplication::desktop()->availableGeometry();
+  dialog.setMinimumHeight( qMin( 620, qMax( 160, settings_available.height() - 120 ) ) );
   ShadowDialogStyle::apply(&dialog);
   dialog.setStyleSheet(ShadowStyle::applicationStyleSheet()+dialog.styleSheet());
   Bee::removeContextHelpButton( &dialog );
@@ -2523,10 +2525,13 @@ void GuiMain::showShadowSettings()
   QCheckBox* startup_check = new QCheckBox( QStringLiteral( "登录 Windows 后自动启动影聊" ), message_card );
   startup_check->setObjectName( "ShadowStartupCheck" );
   const bool startup_enabled = Settings::instance().hasStartOnSystemBoot();
+  const bool startup_preference = Settings::instance().startOnSystemBootPreference();
   startup_check->setChecked( startup_enabled );
   startup_check->setEnabled( !ShadowDevPreview::active() &&
     qApp->property( "shadowAccountRoot" ).toString().isEmpty() &&
     !qApp->arguments().contains( "--profile-root" ) );
+  if( !startup_check->isEnabled() )
+    startup_check->setToolTip( QStringLiteral( "开发预览或隔离配置文件不会修改当前 Windows 用户的启动项。" ) );
   message_layout->addWidget( startup_check );
 #endif
 
@@ -2566,17 +2571,83 @@ void GuiMain::showShadowSettings()
   security_title->setObjectName( "ShadowOnboardingStep" );
   QLabel* update_check = new QLabel( QStringLiteral( "异步检查更新，每个自然日最多建议一次，不影响使用。" ), security_card );
   update_check->setWordWrap( true );
-  update_check->setToolTip( QStringLiteral( "只访问影聊的静态版本清单，不上传姓名、联系人、文件或使用数据。" ) );
+  update_check->setToolTip( QStringLiteral( "通过 GitHub 的公开发布清单和安装包校验信息检查更新，不上传姓名、联系人、文件或使用数据。" ) );
   QLabel* security_text = new QLabel( QStringLiteral( "聊天、文件和通讯录留在局域网；第三方插件、云端转发和从聊天中运行程序已关闭。" ), security_card );
   security_text->setWordWrap( true );
   security_text->setObjectName( "ShadowOnboardingBody" );
+  if( m_updates && m_updates->isChecking() )
+    m_updates->checkManuallyInline();
+  QLabel* update_status = new QLabel( security_card );
+  update_status->setObjectName( "ShadowUpdateSettingsStatus" );
+  update_status->setWordWrap( true );
+  update_status->setTextFormat( Qt::PlainText );
+  update_status->setAccessibleName( QStringLiteral( "更新检查状态" ) );
+  update_status->setText( m_updates ? m_updates->statusText() :
+    QStringLiteral( "当前版本 %1；更新功能暂不可用，请重新启动影聊后重试。" )
+      .arg( Settings::instance().version( false, false, false ) ) );
+  QPlainTextEdit* update_notes = new QPlainTextEdit( security_card );
+  update_notes->setObjectName( "ShadowUpdateSettingsNotes" );
+  update_notes->setAccessibleName( QStringLiteral( "版本更新说明" ) );
+  update_notes->setReadOnly( true );
+  update_notes->setFixedHeight( 80 );
+  update_notes->setSizePolicy( QSizePolicy::Ignored, QSizePolicy::Fixed );
+  update_notes->setPlainText( m_updates ? m_updates->news() : QString() );
+  update_notes->setVisible( m_updates && m_updates->statusCanDownload() && !m_updates->news().isEmpty() );
   QPushButton* version_page = new QPushButton( QStringLiteral( "查看最新版本" ), security_card );
+  version_page->setObjectName( "checkUpdateFromSettings" );
   version_page->setMaximumWidth( 120 );
-  connect( version_page, SIGNAL( clicked() ), this, SLOT( checkNewVersion() ) );
+  QPushButton* update_download = new QPushButton( QStringLiteral( "下载安装包" ), security_card );
+  update_download->setObjectName( "downloadUpdateFromSettings" );
+  update_download->setMaximumWidth( 120 );
+  update_download->setVisible( m_updates && m_updates->statusCanDownload() );
+  if( m_updates )
+    version_page->setEnabled( !m_updates->isChecking() );
+  connect( version_page, &QPushButton::clicked, &dialog,
+    [this, update_status, version_page]() {
+      if( !m_updates )
+      {
+        update_status->setText( QStringLiteral( "更新功能暂不可用，请重新启动影聊后重试。" ) );
+        return;
+      }
+      update_status->setText( QStringLiteral( "正在检查本通道的新版本… 可继续使用影聊。" ) );
+      version_page->setEnabled( false );
+      m_updates->checkManuallyInline();
+    } );
+  if( m_updates )
+  {
+    connect( &dialog, &QDialog::finished, m_updates, &ShadowUpdateController::cancelInlinePresentation );
+    connect( m_updates, &ShadowUpdateController::statusChanged, &dialog,
+      [this, update_status, version_page, update_download, update_notes]() {
+        if( !m_updates )
+          return;
+        update_status->setText( m_updates->statusText() );
+        version_page->setEnabled( !m_updates->isChecking() );
+        update_download->setVisible( m_updates->statusCanDownload() );
+        update_notes->setPlainText( m_updates->news() );
+        update_notes->setVisible( m_updates->statusCanDownload() && !m_updates->news().isEmpty() );
+      } );
+  }
+  connect( update_download, &QPushButton::clicked, &dialog,
+    [this, update_status]() {
+      if( !m_updates || !m_updates->statusCanDownload() )
+      {
+        update_status->setText( QStringLiteral( "暂无可下载的更新，请先重新检查。" ) );
+        return;
+      }
+      if( !QDesktopServices::openUrl( QUrl( m_updates->downloadUrl() ) ) )
+        update_status->setText( QStringLiteral( "无法打开下载链接，请检查默认浏览器设置后重试。" ) );
+    } );
   security_layout->addWidget( security_title );
   security_layout->addWidget( update_check );
   security_layout->addWidget( security_text );
-  security_layout->addWidget( version_page, 0, Qt::AlignLeft );
+  QHBoxLayout* update_actions = new QHBoxLayout;
+  update_actions->setSpacing( 8 );
+  update_actions->addWidget( version_page );
+  update_actions->addWidget( update_download );
+  update_actions->addStretch();
+  security_layout->addLayout( update_actions );
+  security_layout->addWidget( update_status );
+  security_layout->addWidget( update_notes );
   root_layout->addWidget( security_card );
 
   QDialogButtonBox* buttons = new QDialogButtonBox( QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog );
@@ -2603,7 +2674,8 @@ void GuiMain::showShadowSettings()
     return;
 
 #ifdef Q_OS_WIN
-  if( startup_check->isEnabled() && startup_check->isChecked() != startup_enabled )
+  if( startup_check->isEnabled() &&
+      (startup_check->isChecked() != startup_enabled || startup_check->isChecked() != startup_preference) )
   {
     const bool saved = startup_check->isChecked() ? Settings::instance().addStartOnSystemBoot()
                                                 : Settings::instance().removeStartOnSystemBoot();
@@ -5254,6 +5326,9 @@ void GuiMain::checkNewVersion()
 {
   if( m_updates )
     m_updates->checkManually();
+  else
+    QMessageBox::information( this, QStringLiteral( "检查更新" ),
+      QStringLiteral( "更新功能暂不可用，请重新启动影聊后重试。" ) );
 }
 
 void GuiMain::openWebSite()

@@ -2220,25 +2220,64 @@ namespace
       !qApp->property( "shadowAccountRoot" ).toString().isEmpty() ||
       qApp->arguments().contains( "--profile-root" ) || qApp->arguments().contains( "--dev-preview" ));
   }
+
+  QString normalizedStartupPath( QString value )
+  {
+    value = value.trimmed();
+    if( value.startsWith( '"' ) )
+    {
+      const int closing = value.indexOf( '"', 1 );
+      if( closing < 0 || !value.mid( closing + 1 ).trimmed().isEmpty() )
+        return QString();
+      value = value.mid( 1, closing - 1 );
+    }
+    value = QDir::fromNativeSeparators( value );
+    return QDir::cleanPath( value );
+  }
+
+  bool sameStartupPath( const QString& left, const QString& right )
+  {
+    if( left.isEmpty() || right.isEmpty() )
+      return false;
+    return QString::compare( normalizedStartupPath( left ), normalizedStartupPath( right ),
+      Qt::CaseInsensitive ) == 0;
+  }
 }
 
 bool Settings::addStartOnSystemBoot()
 {
 #ifdef Q_OS_WIN
-  if( isolatedStartupSettings() )
+  if( isolatedStartupSettings() || !qApp )
     return false;
-  QString program_path = Bee::convertToNativeFolderSeparator( qApp->applicationFilePath() );
+  QString program_path = Bee::convertToNativeFolderSeparator( QDir::cleanPath( qApp->applicationFilePath() ) );
   QSettings sets( "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", QSettings::NativeFormat );
   if( sets.isWritable() )
   {
+    const QVariant previous_value = sets.value( programName() );
     sets.setValue( programName(), QStringLiteral( "\"%1\"" ).arg( program_path ) );
     sets.sync();
     if( sets.status() != QSettings::NoError )
+    {
+      if( previous_value.isValid() )
+        sets.setValue( programName(), previous_value );
+      else
+        sets.remove( programName() );
+      sets.sync();
       return false;
+    }
     QSettings preference( "HKEY_CURRENT_USER\\Software\\shadowyli\\ShadowChat", QSettings::NativeFormat );
     preference.setValue( "StartupEnabled", 1 );
     preference.sync();
-    return preference.status() == QSettings::NoError;
+    if( preference.status() != QSettings::NoError )
+    {
+      if( previous_value.isValid() )
+        sets.setValue( programName(), previous_value );
+      else
+        sets.remove( programName() );
+      sets.sync();
+      return false;
+    }
+    return true;
   }
   qWarning() << "Unable to add auto start in registry key:" << qPrintable( sets.fileName() );
 #endif
@@ -2248,11 +2287,12 @@ bool Settings::addStartOnSystemBoot()
 bool Settings::removeStartOnSystemBoot()
 {
 #ifdef Q_OS_WIN
-  if( isolatedStartupSettings() )
+  if( isolatedStartupSettings() || !qApp )
     return false;
   QSettings sets( "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", QSettings::NativeFormat );
   if( sets.isWritable() )
   {
+    const QVariant previous_value = sets.value( programName() );
     sets.remove( programName() );
     sets.sync();
     if( sets.status() != QSettings::NoError )
@@ -2260,9 +2300,16 @@ bool Settings::removeStartOnSystemBoot()
     QSettings preference( "HKEY_CURRENT_USER\\Software\\shadowyli\\ShadowChat", QSettings::NativeFormat );
     preference.setValue( "StartupEnabled", 0 );
     preference.sync();
-    return preference.status() == QSettings::NoError;
+    if( preference.status() != QSettings::NoError )
+    {
+      if( previous_value.isValid() )
+        sets.setValue( programName(), previous_value );
+      sets.sync();
+      return false;
+    }
+    return true;
   }
-  qWarning() << "Unable to remove auto start from registry key:" << sets.fileName();
+  qWarning() << "Unable to remove auto start from registry key:" << qPrintable( sets.fileName() );
 #endif
   return false;
 }
@@ -2270,12 +2317,25 @@ bool Settings::removeStartOnSystemBoot()
 bool Settings::hasStartOnSystemBoot() const
 {
 #ifdef Q_OS_WIN
-  if( isolatedStartupSettings() )
+  if( isolatedStartupSettings() || !qApp )
     return false;
-  QString program_path = qApp->applicationFilePath().replace( "/", "\\" );
   QSettings sets( "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", QSettings::NativeFormat );
   const QString configured = sets.value( programName(), "" ).toString();
-  return configured == program_path || configured == QStringLiteral( "\"%1\"" ).arg( program_path );
+  return sameStartupPath( configured, qApp->applicationFilePath() );
+#else
+  return false;
+#endif
+}
+
+bool Settings::startOnSystemBootPreference() const
+{
+#ifdef Q_OS_WIN
+  if( isolatedStartupSettings() || !qApp )
+    return false;
+  QSettings preference( "HKEY_CURRENT_USER\\Software\\shadowyli\\ShadowChat", QSettings::NativeFormat );
+  if( preference.contains( "StartupEnabled" ) )
+    return preference.value( "StartupEnabled" ).toBool();
+  return hasStartOnSystemBoot();
 #else
   return false;
 #endif
@@ -2284,7 +2344,7 @@ bool Settings::hasStartOnSystemBoot() const
 bool Settings::configureStartOnSystemBoot( bool legacyConfigured )
 {
 #ifdef Q_OS_WIN
-  if( isolatedStartupSettings() )
+  if( isolatedStartupSettings() || !qApp )
     return false;
   QSettings preference( "HKEY_CURRENT_USER\\Software\\shadowyli\\ShadowChat", QSettings::NativeFormat );
   const bool enabled = preference.contains( "StartupEnabled" )

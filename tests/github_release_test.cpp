@@ -69,8 +69,50 @@ int main(int argc, char** argv)
     CHECK(version.isEmpty() && download.isEmpty());
   }
   CHECK(parse(QJsonArray{release("2147483648.0.0", "dev")}).isEmpty());
+  CHECK(parse(QJsonArray{release("2147483648.0.0", "dev"), older}).isEmpty());
   CHECK(!parse(QJsonArray{release("1.1.6", "local")}, "test", "local").isEmpty());
   CHECK(ShadowGitHubRelease::manifest("{}", "test", "dev").isEmpty());
+  for(const QJsonValue& size : QJsonArray{0, -1, 0.5, 1.5, "1000", true, QJsonValue(), 1e50})
+  {
+    invalid = latest;
+    asset = latest.value("assets").toArray().first().toObject();
+    asset["size"] = size;
+    invalid["assets"] = QJsonArray{asset};
+    CHECK(parse(QJsonArray{invalid, older}).isEmpty());
+  }
+  invalid = latest;
+  asset = latest.value("assets").toArray().first().toObject();
+  asset["digest"] = "sha256:invalid";
+  invalid["assets"] = QJsonArray{asset};
+  CHECK(parse(QJsonArray{invalid, older}).isEmpty());
+  CHECK(parse(QJsonArray{older, invalid}).isEmpty());
+  for(const QString& flag : QStringList{"prerelease", "draft"})
+  {
+    invalid = latest;
+    invalid[flag] = "false";
+    CHECK(parse(QJsonArray{invalid, older}).isEmpty());
+  }
+  CHECK(parse(QJsonArray{release("9.0.0", "local"), older}) == parse(QJsonArray{older}));
+  CHECK(ShadowGitHubRelease::isTrustedAssetRedirect(QUrl("https://objects.githubusercontent.com/path?signature=public")));
+  CHECK(ShadowGitHubRelease::isTrustedAssetRedirect(QUrl("https://release-assets.githubusercontent.com/path?signature=public")));
+  for(const QString& destination : QStringList{
+    "http://objects.githubusercontent.com/path", "https://objects.githubusercontent.com.evil.test/path",
+    "https://user@objects.githubusercontent.com/path", "https://objects.githubusercontent.com:443/path",
+    "https://objects.githubusercontent.com/path#fragment", "https://127.0.0.1/path", "file:///tmp/metadata"})
+    CHECK(!ShadowGitHubRelease::isTrustedAssetRedirect(QUrl(destination)));
+  const QByteArray buildInfo = "{}";
+  const QByteArray sums = QByteArray(64, 'a') + " *ShadowChat-1.2.0-local-setup.exe\r\n" +
+    QCryptographicHash::hash(buildInfo, QCryptographicHash::Sha256).toHex() + "  build-info.json\n";
+  CHECK(ShadowGitHubRelease::checksums(sums, "ShadowChat-1.2.0-local-setup.exe", QString(64, 'a'), buildInfo) ==
+    ShadowGitHubRelease::ChecksumStatus::Match);
+  CHECK(ShadowGitHubRelease::checksums(sums, "ShadowChat-1.2.0-local-setup.exe", QString(64, 'b'), buildInfo) ==
+    ShadowGitHubRelease::ChecksumStatus::Mismatch);
+  CHECK(ShadowGitHubRelease::checksums(sums, "ShadowChat-1.2.0-local-setup.exe", QString(64, 'a'), "different") ==
+    ShadowGitHubRelease::ChecksumStatus::Mismatch);
+  CHECK(ShadowGitHubRelease::checksums(sums, "missing.exe", QString(64, 'a'), buildInfo) ==
+    ShadowGitHubRelease::ChecksumStatus::Missing);
+  CHECK(ShadowGitHubRelease::checksums("malformed", "missing.exe", QString(64, 'a'), buildInfo) ==
+    ShadowGitHubRelease::ChecksumStatus::Malformed);
   if(app.arguments().size() > 1)
   {
     QFile fixture(app.arguments().at(1));
