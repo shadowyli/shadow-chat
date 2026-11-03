@@ -32,6 +32,7 @@
 #include "ShadowWindowShape.h"
 #include <QTcpServer>
 #include <QtWidgets>
+#include <cstdlib>
 #include <cstdio>
 
 #define CHECK(value) do { if( !(value) ) { std::fprintf( stderr, "FAIL line %d: %s\n", __LINE__, #value ); return 1; } } while(false)
@@ -1229,14 +1230,26 @@ static int verifyWelcome( GuiMain& window )
   bool fileSelected=false;
   QTimer pickerDriver;
   QObject::connect(&pickerDriver,&QTimer::timeout,&dialog,[&]() {
-    QFileDialog* picker=qobject_cast<QFileDialog*>(QApplication::activeModalWidget());
+    QFileDialog* picker=dialog.findChild<QFileDialog*>();
     if(!picker)return;
-    pickerDriver.stop();
-    picker->selectFile(imagePath);
-    fileSelected=QMetaObject::invokeMethod(picker,"accept",Qt::DirectConnection);
+    QLineEdit* fileName=picker->findChild<QLineEdit*>("fileNameEdit");
+    if(!fileName)return;
+    fileName->setText(QDir::toNativeSeparators(imagePath));
+    const bool invoked=QMetaObject::invokeMethod(picker,"accept",Qt::DirectConnection);
+    fileSelected=invoked&&picker->result()==QDialog::Accepted&&
+      picker->selectedFiles().contains(imagePath);
+    if(fileSelected)pickerDriver.stop();
   });
+  QTimer pickerGuard;
+  pickerGuard.setSingleShot(true);
+  QObject::connect(&pickerGuard,&QTimer::timeout,&dialog,[&]() {
+    std::fprintf(stderr,"FAIL: welcome avatar file picker timed out\n");
+    std::exit(1);
+  });
+  pickerGuard.start(5000);
   pickerDriver.start(30);
   avatar->click();
+  pickerGuard.stop();
   pickerDriver.stop();
   QApplication::setAttribute(Qt::AA_DontUseNativeDialogs,nativeDialogsDisabled);
   CHECK(fileSelected&&!dialog.avatar().isNull());
