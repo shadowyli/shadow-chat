@@ -14,7 +14,6 @@
 #include "Core.h"
 #include "Message.h"
 #include "Protocol.h"
-#include "Updater.h"
 #include "ShadowPreviewTransport.h"
 #include "ShadowStickerMedia.h"
 #include <QBuffer>
@@ -286,15 +285,26 @@ bool ShadowDevPreview::checkArguments( int argc, char** argv, QString* error )
 #endif
 }
 
-bool ShadowDevPreview::configure( const QStringList& arguments, QString* error )
+QUrl ShadowDevPreview::previewUpdateSource()
+{
+  return QUrl( QStringLiteral( "http://127.0.0.1:5173/updates/shadowchat.json" ) );
+}
+
+bool ShadowDevPreview::configure( const QStringList& arguments, QString* error, const QUrl& updateSource )
 {
   if( !arguments.contains( "--dev-preview" ) ) return true;
-  const QUrl updateSource = Updater::productionManifestUrl();
-  const QHostAddress updateHost( updateSource.host() );
+#if !defined(SHADOWCHAT_BUILD_LOCAL) || defined(SHADOWCHAT_BUILD_MAIN) || defined(SHADOWCHAT_BUILD_DEV)
+  Q_UNUSED( updateSource )
+  *error = "Native dev preview arguments require an explicit local build.";
+  return false;
+#else
   if( !updateSource.isValid() || (updateSource.scheme() != "http" && updateSource.scheme() != "https") ||
-      updateHost.isNull() || !updateHost.isLoopback() )
+      (updateSource.host() != "127.0.0.1" && updateSource.host() != "::1") ||
+      updateSource.port() == 0 || updateSource.authority( QUrl::FullyEncoded ).contains( '@' ) ||
+      updateSource.hasQuery() || updateSource.hasFragment() ||
+      updateSource.path( QUrl::FullyEncoded ) != "/updates/shadowchat.json" )
   {
-    *error = "Native preview requires the actual update source to use a literal loopback address.";
+    *error = "Native preview requires a literal loopback update source with the fixed safe path and no credentials, query or fragment.";
     return false;
   }
   const QString profile = QFileInfo( option( arguments, "--profile-root" ) ).canonicalFilePath();
@@ -321,6 +331,7 @@ bool ShadowDevPreview::configure( const QStringList& arguments, QString* error )
   qApp->setProperty( "shadowDevSeed", arguments.contains( "--dev-seed" ) );
   qApp->setProperty( "shadowAccountRoot", profile );
   return true;
+#endif
 }
 
 bool ShadowDevPreview::seedAccount( QString* error )

@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QRect>
 #include <QTimer>
+#include <QUrl>
 class GuiMain;
 class Core;
 class Chat;
@@ -16,7 +17,8 @@ class ShadowDevPreview : public QObject
 {
 public:
   static bool checkArguments( int argc, char** argv, QString* error );
-  static bool configure( const QStringList& arguments, QString* error );
+  static QUrl previewUpdateSource();
+  static bool configure( const QStringList& arguments, QString* error, const QUrl& updateSource = previewUpdateSource() );
   static bool seedAccount( QString* error );
   static void prepareSettings();
   static bool active();

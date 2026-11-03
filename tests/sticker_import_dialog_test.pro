@@ -6,8 +6,10 @@ isEmpty(SHADOWCHAT_PREVIEW_BUILD) {
   INCLUDEPATH += $$PWD/../src/core $$PWD/../src/desktop
   SOURCES += $$PWD/sticker_import_dialog_test.cpp \
              $$PWD/../src/desktop/GuiStickerPicker.cpp \
+             $$PWD/../src/desktop/ShadowPopup.cpp \
              $$PWD/../src/core/ShadowStickerStore.cpp
-  HEADERS += $$PWD/../src/desktop/GuiStickerPicker.h
+  HEADERS += $$PWD/../src/desktop/GuiStickerPicker.h \
+             $$PWD/../src/desktop/ShadowPopup.h
 } else {
   include(dev_preview_test.pro)
   QT += gui-private testlib

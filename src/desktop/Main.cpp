@@ -145,13 +145,14 @@ int main( int argc, char *argv[] )
   bee_app.setApplicationVersion( Settings::instance().version( false, false, false ) );
 
   const QStringList startup_arguments = bee_app.arguments();
-  if( !ShadowDevPreview::configure( startup_arguments, &preview_error ) )
+  const bool dev_preview_mode = startup_arguments.contains( QStringLiteral( "--dev-preview" ) );
+  const QUrl update_source = dev_preview_mode ? ShadowDevPreview::previewUpdateSource() : QUrl();
+  if( !ShadowDevPreview::configure( startup_arguments, &preview_error, update_source ) )
   {
     qCritical() << preview_error;
     Settings::close();
     return 2;
   }
-  const bool dev_preview_mode = startup_arguments.contains( QStringLiteral( "--dev-preview" ) );
   const QString startup_profile_root = bee_app.property( "shadowAccountRoot" ).toString();
   const int profile_argument = startup_arguments.indexOf( QStringLiteral( "--profile-root" ) );
   if( profile_argument >= 0 )
@@ -382,8 +383,6 @@ int main( int argc, char *argv[] )
 
   /* Init Main Window */
   GuiMain mw;
-  const QUrl update_source = dev_preview_mode
-    ? QUrl( QStringLiteral( "http://127.0.0.1:5173/updates/shadowchat.json" ) ) : QUrl();
   ShadowUpdateController updates( Settings::instance().version( false, false, false ), &mw, update_source,
     profile_argument >= 0 ? QDir( bee_app.property( "shadowAccountRoot" ).toString() ).filePath( "update-reminders.ini" ) : QString() );
   updates.setBusyPredicate( [&bee_core]() { return bee_core.hasFileTransferInProgress(); } );
