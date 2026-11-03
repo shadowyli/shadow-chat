@@ -25,6 +25,9 @@
 #define BEEBEEP_UPDATER_H
 
 #include <QtCore>
+#include <QDateTime>
+
+class ShadowGitHubFallback;
 
 class Updater : public QObject
 {
@@ -41,7 +44,11 @@ public:
   QString errorString() const { return m_error; }
   bool hasNewerVersion( const QString& current ) const;
   bool isChecking() const { return m_checking; }
+  bool isApiBackedOff() const;
+  QDateTime apiBackoffUntil() const { return m_apiBackoffUntil; }
   static QUrl productionManifestUrl();
+
+  void setNetworkTimeoutsForTesting( int api_timeout_ms, int fallback_timeout_ms );
 
 signals:
   void newVersionAvailable( const QString& );
@@ -54,14 +61,25 @@ protected slots:
   void onDownloadCompleted( const QString& );
 
 private:
+  void finishCheck();
+  void startFallback( const QString& primary_error );
+  void applyApiBackoff( const QByteArray& retry_after, const QByteArray& remaining,
+                        const QByteArray& reset );
+  void readNews( const QByteArray& manifest_data );
+
   QString m_versionAvailable;
   QString m_downloadUrl;
   QString m_news;
   QUrl m_manifestUrl;
   bool m_manifestValid = false;
   bool m_checking = false;
+  bool m_fallbackStarted = false;
   QString m_error;
   QString m_channel;
+  QDateTime m_apiBackoffUntil;
+  int m_apiTimeoutMs = 8000;
+  int m_fallbackTimeoutMs = 24000;
+  ShadowGitHubFallback* m_fallback = nullptr;
 
 };
 
