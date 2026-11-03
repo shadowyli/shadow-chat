@@ -288,7 +288,7 @@ int main( int argc, char** argv )
   flushEvents();
   ShadowCalendarPopup* calendar = birthday->findChild<ShadowCalendarPopup*>();
   CHECK( calendar && calendar->isVisible() );
-  const QString popup_font_family = QFontInfo( ShadowStyle::applicationFont() ).family();
+  const QString popup_font_family = QFontInfo( calendar->font() ).family();
   CHECK( !popup_font_family.isEmpty() );
   CHECK( QFontInfo( calendar->yearButton()->font() ).family() == popup_font_family );
   foreach( QToolButton* day, calendar->findChildren<QToolButton*>( QStringLiteral( "calendarDay" ) ) )
