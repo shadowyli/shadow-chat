@@ -10,6 +10,7 @@
 #include "ShadowAvatarInteractions.h"
 #include "ShadowStyle.h"
 #include "UserManager.h"
+#include <QCursor>
 #include <QtTest>
 #include <cstdio>
 
@@ -190,6 +191,7 @@ int main( int argc, char** argv )
   window.resize( 1000, 720 );
   window.show();
   flushEvents();
+  QCursor::setPos( window.centralWidget()->mapToGlobal( window.centralWidget()->rect().center() ) );
   ExternalOpenProbe external;
   QDesktopServices::setUrlHandler( QStringLiteral( "shadowuser" ), &external, "capture" );
   CHECK( route( window, profileLink( peer ), direct.id() ) );
