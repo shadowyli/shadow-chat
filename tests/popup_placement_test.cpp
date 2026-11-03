@@ -66,6 +66,54 @@ static bool completeShadow( QWidget* widget )
     if( alpha <= 0 || alpha >= 255 )
       return false;
   }
+  for( const QPoint& direction : QList<QPoint>{ QPoint( 1, 0 ), QPoint( -1, 0 ),
+       QPoint( 0, 1 ), QPoint( 0, -1 ) } )
+  {
+    const QPoint edge( direction.x() > 0 ? 0 : direction.x() < 0 ? widget->width()-1 : widget->width()/2,
+      direction.y() > 0 ? 0 : direction.y() < 0 ? widget->height()-1 : widget->height()/2 );
+    const QPoint outside = edge + direction * 2;
+    const QPoint inside = edge + direction * (ShadowPopup::shadowMargin-2);
+    const int outside_alpha = pixels.pixelColor( qRound( outside.x()*ratio ), qRound( outside.y()*ratio ) ).alpha();
+    const int inside_alpha = pixels.pixelColor( qRound( inside.x()*ratio ), qRound( inside.y()*ratio ) ).alpha();
+    if( outside_alpha <= 0 || inside_alpha <= outside_alpha || inside_alpha >= 255 )
+      return false;
+  }
+  return true;
+}
+
+static bool opaqueCard( QWidget* widget, const QString& name, bool check_padding = true )
+{
+  const QImage pixels = widget->grab().toImage();
+  const qreal ratio = pixels.devicePixelRatio();
+  const int inset = ShadowPopup::shadowMargin + 14;
+  const QRect inner( qCeil( inset*ratio ), qCeil( inset*ratio ),
+    qFloor( (widget->width()-2*inset)*ratio ), qFloor( (widget->height()-2*inset)*ratio ) );
+  if( inner.isEmpty() || !pixels.rect().contains( inner ) )
+    return false;
+  int transparent_pixels = 0;
+  for( int vertical = inner.top(); vertical <= inner.bottom(); ++vertical )
+    for( int horizontal = inner.left(); horizontal <= inner.right(); ++horizontal )
+      if( pixels.pixelColor( horizontal, vertical ).alpha() != 255 )
+        ++transparent_pixels;
+  std::printf( "card-opacity %s scale=%.2f inner=%dx%d nonopaque=%d\n", qPrintable( name ),
+    ratio, inner.width(), inner.height(), transparent_pixels );
+  if( transparent_pixels )
+    return false;
+  if( !check_padding )
+    return true;
+  const QRect card = widget->rect().adjusted( ShadowPopup::shadowMargin, ShadowPopup::shadowMargin,
+    -ShadowPopup::shadowMargin, -ShadowPopup::shadowMargin );
+  const QList<QPoint> blank_samples = { QPoint( card.left()+card.width()/4, card.top()+3 ),
+    QPoint( card.center().x(), card.top()+3 ), QPoint( card.right()-card.width()/4, card.top()+3 ),
+    QPoint( card.left()+3, card.center().y() ) };
+  for( const QPoint& point : blank_samples )
+  {
+    const QColor color = pixels.pixelColor( qRound( point.x()*ratio ), qRound( point.y()*ratio ) );
+    std::printf( "card-blank %s logical=%d,%d rgba=%d,%d,%d,%d\n", qPrintable( name ),
+      point.x(), point.y(), color.red(), color.green(), color.blue(), color.alpha() );
+    if( color.alpha() != 255 || color.red() < 245 || color.green() < 245 || color.blue() < 245 )
+      return false;
+  }
   return true;
 }
 
@@ -86,6 +134,7 @@ static int verifyMenu( QMenu* menu, QWidget* trigger, const QString& name )
   CHECK( menu->geometry() == ShadowPopup::placeGeometry( anchor, menu->sizeHint(), available ) );
   CHECK( available.contains( menu->frameGeometry() ) );
   CHECK( completeShadow( menu ) );
+  CHECK( opaqueCard( menu, name ) );
   CHECK( saveProof( menu, name + QStringLiteral( ".png" ) ) );
   QTest::keyClick( menu, Qt::Key_Escape );
   flushEvents();
@@ -158,6 +207,7 @@ int main( int argc, char** argv )
   flushEvents();
   CHECK( popup.isVisible() );
   CHECK( completeShadow( &popup ) );
+  CHECK( opaqueCard( &popup, "placement-probe" ) );
   CHECK( available.contains( popup.frameGeometry() ) );
   CHECK( popup.geometry().bottom() < bottom_anchor.y() );
   CHECK( popup.geometry().right() <= available.right() );
@@ -259,6 +309,7 @@ int main( int argc, char** argv )
       CHECK( !button->isEnabled() );
     }
   CHECK( future_count > 0 || today.day() == today.daysInMonth() );
+  CHECK( opaqueCard( calendar, "calendar-days" ) && completeShadow( calendar ) );
   saveProof( calendar, QStringLiteral( "calendar-popup-%1.png" ).arg( scale ) );
   QTest::keyClick( calendar, Qt::Key_Escape );
   QTest::qWait( 20 );
@@ -288,6 +339,7 @@ int main( int argc, char** argv )
   for( QToolButton* cell : calendar->findChildren<QToolButton*>( "calendarYearCell" ) )
     if( cell->isVisible() && cell->text() == "1900" ) first_year = cell;
   CHECK( first_year );
+  CHECK( opaqueCard( calendar, "calendar-years" ) && completeShadow( calendar ) );
   CHECK( saveProof( calendar, QStringLiteral( "calendar-year-grid.png" ) ) );
   first_year->click();
   calendar->findChildren<QToolButton*>( "calendarMonthCell" ).first()->click();
@@ -304,6 +356,7 @@ int main( int argc, char** argv )
   QTest::qWait( 30 );
   flushEvents();
   CHECK( color_panel.isVisible() );
+  CHECK( opaqueCard( &color_panel, "color-panel" ) && completeShadow( &color_panel ) );
   CHECK( available.contains( color_panel.frameGeometry() ) );
   CHECK( qAbs( color_panel.geometry().center().x() - color_anchor->mapToGlobal( color_anchor->rect().center() ).x() ) < available.width() / 2 );
   saveProof( &color_panel, QStringLiteral( "color-panel-%1.png" ).arg( scale ) );
@@ -343,6 +396,8 @@ int main( int argc, char** argv )
     target->setFocus();
     scroll->ensureWidgetVisible( target ); QTest::qWait( 20 );
     CHECK( scroll->viewport()->rect().intersects( QRect( target->mapTo( scroll->viewport(), QPoint() ), target->size() ) ) );
+    CHECK( opaqueCard( panel, panel == calendar ? "calendar-narrow" : "color-narrow", false ) &&
+      completeShadow( panel ) );
     CHECK( saveProof( panel, panel == calendar ? "calendar-narrow.png" : "color-narrow.png" ) );
     QTest::keyClick( target, Qt::Key_Escape );
     CHECK( !panel->isVisible() && host.isVisible() );
@@ -370,6 +425,7 @@ int main( int argc, char** argv )
   QTest::keyClick( &tall_menu, Qt::Key_End ); QTest::qWait( 30 );
   CHECK( tall_menu.activeAction() == tall_menu.actions().last() );
   CHECK( tall_menu.rect().intersects( tall_menu.actionGeometry( tall_menu.actions().last() ) ) );
+  CHECK( opaqueCard( &tall_menu, "tall-menu" ) && completeShadow( &tall_menu ) );
   CHECK( saveProof( &tall_menu, "tall-menu-last-action.png" ) );
   QTest::keyClick( &tall_menu, Qt::Key_Escape );
   std::puts( "PASS a real 50-item menu stays on screen and its final action is keyboard reachable" );
@@ -398,22 +454,33 @@ int main( int argc, char** argv )
   format_host.close();
 
   GuiStickerPicker stickers( fixture.path(), &host );
+  host.activateWindow();
+  host.raise();
+  QTest::qWait( 30 );
   stickers.showAbove( color_anchor ); QTest::qWait( 30 );
+  CHECK( stickers.isVisible() );
   CHECK( available.contains( stickers.frameGeometry() ) );
   const QPoint sticker_before = stickers.pos();
   host.move( host.pos() + QPoint( -20, -15 ) ); QTest::qWait( 20 );
+  std::printf( "sticker-follow before=%d,%d actual=%d,%d expected=%d,%d size=%dx%d visible=%d active-owner=%d\n",
+    sticker_before.x(), sticker_before.y(), stickers.x(), stickers.y(),
+    stickers.placementGeometryFor( stickers.sizeHint() ).x(), stickers.placementGeometryFor( stickers.sizeHint() ).y(),
+    stickers.width(), stickers.height(), stickers.isVisible(), host.isActiveWindow() );
+  CHECK( stickers.isVisible() );
   CHECK( stickers.pos() - sticker_before == QPoint( -20, -15 ) );
   QToolButton* add = stickers.findChild<QToolButton*>( "StickerAddButton" );
   add->menu()->popup( add->mapToGlobal( QPoint( 0, add->height() ) ) ); QTest::qWait( 20 );
   CHECK( add->menu()->isVisible() && stickers.isVisible() );
   QTest::keyClick( add->menu(), Qt::Key_Escape ); QTest::qWait( 20 );
   CHECK( stickers.isVisible() );
+  CHECK( opaqueCard( &stickers, "stickers" ) && completeShadow( &stickers ) );
   CHECK( saveProof( &stickers, "sticker-popup.png" ) );
   stickers.setMaximumSize( 230, 150 );
   stickers.hide(); stickers.showAbove( color_anchor ); QTest::qWait( 20 );
   CHECK( stickers.width() <= 230 && stickers.height() <= 150 && available.contains( stickers.frameGeometry() ) );
   QScrollArea* sticker_scroll = stickers.findChild<QScrollArea*>( "ShadowPopupScroll" );
   sticker_scroll->ensureWidgetVisible( add );
+  CHECK( opaqueCard( &stickers, "stickers-narrow", false ) && completeShadow( &stickers ) );
   CHECK( saveProof( &stickers, "sticker-narrow.png" ) );
   QTest::keyClick( add, Qt::Key_Escape ); QTest::qWait( 20 );
   CHECK( !stickers.isVisible() );
@@ -441,6 +508,7 @@ int main( int argc, char** argv )
   window.move( window.pos() + QPoint( 16, 12 ) ); QTest::qWait( 30 );
   CHECK( submenu->pos().y() - sub_before.y() == main_menu->pos().y() - root_before.y() );
   CHECK( available.contains( submenu->frameGeometry() ) && completeShadow( submenu ) );
+  CHECK( opaqueCard( submenu, "workspace-submenu" ) );
   QTest::keyClick( submenu, Qt::Key_Escape ); QTest::qWait( 20 );
   CHECK( !submenu->isVisible() && main_menu->isVisible() );
   QTest::keyClick( main_menu, Qt::Key_Escape );
@@ -477,10 +545,15 @@ int main( int argc, char** argv )
   std::puts( "PASS actual GuiMain menu and nested workspace menu follow the main window; Escape preserves the parent menu" );
   std::puts( "PASS actual self avatar opens an anchored card, follows the main window, edits in a reachable dialog and dismisses outside" );
 
-  GuiVCard* public_card = new GuiVCard( &host );
+  host.activateWindow();
+  host.raise();
+  QTest::qWait( 30 );
+  QPointer<GuiVCard> public_card = new GuiVCard( &host );
   public_card->setVCard( settings.localUser(), ID_INVALID, false );
   public_card->showAt( color_anchor->mapToGlobal( QPoint() ) ); QTest::qWait( 20 );
+  CHECK( public_card && public_card->isVisible() );
   CHECK( available.contains( public_card->frameGeometry() ) );
+  CHECK( opaqueCard( public_card, "public-profile" ) && completeShadow( public_card ) );
   const QPoint public_before = public_card->pos();
   host.move( host.pos() + QPoint( 15, 10 ) ); QTest::qWait( 20 );
   CHECK( public_card->pos() - public_before == QPoint( 15, 10 ) );
