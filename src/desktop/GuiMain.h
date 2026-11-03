@@ -49,6 +49,8 @@ class GuiScreenShot;
 class GuiSystemTray;
 class GuiFileTransfer;
 class GuiUserList;
+class GuiVCard;
+class ShadowVideoPreview;
 class User;
 class ShadowUpdateController;
 class QFrame;
@@ -277,6 +279,7 @@ protected:
 
 private:
   void setupChatConnections( GuiChat* );
+  void showPublicVCard( const User&, const QPoint& );
   void createActions();
   void createMenus();
   void createToolAndMenuBars();
@@ -284,6 +287,8 @@ private:
   void createModernShell();
   void applyModernStyle();
   void updateModernResponsiveLayout();
+  void updateModernHistoryGeometry();
+  void showHistoryRecordContext( const QString& chatName, const QString& recordKey );
   void updateModernWindowCorners();
   void applyStartupWindowSize();
   void updateModernNavigation();
@@ -342,8 +347,9 @@ private:
   QStackedWidget* mp_modernWorkspace;
   ShadowDirectoryPage* mp_modernDirectoryPage;
   QSplitter* mp_modernContentSplitter;
-  QSplitter* mp_modernHistorySplitter;
   GuiSavedChat* mp_modernHistory;
+  QWidget* mp_archiveContextPage;
+  QPointer<GuiChat> mp_archiveContextView;
   QLineEdit* mp_modernSearch;
   ShadowSearchPanel* mp_modernSearchPanel;
   QFrame* mp_modernNetworkStrip;
@@ -358,6 +364,8 @@ private:
   QLabel* mp_modernSectionHint;
   QLabel* mp_modernChatTitle;
   QLabel* mp_modernChatAvatar;
+  QPointer<GuiVCard> mp_publicVCard;
+  QPointer<ShadowVideoPreview> mp_videoPreview;
   QLabel* mp_modernChatSubtitle;
   QToolButton* mp_modernMessagesButton;
   QToolButton* mp_modernContactsButton;

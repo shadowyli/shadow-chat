@@ -44,6 +44,8 @@ public:
   inline void setGroupLastModified( const QDateTime& );
   const QString& groupOwnerHash() const { return m_groupOwnerHash; }
   void setGroupOwnerHash( const QString& value ) { m_groupOwnerHash = value; }
+  const QString& richText() const { return m_richText; }
+  void setRichText( const QString& value ) { m_richText = value; }
 
 private:
   QColor m_textColor;
@@ -51,6 +53,7 @@ private:
   QString m_groupName;
   QDateTime m_groupLastModified;
   QString m_groupOwnerHash;
+  QString m_richText;
 
 };
 

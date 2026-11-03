@@ -519,7 +519,7 @@ int Core::archiveAllChats()
   return chat_count;
 }
 
-int Core::sendChatMessage( VNumber chat_id, const QString& msg, bool is_important, bool can_be_delayed, bool is_source_code )
+int Core::sendChatMessage( VNumber chat_id, const QString& msg, bool is_important, bool can_be_delayed, bool is_source_code, const QString& rich_text )
 {
   if( !isConnected() )
   {
@@ -555,7 +555,7 @@ int Core::sendChatMessage( VNumber chat_id, const QString& msg, bool is_importan
     PluginManager::instance().parseText( &msg_to_send, true );
   }
 
-  Message m = Protocol::instance().chatMessage( c, msg_to_send );
+  Message m = Protocol::instance().chatMessage( c, msg_to_send, is_source_code?QString():rich_text );
   if( is_important )
     m.setImportant();
 
@@ -607,7 +607,6 @@ int Core::sendMessageToChat( const Chat& c, const Message& m )
         tr( "消息“%1”：已送达 0/%2 人" ).arg( preview.toHtmlEscaped() ).arg( recipients.size() ),
         DispatchToChat, ChatMessage::Other, true );
   }
-  QStringList offline_users;
   foreach( User u, user_list.toList() )
   {
     if( u.isLocal() )
@@ -616,7 +615,6 @@ int Core::sendMessageToChat( const Chat& c, const Message& m )
     if( m.isDelayed() || !sendMessageToLocalNetwork( u, m ) )
     {
       MessageManager::instance().addMessageToSend( u.id(), c.id(), m );
-      offline_users.append( Bee::userNameToShow( u, true ) );
     }
     else
     {
@@ -624,20 +622,6 @@ int Core::sendMessageToChat( const Chat& c, const Message& m )
         MessageManager::instance().addSentMessage( u.id(), c.id(), m );
       messages_sent += 1;
     }
-  }
-
-  if( !offline_users.isEmpty() )
-  {
-    QString sys_msg;
-    if( m.hasFlag( Message::VoiceMessage ) )
-      sys_msg = tr( "The voice message will be delivered to %1." );
-    else
-      sys_msg = tr( "The message will be delivered to %1." );
-
-    dispatchSystemMessage( c.id(), ID_LOCAL_USER, QString( "%1 %2" )
-                           .arg( IconManager::instance().toHtml( "unsent-message.png", "*m*" ),
-                                 sys_msg.arg( Bee::stringListToTextString( offline_users, true, 3 ) ) ),
-                           DispatchToChat, ChatMessage::Other, false );
   }
 
   return messages_sent;
@@ -855,12 +839,6 @@ void Core::addListToSavedChats()
           }
         }
 
-        dispatchSystemMessage( mr.chatId(), ID_LOCAL_USER, QString( "%1 %2: &quot;%3&quot; [<i>%4</i>]" )
-                               .arg( IconManager::instance().toHtml( "unsent-message.png", "*m*" ) )
-                               .arg( tr( "Offline message will be sent to %1" ).arg( Bee::userNameToShow( to_user, true ) ) )
-                               .arg( msg_txt )
-                               .arg( mr.message().timestamp().toString( "yyyy-MM-dd hh:mm:ss" ) ),
-                               DispatchToChat, ChatMessage::Other, false );
         MessageManager::instance().addMessageRecord( mr );
       }
     }
@@ -909,7 +887,6 @@ int Core::checkOfflineMessagesForUser( const User& u, bool on_new_connection )
   if( message_list.isEmpty() )
     return 0;
 
-  QList<VNumber> chat_list;
   QList<MessageRecord> unsent_messages;
   int messages_sent = 0;
   bool user_is_online = false;
@@ -950,8 +927,6 @@ int Core::checkOfflineMessagesForUser( const User& u, bool on_new_connection )
       {
         if( mr.message().type() == Message::Chat && u.protocolVersion() >= RECEIVED_MESSAGE_PROTO_VERSION )
           MessageManager::instance().addSentMessage( u.id(), mr.chatId(), mr.message() );
-        if( mr.isChatValid() && !chat_list.contains( mr.chatId() ) )
-          chat_list.append( mr.chatId() );
         messages_sent++;
       }
       else
@@ -969,13 +944,6 @@ int Core::checkOfflineMessagesForUser( const User& u, bool on_new_connection )
 
   if( messages_sent > 0 )
   {
-    foreach( VNumber ci, chat_list )
-    {
-      dispatchSystemMessage( ci, u.id(), QString( "%1 %2" )
-                             .arg( IconManager::instance().toHtml( "unsent-message.png", "*m*" ),
-                             tr( "Offline messages sent to %1." ).arg( Bee::userNameToShow( u, true ) ) ),
-                             DispatchToChat, ChatMessage::Other, false );
-    }
     qDebug() << messages_sent << "offline messages sent to" << qPrintable( u.path() ) << "-" << unsent_messages.size() << "messages left";
     emit offlineMessageSentToUser( u );
   }

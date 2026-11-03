@@ -36,6 +36,7 @@ class Emoticon;
 class QLabel;
 class QToolButton;
 class QTimer;
+class GuiStickerPicker;
 
 
 class GuiChat : public QWidget, private Ui::GuiChatWidget
@@ -50,6 +51,7 @@ public:
   void updateActions( const Chat&, bool is_connected, int connected_users, bool file_transfer_is_active );
 
   bool setChat( const Chat& );
+  bool showHistoryRecord( const QString& chatName, const QString& recordKey, bool archivedOnly = false );
   inline VNumber chatId() const;
   void ensureLastMessageVisible();
   void updateShortcuts();
@@ -72,6 +74,7 @@ public:
   void setFileSendResult( bool accepted, const QString& feedback );
   void showSendFeedback( const QString& feedback, bool failed );
   void refreshTransferIndicators();
+  QString pendingRichText( const QString& message ) const { return message==m_pendingMessage?m_pendingRichText:QString(); }
 
 
 #ifdef BEEBEEP_USE_VOICE_CHAT
@@ -229,11 +232,15 @@ private:
   QHash<QString,TransferBubble> m_transferBubbles;
   QString m_pendingMessage;
   QString m_pendingDraftMessage;
+  QString m_pendingRichText;
   QHash<VNumber,QPair<QString,QString>> m_replyDrafts;
-  QHash<VNumber,QString> m_messageDrafts;
+  QHash<VNumber,GuiMessageEdit::Draft> m_messageDrafts;
   QHash<VNumber,QPair<QString,bool>> m_feedbackDrafts;
   QWidget* mp_replyBar;
   QLabel* mp_replyPreview;
+  QPointer<GuiStickerPicker> mp_stickerPicker;
+  QToolButton* mp_stickerButton;
+  bool m_captureHideWindow;
   QString m_fileSendFeedback;
   bool m_fileSendAccepted;
   bool m_modernMode;

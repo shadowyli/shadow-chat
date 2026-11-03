@@ -69,6 +69,7 @@ BeeApplication::BeeApplication( int& argc, char** argv  )
 {
   setObjectName( "BeeApplication" );
   mp_instance = this;
+  setWindowIcon( QIcon( QStringLiteral( ":/images/shadowchat/shadowchat-app.ico" ) ) );
 
   // when beebeep starts closed to tray last window is "ask password".
   // After auth "ask password" is closed and then the app quit

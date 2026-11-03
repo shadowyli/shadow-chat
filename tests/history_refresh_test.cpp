@@ -44,7 +44,8 @@ static void settle( QApplication& application )
 
 int main( int argc, char** argv )
 {
-  qputenv( "QT_QPA_PLATFORM", "offscreen" );
+  if( qEnvironmentVariableIsEmpty( "QT_QPA_PLATFORM" ) )
+    qputenv( "QT_QPA_PLATFORM", "offscreen" );
   BeeApplication application( argc, argv );
   Random::init();
   QTemporaryDir temporary;
@@ -84,6 +85,11 @@ int main( int argc, char** argv )
   ChatManager::instance().addSavedChats( histories );
 
   GuiSavedChat history( Q_NULLPTR, true );
+  QList<QPair<QString,QString>> contextRequests;
+  QObject::connect( &history, &GuiSavedChat::contextRequested,
+    [&]( const QString& chatName, const QString& recordKey ) {
+      contextRequests.append( qMakePair( chatName, recordKey ) );
+    } );
   history.resize( 390, 620 );
   history.showSavedChat( live.name() );
   history.show();
@@ -104,10 +110,13 @@ int main( int argc, char** argv )
     if( combo->accessibleName() == QStringLiteral("排序") ) order = combo;
   }
   CHECK( results && pages && source && keyword && categories && context && sender && dates && order );
+  CHECK( pages->count() == 1 && pages->currentWidget()->isAncestorOf( results ) );
   CHECK( results->count() == 83 );
 
   QListWidgetItem* selected = findResult( results, "history message 030" );
   CHECK( selected );
+  const QString selectedKey = shadowHistoryRecordKeys( shadowChatHistoryRecords( archive ) ).at( 30 );
+  CHECK( selected->data( Qt::UserRole + 7 ).toString() == selectedKey );
   results->setCurrentItem( selected );
   results->scrollToItem( selected, QAbstractItemView::PositionAtTop );
   results->verticalScrollBar()->setValue( results->verticalScrollBar()->value() + 17 );
@@ -129,27 +138,46 @@ int main( int argc, char** argv )
 
   context->click();
   settle( application );
-  CHECK( pages->currentIndex() == 1 && source->verticalScrollBar()->maximum() > 0 );
-  source->verticalScrollBar()->setValue( source->verticalScrollBar()->maximum() / 2 + 11 );
+  CHECK( contextRequests.size() == 1 );
+  CHECK( contextRequests.last() == qMakePair( live.name(), selectedKey ) );
+  CHECK( pages->count() == 1 && pages->currentIndex() == 0 && !source->isVisible() );
+  CHECK( results->currentItem()->data( Qt::UserRole + 7 ).toString() == selectedKey );
+  CHECK( firstVisible( results )->text() == visibleText );
+  CHECK( qAbs( results->visualItemRect( firstVisible( results ) ).top() - visibleTop ) <= 1 );
   const int sourceScroll = source->verticalScrollBar()->value();
   const int hiddenListScroll = results->verticalScrollBar()->value();
   live.addMessage( ChatMessage( peer.id(), Protocol::instance().chatMessage(live,QStringLiteral("live incoming 2")), ChatMessage::Chat, true ) );
   ChatManager::instance().setChat( live );
   history.showSavedChat( live.name() );
   settle( application );
-  CHECK( pages->currentIndex() == 1 && context->isEnabled() );
+  CHECK( pages->count() == 1 && pages->currentIndex() == 0 && context->isEnabled() );
   CHECK( results->currentItem() && results->currentItem()->text().contains( "history message 030" ) );
+  CHECK( results->currentItem()->data( Qt::UserRole + 7 ).toString() == selectedKey );
+  CHECK( firstVisible( results )->text() == visibleText );
+  CHECK( qAbs( results->visualItemRect( firstVisible( results ) ).top() - visibleTop ) <= 1 );
   CHECK( source->verticalScrollBar()->value() == sourceScroll );
   CHECK( results->verticalScrollBar()->value() > hiddenListScroll );
+  CHECK( ChatManager::instance().chatSavedText( live.name() ) == archive );
+  context->click();
+  CHECK( contextRequests.size() == 2 && contextRequests.last() == qMakePair( live.name(), selectedKey ) );
   const int refreshedListScroll = results->verticalScrollBar()->value();
   history.showSavedChat( live.name() );
   settle( application );
-  CHECK( pages->currentIndex() == 1 && source->verticalScrollBar()->value() == sourceScroll );
+  CHECK( pages->count() == 1 && pages->currentIndex() == 0 && source->verticalScrollBar()->value() == sourceScroll );
   CHECK( results->verticalScrollBar()->value() == refreshedListScroll );
+  CHECK( contextRequests.size() == 2 );
+  CHECK( results->currentItem()->data( Qt::UserRole + 7 ).toString() == selectedKey );
 
   keyword->setText( "history message" );
   settle( application );
+  CHECK( pages->count() == 1 && pages->currentIndex() == 0 && context->isEnabled() );
+  CHECK( results->currentItem() && results->currentItem()->data(Qt::UserRole+7).toString() == selectedKey );
+  CHECK( source->verticalScrollBar()->value() == sourceScroll );
+  CHECK( contextRequests.size() == 2 );
+  keyword->setText( "history message 079" );
+  settle( application );
   CHECK( pages->currentIndex() == 0 && !results->currentItem() && !context->isEnabled() );
+  CHECK( results->count() == 1 && results->item(0)->text().contains("history message 079") );
   CHECK( results->verticalScrollBar()->value() == 0 && source->verticalScrollBar()->value() == 0 );
   keyword->clear();
   selected = findResult( results, "history message 030" );
@@ -161,26 +189,44 @@ int main( int argc, char** argv )
   history.showSavedChat( live.name() );
   CHECK( results->currentItem() && results->currentItem()->text().contains( "history message 030" ) );
   CHECK( results->currentItem()->data( Qt::UserRole ).toInt() == oldRecordIndex + 1 );
+  CHECK( results->currentItem()->data( Qt::UserRole + 7 ).toString() == selectedKey );
+  CHECK( ChatManager::instance().chatSavedText( live.name() ) == histories[live.name()] );
 
   for( int row = 0; row < results->count(); ++row )
     if( results->item(row)->data(Qt::UserRole).toInt() == 82 )
       results->setCurrentRow( row );
   CHECK( results->currentItem() && results->currentItem()->text().contains( "exact duplicate" ) );
+  const QString duplicateKey = results->currentItem()->data( Qt::UserRole + 7 ).toString();
   histories[live.name()] += duplicate;
   ChatManager::instance().addSavedChats( histories );
   history.showSavedChat( live.name() );
   CHECK( results->currentItem() && results->currentItem()->data(Qt::UserRole).toInt() == 82 );
+  CHECK( results->currentItem()->data( Qt::UserRole + 7 ).toString() == duplicateKey );
+  context->click();
+  CHECK( contextRequests.last() == qMakePair( live.name(), duplicateKey ) );
+  CHECK( ChatManager::instance().chatSavedText( live.name() ) == histories[live.name()] );
 
   for( QComboBox* filter : QList<QComboBox*>{sender, dates, order} )
   {
     results->setCurrentItem( findResult(results,"history message 031") );
     context->click();
+    const QString matchingFilterKey = results->currentItem()->data(Qt::UserRole+7).toString();
+    const int matchingRequestCount = contextRequests.size();
     filter->setCurrentIndex(1);
     settle( application );
-    CHECK( pages->currentIndex() == 0 && !results->currentItem() && !context->isEnabled() );
-    CHECK( results->verticalScrollBar()->value() == 0 && source->verticalScrollBar()->value() == 0 );
+    CHECK( pages->count() == 1 && pages->currentIndex() == 0 && context->isEnabled() );
+    CHECK( results->currentItem() && results->currentItem()->data(Qt::UserRole+7).toString() == matchingFilterKey );
+    CHECK( contextRequests.size() == matchingRequestCount );
+    context->click();
+    CHECK( contextRequests.size() == matchingRequestCount + 1 );
+    CHECK( contextRequests.last() == qMakePair(live.name(),matchingFilterKey) );
     filter->setCurrentIndex(0);
   }
+  sender->setCurrentIndex(sender->findData("Bob"));
+  settle(application);
+  CHECK( pages->count() == 1 && pages->currentIndex() == 0 && !results->currentItem() && !context->isEnabled() );
+  CHECK( results->verticalScrollBar()->value() == 0 && source->verticalScrollBar()->value() == 0 );
+  sender->setCurrentIndex(0);
 
   sender->setCurrentIndex(sender->findData("Alice"));
   order->setCurrentIndex(1);
@@ -189,14 +235,21 @@ int main( int argc, char** argv )
   context->click();
   settle(application);
   const int filteredSourceScroll = source->verticalScrollBar()->value();
+  const int filteredListScroll = results->verticalScrollBar()->value();
+  const QString filteredKey = results->currentItem()->data( Qt::UserRole + 7 ).toString();
+  CHECK( contextRequests.last() == qMakePair( live.name(), filteredKey ) );
+  CHECK( pages->count() == 1 && pages->currentIndex() == 0 );
   live.addMessage( ChatMessage( peer.id(), Protocol::instance().chatMessage(live,QStringLiteral("unrelated new sender")), ChatMessage::Chat, true ) );
   ChatManager::instance().setChat(live);
   history.showSavedChat(live.name());
   settle(application);
   CHECK( sender->currentData().toString() == "Alice" && order->currentIndex() == 1 );
-  CHECK( keyword->text() == "history message" && pages->currentIndex() == 1 );
+  CHECK( keyword->text() == "history message" && pages->count() == 1 && pages->currentIndex() == 0 );
   CHECK( results->currentItem() && results->currentItem()->text().contains("history message 031") );
+  CHECK( results->currentItem()->data( Qt::UserRole + 7 ).toString() == filteredKey );
+  CHECK( results->verticalScrollBar()->value() == filteredListScroll );
   CHECK( source->verticalScrollBar()->value() == filteredSourceScroll );
+  CHECK( ChatManager::instance().chatSavedText( live.name() ) == histories[live.name()] );
   keyword->clear();
   sender->setCurrentIndex(0);
   order->setCurrentIndex(0);
@@ -208,16 +261,32 @@ int main( int argc, char** argv )
   ChatManager::instance().addSavedChats( histories );
   history.showSavedChat( live.name() );
   categories->setCurrentIndex(2);
-  CHECK( results->count() == 2 );
+  CHECK( results->count() == 3 );
+  int mediaItems = 0;
+  int dateHeaders = 0;
+  for( int row = 0; row < results->count(); ++row )
+  {
+    if( results->item(row)->data(Qt::UserRole+8).toBool() )
+    {
+      ++dateHeaders;
+      CHECK( !results->item(row)->flags().testFlag(Qt::ItemIsSelectable) );
+    }
+    else if( results->item(row)->data(Qt::UserRole+9).toBool() )
+      ++mediaItems;
+  }
+  CHECK( mediaItems == 2 && dateHeaders == 1 );
   for( int row = 0; row < results->count(); ++row )
     if( results->item(row)->data(Qt::UserRole+1).toString() == secondImage )
       results->setCurrentRow(row);
   CHECK( results->currentItem() );
+  const QString mediaKey = results->currentItem()->data(Qt::UserRole+7).toString().section( QLatin1Char('\n'), 0, 0 );
   live.addMessage( ChatMessage( peer.id(), Protocol::instance().chatMessage(live,QStringLiteral("live incoming 3")), ChatMessage::Chat, true ) );
   ChatManager::instance().setChat(live);
   history.showSavedChat(live.name());
   CHECK( results->currentItem() && results->currentItem()->data(Qt::UserRole+1).toString() == secondImage );
+  CHECK( results->currentItem()->data(Qt::UserRole+7).toString().section( QLatin1Char('\n'), 0, 0 ) == mediaKey );
   context->click();
+  CHECK( contextRequests.last() == qMakePair( live.name(), mediaKey ) );
   categories->setCurrentIndex(0);
   CHECK( pages->currentIndex() == 0 && !results->currentItem() );
 
@@ -227,6 +296,10 @@ int main( int argc, char** argv )
   ChatManager::instance().addSavedChats(histories);
   history.showSavedChat(live.name());
   CHECK( pages->currentIndex() == 0 && !results->currentItem() && !context->isEnabled() );
+  const int requestsBeforeMissingSelection = contextRequests.size();
+  context->click();
+  CHECK( contextRequests.size() == requestsBeforeMissingSelection );
+  CHECK( ChatManager::instance().chatSavedText( live.name() ) == histories[live.name()] );
 
   results->setCurrentItem( findResult(results,"history message 030") );
   context->click();
@@ -235,6 +308,8 @@ int main( int argc, char** argv )
   CHECK( pages->currentIndex() == 0 && !results->currentItem() && !context->isEnabled() );
   CHECK( results->count() == 1 && results->item(0)->text().contains("other conversation") );
   CHECK( results->verticalScrollBar()->value() == 0 && source->verticalScrollBar()->value() == 0 );
-  std::puts("PASS history refresh: content identity, reordered results, visible list anchor, context/source scroll, repeated refresh, shifted record indices, duplicate records, active filters, media target, missing selection, explicit filters and conversation reset");
+  CHECK( pages->count() == 1 && !source->isVisible() );
+  CHECK( ChatManager::instance().chatSavedText( live.name() ) == histories[live.name()] );
+  std::puts("PASS history refresh: stable context signal keys, one results page, preserved reading position, unchanged archive, reordered results, repeated refresh, shifted indices, duplicates, active filters, date-grouped media, missing selection and conversation reset");
   return 0;
 }

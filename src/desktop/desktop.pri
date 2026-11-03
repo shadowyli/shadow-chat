@@ -1,5 +1,9 @@
 
 INCLUDEPATH += $$PWD
+HEADERS += desktop/ShadowAvatarInteractions.h
+SOURCES += desktop/ShadowAvatarInteractions.cpp
+HEADERS += desktop/ShadowVideoPreview.h
+SOURCES += desktop/ShadowVideoPreview.cpp
 HEADERS += desktop/ShadowConversationDelegate.h
 HEADERS += desktop/ShadowSearchPanel.h
 SOURCES += desktop/ShadowSearchPanel.cpp
@@ -20,6 +24,7 @@ SOURCES += desktop/ShadowWindowResize.cpp
 HEADERS += desktop/ShadowWindowShadow.h
 SOURCES += desktop/ShadowWindowShadow.cpp
 win32: LIBS += -lgdi32
+HEADERS += desktop/ShadowRichText.h desktop/ShadowComposerFormatBar.h
 HEADERS += desktop/ShadowUpdateController.h
 SOURCES += desktop/ShadowUpdateController.cpp
 HEADERS += desktop/ShadowLocalAccounts.h

@@ -22,7 +22,7 @@ public:
   static bool active();
   static bool canTestChat( const Chat& );
   static bool testPeerReady();
-  static bool sendTestText( quint64 chatId, const QString& message, bool sourceCode, QString* feedback );
+  static bool sendTestText( quint64 chatId, const QString& message, bool sourceCode, QString* feedback, const QString& rich_text = QString() );
   static bool sendTestImage( quint64 chatId, const QImage&, QString* feedback );
   static bool sendTestFiles( quint64 chatId, const QStringList& paths, QString* feedback );
   static bool validateStyle( const QByteArray& data, QString* error );

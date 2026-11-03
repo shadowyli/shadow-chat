@@ -32,6 +32,43 @@
 #include "ShadowConversationPreferences.h"
 #include "ShadowMention.h"
 
+namespace
+{
+bool deliveryNoticeType( const ChatMessage& message )
+{
+  return message.isFromSystem() && (message.type() == ChatMessage::Other ||
+    message.type() == ChatMessage::UserInfo || message.type() == ChatMessage::System);
+}
+
+bool deliveryFailure( const QString& plain )
+{
+  static const QRegularExpression failure( QStringLiteral(
+    "失败|无法|未能|错误|未送达|未收到|无人收到|不能|拒绝|取消|"
+    "\\b(?:fail(?:ed|ure)?|unable|cannot|error|incorrect|refused|rejected|cancelled|canceled)\\b|"
+    "\\b(?:could not|will not be sent|not (?:been )?(?:sent|delivered|received)|nobody has received)\\b" ),
+    QRegularExpression::CaseInsensitiveOption );
+  return failure.match( plain ).hasMatch();
+}
+
+bool routineDeliveryNotice( const ChatMessage& message, const QString& plain )
+{
+  if( !deliveryNoticeType( message ) ) return false;
+  static const QRegularExpression delivered( QStringLiteral(
+    "^消息[“\"].*[”\"]\\s*[：:]\\s*已送达\\s*\\d+\\s*/\\s*\\d+\\s*人[。.!]?$" ) );
+  if( delivered.match( plain ).hasMatch() ) return true;
+  if( deliveryFailure( plain ) ) return false;
+  const QString& html = message.message();
+  if( html.contains( QStringLiteral( "<!--shadow-delivery-notice-->" ) ) ||
+      html.contains( QStringLiteral( "unsent-message.png" ), Qt::CaseInsensitive ) ||
+      html.contains( QStringLiteral( "unsent-message.svg" ), Qt::CaseInsensitive ) )
+    return true;
+  static const QRegularExpression routine( QStringLiteral(
+    "^(?:The (?:voice )?message will be delivered to\\s|Offline messages? (?:will be )?sent to\\s|"
+    "消息即将发送给|离线消息(?:即将|将|已)?发送给)" ), QRegularExpression::CaseInsensitiveOption );
+  return routine.match( plain ).hasMatch();
+}
+}
+
 
 GuiChatItem::GuiChatItem( QTreeWidget* parent )
  : QTreeWidgetItem( parent )
@@ -146,25 +183,38 @@ bool GuiChatItem::updateItem( const Chat& c )
   setData( 0, ChatPending, pending );
   setData( 0, ChatQueued, unsent_messages );
   QString preview;
-  QDateTime latestTimestamp = c.lastMessageTimestamp();
+  QDateTime latestTimestamp;
   bool mentioned = false;
   int unreadRemaining = c.unreadMessages();
   const QList<ChatMessage>& messages = c.messages();
   for( int index = messages.size() - 1; index >= 0; --index )
   {
     const ChatMessage& message = messages.at( index );
-    if( message.isHeader() || message.isSystemActivity() ) continue;
+    if( message.isHeader() ) continue;
     QTextDocument text;
     text.setHtml( message.message() );
     const QString plain = text.toPlainText().remove( QChar::ObjectReplacementCharacter ).simplified();
+    if( routineDeliveryNotice( message, plain ) ||
+        (message.isSystemActivity() && !(deliveryNoticeType( message ) && deliveryFailure( plain ))) )
+      continue;
     if( preview.isEmpty() )
     {
-      if( message.timestamp().isValid() && (!latestTimestamp.isValid() || message.timestamp() > latestTimestamp) )
-        latestTimestamp = message.timestamp();
-      if( message.isImagePreview() ) preview = QStringLiteral( "[图片]" );
+      const bool sticker = message.message().contains( QStringLiteral( "<!--shadow-sticker-->" ) );
+      if( message.isImagePreview() ) preview = sticker ? QStringLiteral( "[表情]" ) : QStringLiteral( "[图片]" );
       else if( message.isVoice() ) preview = QStringLiteral( "[语音]" );
       else if( message.isFileTransfer() ) preview = QStringLiteral( "[文件] " ) + plain;
       else preview = plain;
+      if( preview.isEmpty() && !message.isFromSystem() && text.begin().isValid() )
+      {
+        for( QTextBlock block = text.begin(); block.isValid() && preview.isEmpty(); block = block.next() )
+          for( QTextBlock::iterator fragment = block.begin(); !fragment.atEnd(); ++fragment )
+            if( fragment.fragment().charFormat().isImageFormat() )
+            {
+              preview = QStringLiteral( "[表情]" );
+              break;
+            }
+      }
+      if( !preview.isEmpty() ) latestTimestamp = message.timestamp();
       if( !preview.isEmpty() && !message.isFromSystem() )
       {
         if( message.isFromLocalUser() ) preview.prepend( QStringLiteral( "我：" ) );
@@ -182,6 +232,7 @@ bool GuiChatItem::updateItem( const Chat& c )
     }
     if( !preview.isEmpty() && unreadRemaining <= 0 ) break;
   }
+  if( !latestTimestamp.isValid() && messages.isEmpty() ) latestTimestamp = c.lastMessageTimestamp();
   if( preview.isEmpty() ) preview = QStringLiteral( "暂无消息" );
   if( unsent_messages > 0 ) preview.prepend( QStringLiteral( "[待发送] " ) );
   setData( 0, ChatPreview, preview.left( 240 ) );

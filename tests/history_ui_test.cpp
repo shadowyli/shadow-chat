@@ -14,6 +14,7 @@
 #include "GuiCreateGroup.h"
 #include "GuiFileTransfer.h"
 #include "GuiMain.h"
+#include "GuiMessageEdit.h"
 #include "Listener.h"
 #include "NetworkManager.h"
 #include "Random.h"
@@ -40,7 +41,7 @@ int main(int argc,char** argv)
   });
 #endif
   BeeApplication app(argc,argv);Random::init();QFontDatabase::addApplicationFont("C:/Windows/Fonts/msyh.ttc");app.setFont(QFont("Microsoft YaHei",10));app.setStyleSheet(ShadowStyle::applicationStyleSheet());
-  QTranslator chinese;require(chinese.load("../locale/beebeep_cn.qm"),"installed Chinese translation fixture");app.installTranslator(&chinese);
+  QTranslator chinese;require(chinese.load(QFileInfo(QString::fromUtf8(__FILE__)).dir().filePath("../locale/beebeep_cn.qm")),"installed Chinese translation fixture");app.installTranslator(&chinese);
   QTemporaryDir temporary;require(temporary.isValid(),"temporary profile");
   Settings::instance().setDefaultFolders();Settings::instance().createLocalUser("HistoryTest");Settings::instance().setAccountDataFolder(temporary.path());
   Settings::instance().load();Settings::instance().setChatMessagesToShow(-1);
@@ -58,7 +59,9 @@ int main(int argc,char** argv)
   require(results && tabs && keyword,"history controls exist");require(results->count()==4,"all message records");
   tabs->setCurrentIndex(1);require(results->count()==1 && results->item(0)->text().contains("角色.psd"),"file classification");
   QUrl openedFile;QObject::connect(&window,&GuiSavedChat::openUrl,[&](const QUrl& url){openedFile=url;});results->itemDoubleClicked(results->item(0));require(openedFile.toLocalFile()==sourceFile,"file result opens exact original path");
-  tabs->setCurrentIndex(2);require(results->count()==1 && !results->item(0)->icon().isNull(),"media classification and thumbnail");
+  tabs->setCurrentIndex(2);require(results->count()==2 && results->item(0)->data(Qt::UserRole+8).toBool() &&
+    results->item(1)->data(Qt::UserRole+9).toBool() && results->item(1)->text().isEmpty() &&
+    !results->item(1)->data(Qt::UserRole+6).value<QPixmap>().isNull(),"date grouped media classification and thumbnail");
   require(results->viewMode()==QListView::IconMode,"media thumbnail grid");
   tabs->setCurrentIndex(3);require(results->count()==1 && results->item(0)->text().contains("example.test"),"link classification");
   tabs->setCurrentIndex(0);keyword->setText("配色");require(results->count()==1,"keyword filtering");keyword->clear();
@@ -94,12 +97,14 @@ int main(int argc,char** argv)
   QSet<int> groupSizes;
   for(QTextBlock block=transcript->document()->begin();block.isValid();block=block.next())for(QTextBlock::iterator fragment=block.begin();!fragment.atEnd();++fragment){const QUrl url(fragment.fragment().charFormat().anchorHref());if(url.scheme()=="shadowimage")groupSizes.insert(shadowAlbumPaths(url).size());}
   require(groupSizes.contains(50)&&groupSizes.contains(2),"viewer original scope contains 50 and 2 separately");
-  int largeRemovals=0;QObject::connect(transcript->document(),&QTextDocument::contentsChange,[&](int,int removed,int){if(removed>64)++largeRemovals;});QElapsedTimer appendTimer;appendTimer.start();
+  const QString originalTranscript=transcript->toPlainText().trimmed();
+  int largeRemovals=0;QObject::connect(transcript->document(),&QTextDocument::contentsChange,[&](int,int removed,int added){if(removed>64&&removed!=added)++largeRemovals;});QElapsedTimer appendTimer;appendTimer.start();
   for(int i=0;i<500;++i){const ChatMessage fileMessage(ID_SYSTEM_MESSAGE,Protocol::instance().systemMessage(QString("file-completed-%1").arg(i)),ChatMessage::FileTransfer,true);chat.addMessage(fileMessage);require(chatWidget->appendChatMessage(chat,fileMessage),"file notification append");}
-  require(largeRemovals==0,"file notifications do not clear and rerender existing transcript");require(transcript->toPlainText().contains("file-completed-499"),"all file notifications retained");std::fprintf(stderr,"QA 500 file notifications appended in %lld ms\n",appendTimer.elapsed());
+  require(largeRemovals==0,"file notifications do not clear and rerender existing transcript");require(!transcript->toPlainText().contains("file-completed-499"),"normal completion notifications remain hidden");std::fprintf(stderr,"QA 500 file notifications appended in %lld ms\n",appendTimer.elapsed());
   appendTimer.restart();
   for(int i=0;i<500;++i){const ChatMessage preview(ID_SYSTEM_MESSAGE,Protocol::instance().systemMessage(QString("<a href=\"%1\"><img src=\"%1\"></a>").arg(QUrl::fromLocalFile(imagePath).toString())),ChatMessage::ImagePreview,true);chat.addMessage(preview);require(chatWidget->appendChatMessage(chat,preview),"standalone image append");}
-  require(largeRemovals==0,"standalone image previews never rerender the transcript");
+  require(largeRemovals==0,"standalone image previews do not remove existing transcript content");
+  require(transcript->toPlainText().trimmed().startsWith(originalTranscript),"original transcript remains intact after 500 image additions");
   std::fprintf(stderr,"QA 500 standalone images appended in %lld ms\n",appendTimer.elapsed());
   QString capturedImage;QStringList droppedFiles;
   QObject::connect(chatWidget,&GuiChat::sendFileFromChatRequest,[&](VNumber,const QString& path){capturedImage=path;std::fprintf(stderr,"QA image captured: %s\n",qPrintable(path));});
@@ -107,7 +112,14 @@ int main(int argc,char** argv)
   Settings::instance().setDownloadDirectory(temporary.filePath("received"));QDir().mkpath(Settings::instance().downloadDirectory());
   QMimeData* previousClipboard=new QMimeData;const QMimeData* clipboard=QApplication::clipboard()->mimeData();if(clipboard)foreach(const QString& format,clipboard->formats())previousClipboard->setData(format,clipboard->data(format));
   QApplication::clipboard()->setImage(image);QTextEdit* composer=chatWidget->findChild<QTextEdit*>("GuiMessageEdit");require(composer,"composer");composer->paste();app.processEvents();
-  require(!capturedImage.isEmpty()&&QFileInfo::exists(capturedImage),"actual clipboard paste enters send pipeline");require(QDir::fromNativeSeparators(capturedImage).startsWith(QDir::fromNativeSeparators(Settings::instance().downloadDirectory())),"generated originals survive cache cleanup");require(QImage(capturedImage)==image,"pasted original pixels preserved");
+  GuiMessageEdit* imageDraft=qobject_cast<GuiMessageEdit*>(composer);
+  require(imageDraft&&imageDraft->draftImages().size()==1&&capturedImage.isEmpty(),"clipboard image stays in unsent draft");
+  require(imageDraft->draftImages().first().second==image,"pasted original draft pixels preserved");
+  QObject::connect(chatWidget,&GuiChat::sendFileFromChatRequest,[&](VNumber,const QString& path) {
+    chatWidget->setFileSendResult(QFileInfo::exists(path),QString());
+  });
+  require(QMetaObject::invokeMethod(chatWidget,"sendMessage",Qt::DirectConnection),"submit image draft");
+  require(!capturedImage.isEmpty()&&QFileInfo::exists(capturedImage),"submitted draft enters send pipeline");require(QDir::fromNativeSeparators(capturedImage).startsWith(QDir::fromNativeSeparators(Settings::instance().downloadDirectory())),"generated originals survive cache cleanup");require(QImage(capturedImage)==image,"pasted original pixels preserved");
   QApplication::clipboard()->setMimeData(previousClipboard);
   std::fprintf(stderr,"QA paste verified, drag start\n");
   const QString folder=temporary.filePath("工程目录");QDir().mkpath(folder);QMimeData dropData;dropData.setUrls(QList<QUrl>()<<QUrl::fromLocalFile(imagePath)<<QUrl::fromLocalFile(folder));

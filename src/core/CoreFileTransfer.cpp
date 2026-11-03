@@ -37,6 +37,7 @@
 #include "Settings.h"
 #include "UserManager.h"
 #include "ShadowTransferQueue.h"
+#include "ShadowStickerMedia.h"
 
 namespace {
 ShadowTransferQueue shadowOutbox;
@@ -81,7 +82,8 @@ void Core::processPendingFileTransfers()
           task.state = "failed"; task.error = tr( "接收方未完成接收，请重新发送：%1" ).arg( QFileInfo( task.source ).fileName() );
           shadowOutbox.update( task ); shadowOfferActivity.remove( task.id );
           dispatchSystemMessage( chat.isValid() ? chat.id() : ID_DEFAULT_CHAT, recipient.id(),
-            task.error.toHtmlEscaped() + QStringLiteral( "（%1）" ).arg( recipient.name().toHtmlEscaped() ),
+            QStringLiteral( "<!--shadow-transfer-error-->" ) + task.error.toHtmlEscaped() +
+              QStringLiteral( "（%1）" ).arg( recipient.name().toHtmlEscaped() ),
             chat.isValid() ? DispatchToChat : DispatchToDefaultAndPrivateChat, ChatMessage::FileTransfer, true );
         }
         else activeRecipients.insert( task.recipient );
@@ -94,7 +96,8 @@ void Core::processPendingFileTransfers()
     if( !ShadowTransferQueue::sourceUnchanged( task, &error ) )
     {
       task.state = "failed"; task.error = error; shadowOutbox.update( task );
-      dispatchSystemMessage( chat.isValid() ? chat.id() : ID_DEFAULT_CHAT, recipient.id(), error.toHtmlEscaped(),
+      dispatchSystemMessage( chat.isValid() ? chat.id() : ID_DEFAULT_CHAT, recipient.id(),
+                             QStringLiteral( "<!--shadow-transfer-error-->" ) + error.toHtmlEscaped(),
                              chat.isValid() ? DispatchToChat : DispatchToDefaultAndPrivateChat, ChatMessage::FileTransfer, true );
       continue;
     }
@@ -288,10 +291,6 @@ void Core::checkFileTransferMessage( VNumber peer_id, VNumber user_id, const Fil
               ++recipients; if( sibling.state == "completed" ) ++delivered;
               batchTasks << sibling.id;
             }
-          Chat destination = ChatManager::instance().findChatByPrivateId( task.chat, false, u.id() );
-          dispatchSystemMessage( destination.isValid() ? destination.id() : ID_DEFAULT_CHAT, ID_LOCAL_USER,
-            tr( "已送达 %1/%2 人：%3" ).arg( delivered ).arg( recipients ).arg( QFileInfo( task.source ).fileName().toHtmlEscaped() ),
-            destination.isValid() ? DispatchToChat : DispatchToDefaultAndPrivateChat, ChatMessage::FileTransfer, true );
           if( delivered == recipients ) foreach( const QString& id, batchTasks ) shadowOutbox.remove( id );
         }
       }
@@ -310,15 +309,15 @@ void Core::checkFileTransferMessage( VNumber peer_id, VNumber user_id, const Fil
   ChatMessage chat_voice_msg;
   QUrl file_url = QUrl::fromLocalFile( fi.path() );
 
-  if( FileTransferPeer::stateIsStopped( ft_state ) )
-    sys_msg = QString( "%1 %2 %3 %4 %5: %6." ).arg( icon_html, action_txt, fi.isDownload() ? fi.name() : QString( "<a href=\"%1\">%2</a>" ).arg( file_url.toString(), fi.name() ), fi.isDownload() ? tr( "from" ) : tr( "to" ), Bee::userNameToShow( u, true ), Bee::lowerFirstLetter( msg ) );
+  if( FileTransferPeer::stateIsStopped( ft_state ) && ft_state != FileTransferPeer::Completed )
+    sys_msg = QString( "<!--shadow-transfer-error-->%1 %2 %3 %4 %5: %6." ).arg( icon_html, action_txt, fi.isDownload() ? fi.name() : QString( "<a href=\"%1\">%2</a>" ).arg( file_url.toString(), fi.name() ), fi.isDownload() ? tr( "from" ) : tr( "to" ), Bee::userNameToShow( u, true ), Bee::lowerFirstLetter( msg ) );
 
   if( fi.isDownload() && ft_state == FileTransferPeer::Completed )
   {
     FileShare::instance().addDownloadedFile( fi );
     if( Bee::isFileTypeImage( fi.suffix() ) )
     {
-      QString img_preview_path =  Bee::imagePreviewPath( fi.path() );
+      QString img_preview_path = shadowGifSource( fi.path() ) ? fi.path() : Bee::imagePreviewPath( fi.path() );
       if( img_preview_path.isEmpty() )
         qWarning() << "Unable to show image preview of the file" << fi.path();
       else
@@ -385,9 +384,11 @@ void Core::checkFileTransferMessage( VNumber peer_id, VNumber user_id, const Fil
       const QRegularExpression albumExpression( QStringLiteral( "(?:^|;)shadow-album=([a-fA-F0-9{}-]{36,38})(?:;|$)" ) );
       const QRegularExpressionMatch album = albumExpression.match( fi.mimeType() );
       if( album.hasMatch() ) sys_msg_img_preview.prepend( QStringLiteral( "<!--shadow-album:%1-->" ).arg( album.captured( 1 ) ) );
+      if( fi.mimeType().contains( QRegularExpression( QStringLiteral( "(?:^|;)shadow-sticker=1(?:;|$)" ) ) ) )
+        sys_msg_img_preview.prepend( QStringLiteral( "<!--shadow-sticker-->" ) );
       dispatchSystemMessage( chat_to_show_message.isValid() ? chat_to_show_message.id() : ID_DEFAULT_CHAT, u.id(), sys_msg_img_preview, chat_to_show_message.isValid() ? DispatchToChat : DispatchToDefaultAndPrivateChat, ChatMessage::ImagePreview, true );
     }
-    if( !sys_msg_open_file.isEmpty() )
+    if( !sys_msg_open_file.isEmpty() && sys_msg_img_preview.isEmpty() )
       dispatchSystemMessage( chat_to_show_message.isValid() ? chat_to_show_message.id() : ID_DEFAULT_CHAT, u.id(), sys_msg_open_file, chat_to_show_message.isValid() ? DispatchToChat : DispatchToDefaultAndPrivateChat, ChatMessage::FileTransfer, true );
   }
 
@@ -424,14 +425,17 @@ bool Core::showFilesUploadPreviewInChat( const Chat& c, const QStringList& file_
     QFileInfo fi( file_path );
     if( Bee::isFileTypeImage( fi.suffix() ) )
     {
-      QString img_preview_path = Bee::imagePreviewPath( file_path );
+      QString img_preview_path = shadowGifSource( file_path ) ? file_path : Bee::imagePreviewPath( file_path );
 #ifdef BEEBEEP_DEBUG
       qDebug() << "Showing image preview"<< img_preview_path << "of file" << qPrintable( file_path );
 #endif
       if( !img_preview_path.isEmpty() )
       {
-        QUrl file_url( file_path );
-        QString img_preview = QString( "<a href=\"%1\"><img src=\"%2\"></a>" ).arg( file_url.toString(), QUrl::fromLocalFile( img_preview_path ).toString() );
+        const QUrl file_url = QUrl::fromLocalFile( file_path );
+        QString img_preview = QString( "<a href=\"%1\"><img src=\"%2\"></a>" )
+          .arg( file_url.toString().toHtmlEscaped(), QUrl::fromLocalFile( img_preview_path ).toString().toHtmlEscaped() );
+        if( shadowStoredSticker( file_path, Settings::instance().dataFolder() ) )
+          img_preview.prepend( QStringLiteral( "<!--shadow-sticker-->" ) );
         preview_list.append( img_preview );
       }
       else
@@ -563,10 +567,10 @@ bool Core::sendFileToUser( const User&u, const QString& file_path, const QString
     QString error;
     const bool queued = shadowOutbox.open( Settings::instance().dataFolder() ) &&
       shadowOutbox.enqueue( shadowRecipientKey( u ), chat_selected.privateId(), chat_selected.isGroup(), file_path, &error, shadowTransferBatch );
-    const QString status = queued ? tr( "等待发送 %1 给 %2，双方软件在线后自动发送。" )
-      .arg( file.fileName(), Bee::userNameToShow( u, true ) ) : tr( "无法加入待发送队列：%1" ).arg( error );
-    dispatchSystemMessage( chat_selected.isValid() ? chat_selected.id() : ID_DEFAULT_CHAT, u.id(), status.toHtmlEscaped(),
-                           chat_selected.isValid() ? DispatchToChat : DispatchToDefaultAndPrivateChat, ChatMessage::FileTransfer, true );
+    if( !queued )
+      dispatchSystemMessage( chat_selected.isValid() ? chat_selected.id() : ID_DEFAULT_CHAT, u.id(),
+        QStringLiteral( "<!--shadow-transfer-error-->" ) + tr( "无法加入待发送队列：%1" ).arg( error ).toHtmlEscaped(),
+        chat_selected.isValid() ? DispatchToChat : DispatchToDefaultAndPrivateChat, ChatMessage::FileTransfer, true );
     return queued;
   }
 
@@ -589,6 +593,8 @@ bool Core::sendFileToUser( const User&u, const QString& file_path, const QString
   else
   {
     FileInfo fi = mp_fileTransfer->addFile( file, share_folder, to_share_box, chat_selected.privateId(), FileInfo::File, -1 );
+    if( shadowStoredSticker( file.absoluteFilePath(), Settings::instance().dataFolder() ) )
+      fi.setMimeType( fi.mimeType() + QStringLiteral( ";shadow-sticker=1" ) );
     if( !shadowActiveAlbum.isEmpty() && Bee::isFileTypeImage( fi.suffix() ) )
       fi.setMimeType( fi.mimeType() + QStringLiteral( ";shadow-album=" ) + shadowActiveAlbum );
     if( shadowDispatchingOutbox ) mp_fileTransfer->authorizeFileForUser( fi.id(), u.id() );

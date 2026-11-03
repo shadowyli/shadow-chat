@@ -42,6 +42,18 @@ public:
   void addText( const QString& );
 
   QString message();
+  QString richText() const;
+  struct Draft
+  {
+    QString html;
+    QHash<QString,QImage> images;
+    QList<Emoticon> emoticons;
+  };
+  Draft draft() const;
+  void setDraft( const Draft& );
+  void addDraftImage( const QImage& );
+  QList<QPair<QString,QImage>> draftImages() const;
+  void removeDraftImage( const QString& );
   void clearMessage();
   void addMessageToHistory();
 
@@ -57,6 +69,8 @@ signals:
   void writing();
   void urlsToCheck( const QMimeData* );
   void imageToCheck( const QMimeData* );
+  void favoriteImageRequested( const QImage& );
+  void inputError( const QString& );
 
 protected:
   void keyPressEvent( QKeyEvent* );
@@ -87,6 +101,7 @@ private:
   QList<Emoticon> m_emoticonsAdded;
   QString m_currentMessage;
   bool m_messageChanged;
+  QHash<QString,QImage> m_draftImages;
 
 #ifdef BEEBEEP_USE_HUNSPELL
   SpellCheckerHighlighter* mp_scHighlighter;

@@ -117,9 +117,10 @@ ShadowSearchPanel::ShadowSearchPanel( QWidget* parent )
     "QPushButton#ShadowSearchClear{background:transparent;border:0;color:#8A95A2;padding:6px 8px;}"
     "QToolButton#ShadowSearchClose{background:transparent;border:0;border-radius:5px;padding:5px;}"
     "QToolButton#ShadowSearchClose:hover{background:#E9EFF5;}"
-    "QTabBar#ShadowSearchTabs{background:#FFFFFF;border-bottom:1px solid #EDF0F4;}"
-    "QTabBar#ShadowSearchTabs::tab{background:transparent;border:0;border-bottom:3px solid transparent;color:#243044;padding:13px 20px;font-size:15px;}"
-    "QTabBar#ShadowSearchTabs::tab:selected{color:#2878F0;border-bottom-color:#4289FF;}"
+    "QTabBar#ShadowSearchTabs{background:#FFFFFF;border:0;border-bottom:1px solid #E5EAF1;}"
+    "QTabBar#ShadowSearchTabs::tab{background:transparent;border:0;border-bottom:2px solid transparent;"
+    "color:#52647F;min-width:0;min-height:0;padding:9px 0;margin:0 10px;font-size:13px;}"
+    "QTabBar#ShadowSearchTabs::tab:selected{color:#2877EF;border-bottom-color:#2877EF;}"
     "QTabBar#ShadowSearchTabs::tab:focus{background:#F0F6FF;}"
     "QTreeWidget#ShadowGlobalSearchResults{background:#FFFFFF;border:0;outline:0;}"
     "QLabel#ShadowSearchEmpty{background:#FFFFFF;border:0;color:#8A95A2;font-size:14px;padding:28px;}"
@@ -160,6 +161,8 @@ ShadowSearchPanel::ShadowSearchPanel( QWidget* parent )
   mp_tabs->setObjectName( QStringLiteral( "ShadowSearchTabs" ) );
   mp_tabs->setExpanding( false );
   mp_tabs->setDrawBase( false );
+  mp_tabs->setElideMode( Qt::ElideNone );
+  mp_tabs->setUsesScrollButtons( true );
   mp_tabs->addTab( QStringLiteral( "全部" ) );
   mp_tabs->addTab( QStringLiteral( "联系人" ) );
   mp_tabs->addTab( QStringLiteral( "群" ) );
@@ -185,13 +188,16 @@ ShadowSearchPanel::ShadowSearchPanel( QWidget* parent )
   QWidget* footer = new QWidget( this );
   footer->setObjectName( QStringLiteral( "ShadowSearchFooter" ) );
   QHBoxLayout* hints = new QHBoxLayout( footer );
+  hints->setObjectName( QStringLiteral( "ShadowSearchHintsLayout" ) );
   hints->setContentsMargins( 16, 10, 16, 10 );
   QLabel* keys = new QLabel( QStringLiteral( "↑↓ 选择    Tab 切换分类    Enter 打开    Esc 关闭" ), footer );
   keys->setObjectName( QStringLiteral( "ShadowSearchKeys" ) );
+  keys->setWordWrap( true );
   hints->addWidget( keys );
   hints->addStretch();
   mp_scope = new QLabel( QStringLiteral( "本机已加载内容" ), footer );
   mp_scope->setObjectName( QStringLiteral( "ShadowSearchScope" ) );
+  mp_scope->setWordWrap( true );
   hints->addWidget( mp_scope );
   layout->addWidget( footer );
   m_debounce.setSingleShot( true );
@@ -216,8 +222,13 @@ ShadowSearchPanel::ShadowSearchPanel( QWidget* parent )
 void ShadowSearchPanel::positionPanel()
 {
   const int left = qBound( 88, parentWidget()->width() / 10, 144 );
-  const int width = qMin( 1200, parentWidget()->width() - left - 100 );
-  setGeometry( left, 7, qMax( 460, width ), qMin( 760, parentWidget()->height() - 24 ) );
+  const int width = qMin( qMax( 0, parentWidget()->width() - 16 ),
+    qBound( 460, parentWidget()->width() - left - 100, 1200 ) );
+  setGeometry( qMin( left, qMax( 8, parentWidget()->width() - width - 8 ) ), 7, width,
+    qMax( 0, qMin( 760, parentWidget()->height() - 24 ) ) );
+  QBoxLayout* hints = findChild<QBoxLayout*>( QStringLiteral( "ShadowSearchHintsLayout" ) );
+  const QBoxLayout::Direction direction = width < 600 ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight;
+  if( hints && hints->direction() != direction ) hints->setDirection( direction );
   QPainterPath outline;
   outline.addRoundedRect( QRectF( rect() ), 9, 9 );
   setMask( QRegion( outline.toFillPolygon().toPolygon() ) );

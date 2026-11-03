@@ -15,6 +15,7 @@
 #include "UserManager.h"
 #include <QtWidgets>
 #include <QTextTable>
+#include <QTest>
 #include <algorithm>
 #include <cstdio>
 
@@ -91,6 +92,7 @@ static void settle( QApplication& application )
 {
   for( int iteration = 0; iteration < 5; ++iteration )
     application.processEvents();
+  QTest::qWait(100);
 }
 
 static int seed( QApplication& application, const QString& root )
@@ -181,6 +183,8 @@ static int verify( QApplication& application, const QString& root )
   ChatManager::instance().addSavedChats( loader.savedChats() );
   const QMap<QString,QString> loaded = ChatManager::instance().constHistoryMap();
   CHECK( loaded.contains( conversation().name() ) );
+  CHECK( !loaded.value( conversation().name() ).contains( "<!--shadow-sticker-->" ) );
+  CHECK( QImage( imagePath ).size() == QSize( 900, 600 ) && QImage( secondPath ).size() == QSize( 900, 600 ) );
   CHECK( !UserManager::instance().findUser( 96302 ).isValid() );
   QMainWindow host;
   QToolBar* tools = host.addToolBar( "synthetic tools" );
@@ -202,7 +206,7 @@ static int verify( QApplication& application, const QString& root )
   std::printf( "Reloaded bubbles: %d\n", rows.size() );
   CHECK( rows.size() == 10 && transcript->bubbleCount() == 10 );
   const QStringList expected = { "legacy outgoing", "image caption retained", "legacy attachment",
-    "saved local text", "saved incoming", "张图片", "file card", "native saved bubble", "exact duplicate", "exact duplicate" };
+    "saved local text", "saved incoming", "张图片", "brief & layout.psd", "native saved bubble", "exact duplicate", "exact duplicate" };
   const QSet<int> outgoing{ 0, 3, 5 };
   for( int index = 0; index < rows.size(); ++index )
   {
@@ -213,6 +217,16 @@ static int verify( QApplication& application, const QString& root )
     CHECK( rows.at( index ).body->format().property( ShadowChatTranscript::BubbleColorProperty ).value<QColor>() ==
       QColor( outgoing.contains( index ) ? "#DDEBFF" : "#F0F2F4" ) );
   }
+  CHECK( rows.at(6).text.contains( QStringLiteral("36 字节") ) && !rows.at(6).text.contains("file card") );
+  bool attachmentEntry = false;
+  for( QTextBlock block = transcript->document()->findBlock(rows.at(6).body->firstPosition());
+       block.isValid() && block.position() <= rows.at(6).body->lastPosition(); block = block.next() )
+    for( auto fragment = block.begin(); !fragment.atEnd(); ++fragment )
+    {
+      const QUrl target( fragment.fragment().charFormat().anchorHref() );
+      attachmentEntry = attachmentEntry || (target.isLocalFile() && target.toLocalFile() == filePath);
+    }
+  CHECK( attachmentEntry );
   const QString plain = transcript->toPlainText();
   CHECK( plain.contains( "legacy continuation" ) && plain.contains( "retained quote" ) );
   CHECK( plain.contains( "second saved line" ) && plain.contains( "new quoted content" ) );
@@ -245,6 +259,7 @@ static int verify( QApplication& application, const QString& root )
         continue;
       ++media;
       CHECK( image.width() >= 140 && image.height() >= 90 );
+      CHECK( qAbs(image.width()*2-image.height()*3) <= 2 );
       CHECK( transcript->document()->resource( QTextDocument::ImageResource, QUrl( image.name() ) ).isValid() );
       if( shadowAlbumPaths( url ).contains( imagePath ) )
         ++fullImageLinks;
@@ -285,7 +300,7 @@ static int verify( QApplication& application, const QString& root )
   CHECK( chat->setChat( conversation() ) );
   settle( application );
   CHECK( transcript->bubbleCount() == 4 );
-  CHECK( transcript->toPlainText().contains( "file card" ) && transcript->toPlainText().count( "exact duplicate" ) == 2 );
+  CHECK( transcript->toPlainText().contains( "brief & layout.psd" ) && transcript->toPlainText().count( "exact duplicate" ) == 2 );
   CHECK( transcript->toPlainText().contains( "native nested quote" ) );
   settings.setChatMessagesToShow( -1 );
   ChatManager::instance().setChat( conversation() );

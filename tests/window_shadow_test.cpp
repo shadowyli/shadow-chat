@@ -229,11 +229,31 @@ static int verifyShadow( QWidget& window, WhiteBackground& background )
   POINT outside = { mainBounds.left() - qMax( 2, qRound( 3 * window.devicePixelRatioF() ) ), mainBounds.center().y() };
   const HWND backdrop = reinterpret_cast<HWND>( background.winId() );
   CHECK( WindowFromPoint( outside ) == backdrop );
-  SendMessageW( backdrop, WM_LBUTTONDOWN, MK_LBUTTON, 0 );
-  SendMessageW( backdrop, WM_LBUTTONUP, 0, 0 );
-  settle();
-  CHECK( background.clicks == 1 && GetForegroundWindow() != shadow );
-  std::puts( "PASS native hit testing and synthetic input on the owned white window; no desktop mouse injection" );
+  struct RestorePointer
+  {
+    POINT position;
+    RestorePointer() { GetCursorPos( &position ); }
+    ~RestorePointer() { SetCursorPos( position.x, position.y ); }
+  } restorePointer;
+  if( SetCursorPos( outside.x, outside.y ) )
+  {
+    INPUT input[2] = {};
+    input[0].type = INPUT_MOUSE;
+    input[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+    input[1].type = INPUT_MOUSE;
+    input[1].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+    CHECK( SendInput( 2, input, sizeof( INPUT ) ) == 2 );
+    settle();
+    CHECK( background.clicks == 1 && GetForegroundWindow() == backdrop );
+    CHECK( GetForegroundWindow() != shadow );
+    window.move( window.pos() + QPoint( 1, 0 ) );
+    CHECK( GetForegroundWindow() == backdrop );
+    window.move( window.pos() - QPoint( 1, 0 ) );
+    CHECK( GetForegroundWindow() == backdrop );
+    std::puts( "PASS real Windows mouse input traverses visible shadow to underlying white window" );
+  }
+  else
+    std::puts( "SKIP live mouse injection: input desktop unavailable; native WindowFromPoint and hit tests passed" );
   window.raise();
   window.activateWindow();
   settle();

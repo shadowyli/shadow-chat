@@ -64,6 +64,8 @@
 #include "GuiUserList.h"
 #include "GuiMain.h"
 #include "GuiVCard.h"
+#include "ShadowAvatarInteractions.h"
+#include "ShadowVideoPreview.h"
 #ifdef BEEBEEP_USE_WEBENGINE
   #include "GuiWebView.h"
 #endif
@@ -148,8 +150,8 @@ GuiMain::GuiMain( QWidget *parent )
   mp_modernWorkspace = Q_NULLPTR;
   mp_modernDirectoryPage = Q_NULLPTR;
   mp_modernContentSplitter = Q_NULLPTR;
-  mp_modernHistorySplitter = Q_NULLPTR;
   mp_modernHistory = Q_NULLPTR;
+  mp_archiveContextPage = Q_NULLPTR;
   mp_modernSearch = Q_NULLPTR;
   mp_modernSearchPanel = Q_NULLPTR;
   mp_modernNetworkStrip = Q_NULLPTR;
@@ -472,6 +474,7 @@ void GuiMain::resizeEvent( QResizeEvent* e )
 {
   QMainWindow::resizeEvent( e );
   updateModernResponsiveLayout();
+  updateModernHistoryGeometry();
   updateModernWindowCorners();
 }
 
@@ -532,6 +535,52 @@ bool GuiMain::nativeEvent( const QByteArray& event_type, void* message, long* re
 
 bool GuiMain::eventFilter( QObject* watched, QEvent* event )
 {
+  if( watched == mp_modernConversationPanel &&
+      (event->type() == QEvent::Resize || event->type() == QEvent::Show) )
+    updateModernHistoryGeometry();
+  if( watched == mp_modernChatAvatar )
+  {
+    const bool mouseRelease = event->type() == QEvent::MouseButtonRelease &&
+      static_cast<QMouseEvent*>( event )->button() == Qt::LeftButton &&
+      mp_modernChatAvatar->rect().contains( static_cast<QMouseEvent*>( event )->pos() );
+    const bool keyboardOpen = event->type() == QEvent::KeyPress &&
+      (static_cast<QKeyEvent*>( event )->key() == Qt::Key_Return ||
+       static_cast<QKeyEvent*>( event )->key() == Qt::Key_Enter ||
+       static_cast<QKeyEvent*>( event )->key() == Qt::Key_Space);
+    if( (mouseRelease || keyboardOpen) && mp_embeddedChat )
+    {
+      const Chat chat = ChatManager::instance().chat( mp_embeddedChat->guiChat()->chatId() );
+      const User user = chat.isPrivate() ?
+        ShadowAvatarInteractions::userForChat( chat.privateUserId(), chat ) : User();
+      if( user.isValid() )
+        showPublicVCard( user, mp_modernChatAvatar->mapToGlobal( QPoint( 0, mp_modernChatAvatar->height() + 6 ) ) );
+      return true;
+    }
+  }
+  QTreeWidget* conversations = mp_chatList ?
+    mp_chatList->findChild<QTreeWidget*>( QStringLiteral( "ShadowConversationList" ) ) : Q_NULLPTR;
+  if( conversations && watched == conversations->viewport() &&
+      (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonRelease ||
+       event->type() == QEvent::MouseButtonDblClick) )
+  {
+    QMouseEvent* mouse = static_cast<QMouseEvent*>( event );
+    QTreeWidgetItem* item = conversations->itemAt( mouse->pos() );
+    if( mouse->button() == Qt::LeftButton && item &&
+        ShadowAvatarInteractions::conversationAvatarRect( conversations->visualItemRect( item ) ).contains( mouse->pos() ) )
+    {
+      const Chat chat = ChatManager::instance().chat( item->data( 0, GuiChatItem::ChatId ).toULongLong() );
+      if( chat.isPrivate() )
+      {
+        if( event->type() == QEvent::MouseButtonRelease )
+        {
+          const User user = ShadowAvatarInteractions::userForChat( chat.privateUserId(), chat );
+          if( user.isValid() )
+            showPublicVCard( user, mouse->globalPos() + QPoint( 6, 6 ) );
+        }
+        return true;
+      }
+    }
+  }
   if(watched==mp_modernHistory&&event->type()==QEvent::Hide)
     QTimer::singleShot(0,this,[this]() {updateModernResponsiveLayout();});
   if( watched == mp_modernSearch && mp_modernSearchPanel &&
@@ -2203,6 +2252,8 @@ void GuiMain::createModernShell()
   mp_modernChatAvatar = new QLabel( chat_header );
   mp_modernChatAvatar->setObjectName( "ShadowChatAvatar" );
   mp_modernChatAvatar->setFixedSize( 36, 36 );
+  mp_modernChatAvatar->installEventFilter( this );
+  mp_modernChatAvatar->setFocusPolicy( Qt::StrongFocus );
   chat_header_layout->addWidget( mp_modernChatAvatar );
   QVBoxLayout* chat_title_layout = new QVBoxLayout;
   chat_title_layout->setContentsMargins( 0, 0, 0, 0 );
@@ -2236,15 +2287,10 @@ void GuiMain::createModernShell()
 
   mp_modernConversationStack->addWidget( mp_modernChatPlaceholder );
   mp_modernConversationStack->addWidget( mp_modernChatPage );
-  mp_modernHistorySplitter = new QSplitter(Qt::Horizontal,mp_modernConversationPanel);
-  mp_modernHistorySplitter->setObjectName(QStringLiteral("ShadowHistorySplitter"));
-  mp_modernHistorySplitter->setChildrenCollapsible(false);
-  mp_modernHistorySplitter->setHandleWidth(1);
   mp_modernConversationStack->setMinimumWidth(320);
   mp_modernConversationStack->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Expanding);
-  mp_modernHistorySplitter->addWidget(mp_modernConversationStack);
-  mp_modernHistorySplitter->setStretchFactor(0,1);
-  conversation_layout->addWidget( mp_modernHistorySplitter );
+  conversation_layout->addWidget( mp_modernConversationStack );
+  mp_modernConversationPanel->installEventFilter( this );
 
   mp_modernContentSplitter = new QSplitter( Qt::Horizontal, mp_modernRoot );
   mp_modernContentSplitter->setObjectName( "ShadowContentSplitter" );
@@ -2370,7 +2416,7 @@ void GuiMain::updateModernResponsiveLayout()
     return;
 
   const bool historyOpen = mp_modernHistory && !mp_modernHistory->isHidden();
-  const bool compact = width() < (historyOpen ? 1100 : 900);
+  const bool compact = width() < 900;
   if( mp_modernNavigationRail )
     mp_modernNavigationRail->setFixedWidth( compact ? 68 : 80 );
 
@@ -2386,12 +2432,23 @@ void GuiMain::updateModernResponsiveLayout()
 
   mp_modernContentSplitter->setHandleWidth( 0 );
   const bool chat_is_open = mp_modernConversationStack &&
-                            (historyOpen || mp_modernConversationStack->currentWidget() == mp_modernChatPage) &&
+                            (historyOpen || mp_modernConversationStack->currentWidget() == mp_modernChatPage ||
+                             (mp_archiveContextPage && mp_modernConversationStack->currentWidget() == mp_archiveContextPage)) &&
                             mp_modernConversationPanel->isVisible();
   mp_modernListPanel->setVisible( !chat_is_open );
   mp_modernConversationPanel->setVisible( chat_is_open );
   if( mp_modernBackButton )
     mp_modernBackButton->setVisible( chat_is_open );
+}
+
+void GuiMain::updateModernHistoryGeometry()
+{
+  if( !mp_modernHistory || !mp_modernConversationPanel || mp_modernHistory->isHidden() )
+    return;
+  const QRect area = mp_modernConversationPanel->rect();
+  const int panelWidth = qMin( 380, area.width() );
+  mp_modernHistory->setGeometry( area.right() - panelWidth + 1, area.top(), panelWidth, area.height() );
+  mp_modernHistory->raise();
 }
 
 void GuiMain::updateModernWindowCorners()
@@ -2866,7 +2923,15 @@ void GuiMain::updateModernChatHeader( const Chat& c )
     mp_modernChatSubtitle->show();
   }
   if( mp_modernChatAvatar )
+  {
     mp_modernChatAvatar->setPixmap( ShadowStyle::avatarPixmap( avatar, QSize( 36, 36 ) ) );
+    const bool hasProfile = c.isPrivate() &&
+      ShadowAvatarInteractions::userForChat( c.privateUserId(), c ).isValid();
+    mp_modernChatAvatar->setCursor( hasProfile ? Qt::PointingHandCursor : Qt::ArrowCursor );
+    mp_modernChatAvatar->setFocusPolicy( hasProfile ? Qt::StrongFocus : Qt::NoFocus );
+    mp_modernChatAvatar->setToolTip( hasProfile ? QStringLiteral( "查看公开资料" ) : QString() );
+    mp_modernChatAvatar->setAccessibleName( hasProfile ? QStringLiteral( "查看对方公开资料" ) : QStringLiteral( "群聊头像" ) );
+  }
 }
 
 void GuiMain::createMainWidgets()
@@ -2887,6 +2952,8 @@ void GuiMain::createMainWidgets()
   mp_userList->setMainToolTip( QString( "%1\n(%2)" ).arg( mp_tabMain->tabToolTip( tab_index ), tooltip_right_button ) );
 
   mp_chatList = new GuiChatList( this );
+  if( QTreeWidget* conversations = mp_chatList->findChild<QTreeWidget*>( QStringLiteral( "ShadowConversationList" ) ) )
+    conversations->viewport()->installEventFilter( this );
   tab_index = mp_tabMain->addTab( mp_chatList, IconManager::instance().icon( "chat-list.png" ), "" );
   mp_tabMain->setTabToolTip( tab_index, tr( "Chats" ) );
   mp_chatList->setMainToolTip( QString( "%1\n(%2)" ).arg( mp_tabMain->tabToolTip( tab_index ), tooltip_right_button ) );
@@ -3721,12 +3788,12 @@ void GuiMain::sendMessage( VNumber chat_id, const QString& msg, bool is_source_c
   if( beeCore->devPreviewIsolated() )
   {
     QString feedback;
-    const bool accepted = ShadowDevPreview::sendTestText( chat_id, msg, is_source_code, &feedback );
+    const bool accepted = ShadowDevPreview::sendTestText( chat_id, msg, is_source_code, &feedback, origin?origin->pendingRichText(msg):QString() );
     if( origin ) origin->setMessageSendResult( msg, accepted, feedback );
     return;
   }
   const int pending_before = MessageManager::instance().countMessagesToSendInChatId( chat_id );
-  const int submitted = beeCore->sendChatMessage( chat_id, msg, false, false, is_source_code );
+  const int submitted = beeCore->sendChatMessage( chat_id, msg, false, false, is_source_code, origin?origin->pendingRichText(msg):QString() );
   const bool queued = MessageManager::instance().countMessagesToSendInChatId( chat_id ) > pending_before;
   const bool accepted = submitted > 0 || queued;
   const QString feedback = queued
@@ -4489,11 +4556,19 @@ void GuiMain::showLocalUserVCard()
 
 void GuiMain::showVCard( VNumber user_id )
 {
-  User u = UserManager::instance().findUser( user_id );
+  const User u = UserManager::instance().findUser( user_id );
   if( !u.isValid() )
     return;
 
+  showPublicVCard( u, QCursor::pos() );
+}
+
+void GuiMain::showPublicVCard( const User& u, const QPoint& anchor )
+{
+  if( mp_publicVCard )
+    mp_publicVCard->close();
   GuiVCard* gvc = new GuiVCard( this );
+  mp_publicVCard = gvc;
   connect( gvc, SIGNAL( showChat( VNumber ) ), this, SLOT( showChat( VNumber ) ) );
   connect( gvc, SIGNAL( sendFile( VNumber ) ), this, SLOT( sendFile( VNumber ) ) );
   connect( gvc, SIGNAL( changeUserColor( VNumber, const QString& ) ), this, SLOT( changeUserColor( VNumber, const QString& ) ) );
@@ -4503,18 +4578,7 @@ void GuiMain::showVCard( VNumber user_id )
   connect( gvc, SIGNAL( sendHelpRequestToUser( VNumber ) ), this, SLOT( sendHelpMessageToUser( VNumber ) ) );
   gvc->setVCard( u, ChatManager::instance().privateChatForUser( u.id() ).id(), beeCore->isConnected() );
 
-  QPoint cursor_pos = QCursor::pos();
-  QRect screen_rect = qApp->desktop()->availableGeometry( cursor_pos );
-  int diff_margin = cursor_pos.x() + gvc->size().width() - screen_rect.width();
-  if( diff_margin > 0 )
-    cursor_pos.setX( cursor_pos.x() - gvc->size().width() - 16 );
-  diff_margin = cursor_pos.y() + gvc->size().height() - screen_rect.height();
-  if( diff_margin > 0 )
-    cursor_pos.setY( cursor_pos.y() - gvc->size().height() + 24 );
-  gvc->move( cursor_pos );
-  gvc->show();
-  gvc->adjustSize();
-  gvc->setFixedSize( gvc->size() );
+  gvc->showAt( anchor );
 }
 
 void GuiMain::updadePluginMenu()
@@ -4715,6 +4779,14 @@ void GuiMain::openUrl( const QUrl& file_url )
 
 void GuiMain::openUrlFromChat( const QUrl& file_url, VNumber chat_id )
 {
+  if( file_url.scheme().compare( QLatin1String( "shadowuser" ), Qt::CaseInsensitive ) == 0 )
+  {
+    const VNumber userId = ShadowAvatarInteractions::userIdFromLink( file_url );
+    const User user = ShadowAvatarInteractions::userForChat( userId, ChatManager::instance().chat( chat_id ) );
+    if( user.isValid() )
+      showPublicVCard( user, QCursor::pos() + QPoint( 6, 6 ) );
+    return;
+  }
 #ifdef BEEBEEP_DEBUG
   qDebug() << "Opening url (not encoded):" << qPrintable( file_url.toString() );
 #endif
@@ -4772,6 +4844,18 @@ void GuiMain::openUrlFromChat( const QUrl& file_url, VNumber chat_id )
     if( file_path.isEmpty() )
     {
       qWarning() << "Unable to open an empty file path";
+      return;
+    }
+
+    if( ShadowVideoPreview::canPreview( file_url ) )
+    {
+      if( !mp_videoPreview )
+        mp_videoPreview = new ShadowVideoPreview( file_url, this );
+      else
+        mp_videoPreview->openFile( file_url );
+      mp_videoPreview->show();
+      mp_videoPreview->raise();
+      mp_videoPreview->activateWindow();
       return;
     }
 
@@ -5036,19 +5120,68 @@ void GuiMain::showSavedChatSelected( const QString& chat_name )
   }
   if(!mp_modernHistory)
   {
-    mp_modernHistory=new GuiSavedChat(mp_modernHistorySplitter,true);
+    mp_modernHistory=new GuiSavedChat(mp_modernConversationPanel,true);
     mp_modernHistory->installEventFilter(this);
-    mp_modernHistorySplitter->addWidget(mp_modernHistory);
-    mp_modernHistorySplitter->setStretchFactor(1,0);
     connect(mp_modernHistory,&GuiSavedChat::deleteSavedChatRequest,this,&GuiMain::removeSavedChat);
     connect(mp_modernHistory,&GuiSavedChat::openUrl,this,&GuiMain::openUrl);
+    connect(mp_modernHistory,&GuiSavedChat::contextRequested,this,&GuiMain::showHistoryRecordContext);
     connect(mp_modernHistory,&QObject::destroyed,this,[this]() {mp_modernHistory=Q_NULLPTR;});
   }
   mp_modernHistory->showSavedChat(chat_name);
   mp_modernHistory->show();
   updateModernResponsiveLayout();
-  mp_modernHistorySplitter->setSizes(QList<int>()<<qMax(320,mp_modernHistorySplitter->width()-361)<<360);
+  updateModernHistoryGeometry();
   mp_modernHistory->findChild<QLineEdit*>("GuiLineEditFilterHistory")->setFocus();
+}
+
+void GuiMain::showHistoryRecordContext( const QString& chatName, const QString& recordKey )
+{
+  const Chat chat = ChatManager::instance().findChatByName( chatName );
+  GuiChat* view = Q_NULLPTR;
+  QWidget* previousPage = mp_modernConversationStack->currentWidget();
+  if( chat.isValid() )
+  {
+    showChat( chat.id() );
+    if( GuiFloatingChat* floating = floatingChat( chat.id() ) )
+      view = floating->guiChat();
+  }
+  else if( ChatManager::instance().chatHasSavedText( chatName ) )
+  {
+    if( !mp_archiveContextPage )
+    {
+      mp_archiveContextPage = new QWidget( mp_modernConversationStack );
+      mp_archiveContextPage->setObjectName( QStringLiteral( "ShadowArchivedContextPage" ) );
+      QVBoxLayout* layout = new QVBoxLayout( mp_archiveContextPage );
+      layout->setContentsMargins( 0, 0, 0, 0 );
+      QLabel* title = new QLabel( mp_archiveContextPage );
+      title->setObjectName( QStringLiteral( "ShadowArchivedContextTitle" ) );
+      title->setMargin( 18 );
+      layout->addWidget( title );
+      GuiChat* archived = new GuiChat( mp_archiveContextPage );
+      mp_archiveContextView = archived;
+      archived->setObjectName( QStringLiteral( "ShadowArchivedContextChat" ) );
+      QToolBar* toolbar = new QToolBar( mp_archiveContextPage );
+      archived->setupToolBar( toolbar );
+      toolbar->hide();
+      archived->setModernMode( true );
+      layout->addWidget( archived, 1 );
+      connect( archived, &GuiChat::openUrl, this, &GuiMain::openUrlFromChat );
+      mp_modernConversationStack->addWidget( mp_archiveContextPage );
+    }
+    mp_archiveContextPage->findChild<QLabel*>( QStringLiteral( "ShadowArchivedContextTitle" ) )->setText( chatName );
+    mp_modernConversationStack->setCurrentWidget( mp_archiveContextPage );
+    view = mp_archiveContextView;
+  }
+  if( view && view->showHistoryRecord( chatName, recordKey, !chat.isValid() ) )
+  {
+    if( mp_modernHistory )
+      mp_modernHistory->hide();
+    updateModernResponsiveLayout();
+    return;
+  }
+  mp_modernConversationStack->setCurrentWidget( previousPage );
+  QMessageBox::information( this, QStringLiteral( "聊天记录" ),
+    QStringLiteral( "这条记录当前无法定位，请刷新聊天记录后重试。" ), QStringLiteral( "确定" ) );
 }
 
 void GuiMain::removeSavedChat( const QString& chat_name )
