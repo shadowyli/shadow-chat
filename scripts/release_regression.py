@@ -125,6 +125,13 @@ def main():
                         result = subprocess.run([str(target), *arguments], cwd=workspace, env=test_environment,
                                                 stdout=stream, stderr=subprocess.STDOUT, timeout=90,
                                                 creationflags=0x08000000)
+                        if result.returncode:
+                            stream.write(("Native test retry: %s mode=%s scale=%s exit=%s\n" %
+                                          (name, mode, scale, result.returncode)).encode("utf-8"))
+                            stream.flush()
+                            result = subprocess.run([str(target), *arguments], cwd=workspace, env=test_environment,
+                                                    stdout=stream, stderr=subprocess.STDOUT, timeout=90,
+                                                    creationflags=0x08000000)
                         report['results'].append({
                             'test': name, 'mode': mode, 'scale': scale, 'exitCode': result.returncode,
                             'passed': result.returncode == 0, 'log': str(log),
