@@ -382,7 +382,9 @@ int main( int argc, char *argv[] )
 
   /* Init Main Window */
   GuiMain mw;
-  ShadowUpdateController updates( Settings::instance().version( false, false, false ), &mw, QUrl(),
+  const QUrl update_source = dev_preview_mode
+    ? QUrl( QStringLiteral( "http://127.0.0.1:5173/updates/shadowchat.json" ) ) : QUrl();
+  ShadowUpdateController updates( Settings::instance().version( false, false, false ), &mw, update_source,
     profile_argument >= 0 ? QDir( bee_app.property( "shadowAccountRoot" ).toString() ).filePath( "update-reminders.ini" ) : QString() );
   updates.setBusyPredicate( [&bee_core]() { return bee_core.hasFileTransferInProgress(); } );
   mw.setUpdateController( &updates );
@@ -401,7 +403,8 @@ int main( int argc, char *argv[] )
   mw.loadSession();
   if( dev_preview_mode )
     new ShadowDevPreview( &mw, &bee_core );
-  updates.start();
+  if( !dev_preview_mode )
+    updates.start();
 
   /* Event Loop */
   qDebug() << "Enter in the main event loop";

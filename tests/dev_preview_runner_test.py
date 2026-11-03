@@ -15,6 +15,31 @@ spec.loader.exec_module(runner)
 
 
 class PreviewRunnerTests(unittest.TestCase):
+    def test_preview_reuses_public_update_build_arguments(self):
+        configuration = {"releaseEnvironment": "local",
+                         "qmakeArguments": ["SHADOWCHAT_ENV=local", "CONFIG+=no_batch"]}
+        arguments = runner.preview_qmake_arguments(configuration)
+        self.assertEqual(arguments, configuration["qmakeArguments"])
+        self.assertFalse(any("SHADOWCHAT_LOCAL_UPDATE_PORT" in argument for argument in arguments))
+        arguments.append("independent-copy")
+        self.assertNotIn("independent-copy", configuration["qmakeArguments"])
+
+    def test_preview_preserves_explicit_loopback_build_arguments(self):
+        arguments = ["SHADOWCHAT_ENV=local", "CONFIG+=no_batch", "SHADOWCHAT_LOCAL_UPDATE_PORT=5199"]
+        self.assertEqual(runner.preview_qmake_arguments(
+            {"releaseEnvironment": "local", "qmakeArguments": arguments}), arguments)
+
+    def test_preview_rejects_mixed_or_missing_build_environment(self):
+        for configuration in (
+            {"releaseEnvironment": "dev", "qmakeArguments": ["SHADOWCHAT_ENV=dev"]},
+            {"releaseEnvironment": "local", "qmakeArguments": ["CONFIG+=no_batch"]},
+            {"releaseEnvironment": "local", "qmakeArguments": ["SHADOWCHAT_ENV=local", "SHADOWCHAT_ENV=main"]},
+            {"releaseEnvironment": "local", "qmakeArguments": ["SHADOWCHAT_ENV=local", "-after"]},
+            {"releaseEnvironment": "local", "qmakeArguments": ["SHADOWCHAT_ENV=local", 5173]},
+        ):
+            with self.assertRaises(RuntimeError):
+                runner.preview_qmake_arguments(configuration)
+
     def test_outside_paths_rejected(self):
         for filename in (ROOT / "src/release/ShadowChat.exe", ROOT / "dist/local/production/bin/ShadowChat.exe",
                          ROOT.parent / "ShadowChat.exe", runner.OUT / "../other/ShadowChat.exe"):
