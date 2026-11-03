@@ -167,6 +167,18 @@ def toolchain():
     return configuration, qmake, nmake, environment
 
 
+def preview_qmake_arguments(configuration):
+    arguments = configuration.get("qmakeArguments")
+    if configuration.get("releaseEnvironment") != "local" or not isinstance(arguments, list):
+        raise RuntimeError("Native preview requires the recorded local build arguments")
+    if any(not isinstance(argument, str) for argument in arguments):
+        raise RuntimeError("Invalid recorded preview build arguments")
+    environments = [argument for argument in arguments if argument.startswith("SHADOWCHAT_ENV=")]
+    if environments != ["SHADOWCHAT_ENV=local"] or "-after" in arguments:
+        raise RuntimeError("Native preview build environment differs from local production")
+    return list(arguments)
+
+
 def fingerprint():
     snapshot = hashlib.sha256()
     for base in (ROOT / "src", ROOT / "locale", ROOT / "scripts/dev-preview"):
@@ -259,7 +271,7 @@ def build():
         write_json(workspace / "reuse.json", {"production": str(production), "sourceSha256": configuration["sourceExecutableSha256"], "utc": utc()})
     log = OUT / "logs/build.log"
     arguments = [str(qmake), str(ROOT / "src/src.pro"), "-o", "Makefile",
-                 "SHADOWCHAT_ENV=local", "SHADOWCHAT_LOCAL_UPDATE_PORT=5173", "CONFIG+=no_batch", "-after"]
+                 *preview_qmake_arguments(configuration), "-after"]
     arguments += [name + "=" + str(workspace / subdirectory).replace("\\", "/") for name, subdirectory in
                   (("DESTDIR", "bin"), ("OBJECTS_DIR", "objects"), ("MOC_DIR", "generated"), ("UI_DIR", "generated"), ("RCC_DIR", "generated"))]
     run_logged(arguments, workspace, log, environment)
