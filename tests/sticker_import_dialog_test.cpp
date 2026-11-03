@@ -240,12 +240,18 @@ private slots:
     TestStickerPicker picker(workspace.path());
     picker.execute=[&](QFileDialog& dialog) {
       dialog.setOption(QFileDialog::DontUseNativeDialog,true);
+      dialog.setDirectory(QFileInfo(archive).absolutePath());
       dialog.selectFile(archive);
+      QCoreApplication::processEvents();
+      if(QLineEdit* fileName=dialog.findChild<QLineEdit*>("fileNameEdit"))
+        fileName->setText(QFileInfo(archive).fileName());
+      QCoreApplication::processEvents();
+      if(!dialog.selectedFiles().contains(archive))return QDialog::Rejected;
       return QDialog::Accepted;
     };
     picker.chooseArchive();
     QListWidget* grid=picker.findChild<QListWidget*>("StickerGrid");
-    QCOMPARE(grid->count(),2);
+    QVERIFY2(grid->count()==2,qPrintable(picker.findChild<QLabel*>("StickerStatus")->text()));
     QVERIFY(grid->item(1)->text().isEmpty());
     QVERIFY(!grid->item(1)->toolTip().contains("sticker"));
     QSignalSpy sent(&picker,&GuiStickerPicker::stickerSelected);
@@ -302,7 +308,8 @@ private slots:
       picker.isVisible(),grid->isVisible(),QApplication::activePopupWidget()==&picker,
       grid->viewport()->width(),grid->viewport()->height(),firstStickerRect.x(),firstStickerRect.y(),
       firstStickerRect.width(),firstStickerRect.height(),movies.size());
-    QVERIFY(!movies.isEmpty());
+    QTRY_VERIFY_WITH_TIMEOUT(!picker.findChildren<QMovie*>("StickerVisibleMovie").isEmpty(),1000);
+    movies=picker.findChildren<QMovie*>("StickerVisibleMovie");
     QVERIFY(movies.size()<=12);
     QMovie* first=movies.first();
     QSignalSpy frames(first,&QMovie::frameChanged);
