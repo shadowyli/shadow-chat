@@ -30,8 +30,11 @@
 #include "PluginManager.h"
 #include "Settings.h"
 #include "ShadowDialogStyle.h"
+#include "ShadowPopup.h"
 #include "ShadowStyle.h"
 #include "UserManager.h"
+#include <QApplication>
+#include <QPainter>
 
 
 GuiVCard::GuiVCard( QWidget *parent )
@@ -39,15 +42,17 @@ GuiVCard::GuiVCard( QWidget *parent )
 {
   setupUi( this );
   setObjectName( "GuiVCard" );
-  setWindowFlags( Qt::Popup | Qt::FramelessWindowHint );
+  setWindowFlags( Qt::Popup | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint );
+  setAttribute( Qt::WA_TranslucentBackground, true );
   setAttribute( Qt::WA_DeleteOnClose, true );
   setFocusPolicy( Qt::StrongFocus );
   setFrameShape( QFrame::NoFrame );
   setMinimumSize( 0, 0 );
-  setMaximumWidth( 420 );
+  setMaximumWidth( 440 );
   delete layout();
   QVBoxLayout* card = new QVBoxLayout( this );
-  card->setContentsMargins( 20, 16, 20, 20 );
+  card->setSizeConstraint( QLayout::SetNoConstraint );
+  card->setContentsMargins( 30, 26, 30, 30 );
   card->setSpacing( 12 );
   QHBoxLayout* heading = new QHBoxLayout;
   QLabel* title = new QLabel( QStringLiteral( "公开资料" ), this );
@@ -124,7 +129,7 @@ GuiVCard::GuiVCard( QWidget *parent )
   mp_pbChat->setProperty( "role", "primary" );
   ShadowDialogStyle::apply( this );
   setStyleSheet( styleSheet() + QStringLiteral(
-    "QFrame#GuiVCard{background:#ffffff;border:1px solid #dce4f0;border-radius:12px;}"
+    "QFrame#GuiVCard{background:transparent;border:0;}"
     "QScrollArea#publicProfileDetails,QScrollArea#publicProfileDetails>QWidget>QWidget{background:#ffffff;}"
     "QPlainTextEdit#mp_teInfo{background:transparent;border:0;padding:0;color:#697b94;}" ) );
   qApp->installEventFilter( this );
@@ -164,20 +169,37 @@ void GuiVCard::setVCard( const User& u, VNumber chat_id, bool core_is_connected 
 
 void GuiVCard::showAt( const QPoint& anchor )
 {
-  const QRect available = qApp->desktop()->availableGeometry( anchor ).adjusted( 8, 8, -8, -8 );
-  const int width = qMin( 380, available.width() );
+  m_anchorWindow = parentWidget() ? parentWidget()->window() : QApplication::activeWindow();
+  if( m_anchorWindow == this )
+    m_anchorWindow = Q_NULLPTR;
+  m_anchorWidget = QApplication::widgetAt( anchor );
+  if( !m_anchorWidget || m_anchorWidget->window() != m_anchorWindow )
+    m_anchorWidget = m_anchorWindow;
+  if( m_anchorWidget )
+    m_anchorOffset = m_anchorWidget->mapFromGlobal( anchor );
+  const QRect available = ShadowPopup::availableGeometryFor( anchor ).adjusted( 8, 8, -8, -8 );
+  const int width = qMin( 400, available.width() );
   setMaximumWidth( width );
-  resize( width, qMin( 560, available.height() ) );
+  resize( width, qMin( 580, available.height() ) );
   ensurePolished();
   layout()->activate();
   mp_publicDetails->widget()->layout()->activate();
   const int contentHeight = mp_publicDetails->widget()->layout()->totalHeightForWidth(
     qMax( 1, width - 60 ) );
-  const int desiredHeight = qMax( 240, contentHeight + (mp_pbChat->isHidden() ? 92 : 140) );
-  setGeometry( ShadowAvatarInteractions::popupGeometry( anchor,
-    QSize( width, qMin( qMin( desiredHeight, 600 ), available.height() ) ), available ) );
+  const int desiredHeight = qMax( 260, contentHeight + (mp_pbChat->isHidden() ? 132 : 180 ) );
+  const QSize targetSize( width, qMin( qMin( desiredHeight, 620 ), available.height() ) );
+  setGeometry( ShadowPopup::placeGeometry( QRect( anchor, QSize( 1, 1 ) ), targetSize, available,
+                                           ShadowPopup::Automatic, 8 ) );
   show();
   setFocus( Qt::PopupFocusReason );
+}
+
+void GuiVCard::paintEvent( QPaintEvent* event )
+{
+  Q_UNUSED( event );
+  QPainter painter( this );
+  ShadowPopup::paintCard( &painter, rect().adjusted( ShadowPopup::shadowMargin, ShadowPopup::shadowMargin,
+    -ShadowPopup::shadowMargin, -ShadowPopup::shadowMargin ) );
 }
 
 void GuiVCard::keyPressEvent( QKeyEvent* event )
@@ -193,10 +215,40 @@ void GuiVCard::keyPressEvent( QKeyEvent* event )
 
 bool GuiVCard::eventFilter( QObject* watched, QEvent* event )
 {
+  QWidget* widget = qobject_cast<QWidget*>( watched );
+  if( isVisible() && m_anchorWidget && widget && widget != this &&
+      (widget == m_anchorWidget || widget->isAncestorOf( m_anchorWidget )) &&
+      (event->type() == QEvent::Move || event->type() == QEvent::Resize) )
+  {
+    const QPoint anchor = m_anchorWidget->mapToGlobal( m_anchorOffset );
+    const QRect available = ShadowPopup::availableGeometryFor( anchor ).adjusted( 8, 8, -8, -8 );
+    setGeometry( ShadowPopup::placeGeometry( QRect( anchor, QSize( 1, 1 ) ), size(), available,
+                                             ShadowPopup::Automatic, 8 ) );
+  }
+  if( isVisible() && widget && m_anchorWidget &&
+      (widget == m_anchorWidget || widget->isAncestorOf( m_anchorWidget )) &&
+      (event->type() == QEvent::Hide || (event->type() == QEvent::WindowStateChange && widget->isMinimized())) )
+  {
+    close();
+    return false;
+  }
+  if( isVisible() && QApplication::activePopupWidget() == this && widget && widget->window() == this &&
+      event->type() == QEvent::KeyPress && static_cast<QKeyEvent*>( event )->key() == Qt::Key_Escape )
+  {
+    close();
+    return true;
+  }
   if( isVisible() && event->type() == QEvent::MouseButtonPress &&
       !frameGeometry().contains( static_cast<QMouseEvent*>( event )->globalPos() ) )
     close();
   return QFrame::eventFilter( watched, event );
+}
+
+void GuiVCard::hideEvent( QHideEvent* event )
+{
+  QFrame::hideEvent( event );
+  if( m_anchorWidget && m_anchorWidget->isVisible() && m_anchorWidget->window()->isActiveWindow() )
+    m_anchorWidget->setFocus( Qt::OtherFocusReason );
 }
 
 void GuiVCard::showPrivateChat()

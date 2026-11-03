@@ -26,6 +26,7 @@
 
 #include "ui_GuiVCard.h"
 #include "Config.h"
+#include <QPointer>
 class User;
 
 
@@ -42,6 +43,8 @@ public:
 protected:
   void keyPressEvent( QKeyEvent* ) override;
   bool eventFilter( QObject*, QEvent* ) override;
+  void paintEvent( QPaintEvent* ) override;
+  void hideEvent( QHideEvent* ) override;
 
 signals:
   void showChat( VNumber );
@@ -67,7 +70,9 @@ private:
   QString m_userColor;
   QScrollArea* mp_publicDetails;
   QLabel* mp_fullName;
-
+  QPointer<QWidget> m_anchorWindow;
+  QPointer<QWidget> m_anchorWidget;
+  QPoint m_anchorOffset;
 };
 
 #endif // BEEBEEP_GUIVCARD_H

@@ -1,6 +1,6 @@
 #ifndef GUI_STICKER_PICKER_H
 #define GUI_STICKER_PICKER_H
-#include <QDialog>
+#include "ShadowPopup.h"
 #include <QPointer>
 class QListWidget;
 class QListWidgetItem;
@@ -11,7 +11,7 @@ class QFileDialog;
 class QMenu;
 class StickerImportDialogTest;
 
-class GuiStickerPicker : public QDialog
+class GuiStickerPicker : public ShadowPopup
 {
   Q_OBJECT
 public:
@@ -30,12 +30,9 @@ private:
   static QString preferredArchiveDirectory( const QString& previous, const QString& downloads,
                                            const QString& documents, const QString& home );
   void chooseArchive();
-  void positionAboveAnchor();
-  void scheduleAnchorPosition();
   void removeSelected();
   void chooseImages();
   void activateSticker( QListWidgetItem* );
-  bool eventFilter( QObject*, QEvent* ) override;
   QString m_accountFolder;
   QListWidget* m_grid;
   QLabel* m_status;
@@ -43,9 +40,7 @@ private:
   QLineEdit* m_search;
   QMenu* m_addMenu;
   QPointer<QWidget> m_anchor;
-  QPointer<QWidget> m_owner;
   bool m_recent;
   bool m_managing;
-  bool m_positionPending;
 };
 #endif

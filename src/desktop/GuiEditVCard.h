@@ -26,6 +26,7 @@
 
 #include <ui_GuiEditVCard.h>
 #include "User.h"
+#include <QPointer>
 
 
 class GuiEditVCard : public QDialog, private Ui::GuiVCardDialog
@@ -37,6 +38,8 @@ public:
 
   void setUser( const User& );
   void setProfileStatus( int );
+  void reject() override;
+  void showAt( QWidget* anchor );
 
   inline const VCard& vCard() const;
   inline const QString& userColor() const;
@@ -47,6 +50,7 @@ signals:
 
 protected:
   void showEvent( QShowEvent* ) override;
+  bool eventFilter( QObject*, QEvent* ) override;
   void loadVCard();
   void setUserColor( const QString& );
   bool checkLineEdit( QLineEdit*, const QString& );
@@ -56,17 +60,19 @@ protected:
   void resizeProfilePage();
   void showProfileEditor( QWidget* );
   void updateCardClock();
+  void placeCard();
 
 private slots:
   void changePhoto();
-  void removePhoto();
   void onOkClicked();
   void changeUserColor();
   void regenerateHash();
 
 private:
   VCard m_vCard;
+  QPixmap m_photo;
   QString m_userColor;
+  QString m_savedUserColor;
   bool m_regenerateUserHash;
   QString m_accountEmail;
   QStackedWidget* m_profilePages;
@@ -79,6 +85,8 @@ private:
   QLabel* m_cardGroups;
   QLabel* m_cardClock;
   QPushButton* m_cardStatus;
+  QPointer<QWidget> m_cardAnchor;
+  bool m_cardAnchored = false;
 
 };
 

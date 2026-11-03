@@ -86,6 +86,8 @@
 #include <QScreen>
 #include <QPainterPath>
 #include "ShadowDialogStyle.h"
+#include "ShadowColorPanel.h"
+#include "ShadowPopup.h"
 #include "ShadowWorkspaceArchive.h"
 #include "ShadowLocalAccounts.h"
 #include "Updater.h"
@@ -122,6 +124,7 @@ GuiMain::GuiMain( QWidget *parent )
  : QMainWindow( parent ), m_floatingChats()
 {
   setObjectName( "GuiMainWindow" );
+  ShadowPopup::installMenuTracking();
   setWindowIcon( QIcon( QStringLiteral( ":/images/shadowchat/shadowchat-mark-source.png" ) ) );
 
   // Create a status bar before the actions and the menu
@@ -3498,7 +3501,8 @@ void GuiMain::settingsChanged( QAction* act )
     break;
   case 72:
     {
-      QColor c = QColorDialog::getColor( QColor( Settings::instance().chatBackgroundColor() ), this );
+      QColor c = ShadowColorPanel::pickForAction( act, QColor( Settings::instance().chatBackgroundColor() ),
+        this, QStringLiteral( "聊天背景颜色" ) );
       if( c.isValid() )
       {
         Settings::instance().setChatBackgroundColor( c.name() );
@@ -3508,7 +3512,8 @@ void GuiMain::settingsChanged( QAction* act )
     break;
   case 73:
     {
-      QColor c = QColorDialog::getColor( QColor( Settings::instance().chatDefaultTextColor() ), this );
+      QColor c = ShadowColorPanel::pickForAction( act, QColor( Settings::instance().chatDefaultTextColor() ),
+        this, QStringLiteral( "聊天文字颜色" ) );
       if( c.isValid() )
       {
         Settings::instance().setChatDefaultTextColor( c.name() );
@@ -3518,7 +3523,8 @@ void GuiMain::settingsChanged( QAction* act )
     break;
   case 74:
     {
-      QColor c = QColorDialog::getColor( QColor( Settings::instance().chatSystemTextColor() ), this );
+      QColor c = ShadowColorPanel::pickForAction( act, QColor( Settings::instance().chatSystemTextColor() ),
+        this, QStringLiteral( "系统提示文字颜色" ) );
       if( c.isValid() )
       {
         Settings::instance().setChatSystemTextColor( c.name() );
@@ -3636,7 +3642,8 @@ void GuiMain::settingsChanged( QAction* act )
     break;
   case 89:
     {
-      QColor c = QColorDialog::getColor( QColor( Settings::instance().chatQuoteTextColor() ), this );
+      QColor c = ShadowColorPanel::pickForAction( act, QColor( Settings::instance().chatQuoteTextColor() ),
+        this, QStringLiteral( "引用文字颜色" ) );
       if( c.isValid() )
       {
         Settings::instance().setChatQuoteTextColor( c.name() );
@@ -3646,7 +3653,8 @@ void GuiMain::settingsChanged( QAction* act )
     break;
   case 90:
     {
-      QColor c = QColorDialog::getColor( QColor( Settings::instance().chatQuoteBackgroundColor() ), this );
+      QColor c = ShadowColorPanel::pickForAction( act, QColor( Settings::instance().chatQuoteBackgroundColor() ),
+        this, QStringLiteral( "引用背景颜色" ) );
       if( c.isValid() )
       {
         Settings::instance().setChatQuoteBackgroundColor( c.name() );
@@ -4601,24 +4609,26 @@ void GuiMain::showChat( VNumber chat_id )
 
 void GuiMain::changeVCard()
 {
-  GuiEditVCard gvc( this );
-  connect( &gvc, &GuiEditVCard::userStatusSelected, this, [this, &gvc]( int status ) {
+  GuiEditVCard* gvc = new GuiEditVCard( this );
+  gvc->setAttribute( Qt::WA_DeleteOnClose );
+  connect( gvc, &GuiEditVCard::userStatusSelected, this, [this, gvc]( int status ) {
     setUserStatusSelected( status );
-    gvc.setProfileStatus( Settings::instance().localUser().status() );
+    gvc->setProfileStatus( Settings::instance().localUser().status() );
   } );
-  gvc.setModal( true );
-  gvc.setUser( Settings::instance().localUser() );
-  gvc.setSizeGripEnabled( true );
-  gvc.show();
-  if( gvc.exec() == QDialog::Accepted )
-  {
-    beeCore->setLocalUserVCard( gvc.userColor(), gvc.vCard() );
-    if( gvc.regenerateUserHash() )
+  connect( gvc, &QDialog::accepted, this, [this, gvc]() {
+    beeCore->setLocalUserVCard( gvc->userColor(), gvc->vCard() );
+    if( gvc->regenerateUserHash() )
     {
       beeCore->regenerateLocalUserHash();
       QMessageBox::information( this, Settings::instance().programName(), tr( "You must restart %1 to apply these changes." ).arg( Settings::instance().programName() ) );
     }
-  }
+  } );
+  gvc->setUser( Settings::instance().localUser() );
+  gvc->setSizeGripEnabled( true );
+  QWidget* anchor = qobject_cast<QWidget*>( sender() );
+  if( !anchor || !anchor->isVisible() )
+    anchor = findChild<QWidget*>( QStringLiteral( "ShadowTitleProfile" ) );
+  gvc->showAt( anchor ? anchor : this );
 }
 
 void GuiMain::showLocalUserVCard()
@@ -5409,7 +5419,8 @@ void GuiMain::showMessage( const QString& status_msg, int time_out )
 
 void GuiMain::changeUserColor( VNumber user_id, const QString& user_color )
 {
-  QColor c = QColorDialog::getColor( QColor( user_color ), qApp->activeWindow() );
+  QColor c = ShadowColorPanel::pickForAction( sender(), QColor( user_color ),
+    qApp->activeWindow(), QStringLiteral( "昵称颜色" ) );
   if( c.isValid() )
     beeCore->changeUserColor( user_id, c.name() );
 }

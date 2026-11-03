@@ -2,6 +2,8 @@
 INCLUDEPATH += $$PWD
 HEADERS += desktop/ShadowAvatarInteractions.h
 SOURCES += desktop/ShadowAvatarInteractions.cpp
+HEADERS += desktop/ShadowPopup.h desktop/ShadowCalendarPopup.h desktop/ShadowBirthdayEdit.h desktop/ShadowColorPanel.h
+SOURCES += desktop/ShadowPopup.cpp desktop/ShadowCalendarPopup.cpp desktop/ShadowBirthdayEdit.cpp desktop/ShadowColorPanel.cpp
 HEADERS += desktop/ShadowVideoPreview.h
 SOURCES += desktop/ShadowVideoPreview.cpp
 HEADERS += desktop/ShadowConversationDelegate.h
