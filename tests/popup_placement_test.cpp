@@ -17,6 +17,7 @@
 #include <QApplication>
 #include <QDialog>
 #include <QDir>
+#include <QFontInfo>
 #include <QLabel>
 #include <QMenu>
 #include <QPushButton>
@@ -285,6 +286,9 @@ int main( int argc, char** argv )
   flushEvents();
   ShadowCalendarPopup* calendar = birthday->findChild<ShadowCalendarPopup*>();
   CHECK( calendar && calendar->isVisible() );
+  CHECK( QFontInfo( calendar->yearButton()->font() ).family().contains( QStringLiteral( "YaHei" ) ) );
+  foreach( QToolButton* day, calendar->findChildren<QToolButton*>( QStringLiteral( "calendarDay" ) ) )
+    CHECK( QFontInfo( day->font() ).family().contains( QStringLiteral( "YaHei" ) ) );
   CHECK( available.contains( calendar->geometry() ) );
   CHECK( qAbs( calendar->geometry().center().x() - birthday->mapToGlobal( birthday->rect().center() ).x() ) < available.width() / 2 );
   calendar->yearButton()->click();

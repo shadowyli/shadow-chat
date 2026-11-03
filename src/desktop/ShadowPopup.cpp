@@ -2,6 +2,7 @@
 #include <QApplication>
 #include <QAbstractButton>
 #include <QEvent>
+#include <QFont>
 #include <QGuiApplication>
 #include <QHideEvent>
 #include <QKeyEvent>
@@ -226,6 +227,9 @@ ShadowPopup::ShadowPopup( QWidget* parent )
   setFocusPolicy( Qt::StrongFocus );
   setProperty( "shadowPopup", true );
   setWindowTitle( QString() );
+  QFont popup_font( QStringLiteral( "Microsoft YaHei UI" ) );
+  popup_font.setPixelSize( 12 );
+  setFont( popup_font );
 
   QVBoxLayout* outer = new QVBoxLayout( this );
   outer->setContentsMargins( shadowMargin, shadowMargin, shadowMargin, shadowMargin );
