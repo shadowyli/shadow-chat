@@ -50,6 +50,7 @@
 #include "ShadowChatTranscript.h"
 #include "ShadowTransferQueue.h"
 #include "ShadowComposerFormatBar.h"
+#include "ShadowColorPanel.h"
 #include "ShadowRichText.h"
 #include <QDesktopServices>
 #include <QUrlQuery>
@@ -1976,7 +1977,8 @@ void GuiChat::updateChatColors()
 
 void GuiChat::selectFontColor()
 {
-  QColor c = QColorDialog::getColor( QColor( Settings::instance().chatFontColor() ), this );
+  QColor c = ShadowColorPanel::pickForAction( sender(), QColor( Settings::instance().chatFontColor() ),
+    this, QStringLiteral( "消息文字颜色" ) );
   if( c.isValid() && c.name() != Settings::instance().chatFontColor() )
   {
     Settings::instance().setChatFontColor( c.name() );
@@ -1987,7 +1989,8 @@ void GuiChat::selectFontColor()
 
 void GuiChat::selectBackgroundColor()
 {
-  QColor c = QColorDialog::getColor( QColor( (m_chatId == ID_DEFAULT_CHAT ? Settings::instance().defaultChatBackgroundColor() : Settings::instance().chatBackgroundColor() ) ), this );
+  QColor c = ShadowColorPanel::pickForAction( sender(), QColor( (m_chatId == ID_DEFAULT_CHAT ? Settings::instance().defaultChatBackgroundColor() : Settings::instance().chatBackgroundColor() ) ),
+    this, QStringLiteral( "聊天背景颜色" ) );
   if( c.isValid() )
   {
     if( m_chatId == ID_DEFAULT_CHAT )
@@ -2005,7 +2008,8 @@ void GuiChat::selectBackgroundColor()
 
 void GuiChat::selectForegroundColor()
 {
-  QColor c = QColorDialog::getColor( QColor( Settings::instance().chatDefaultTextColor() ), this );
+  QColor c = ShadowColorPanel::pickForAction( sender(), QColor( Settings::instance().chatDefaultTextColor() ),
+    this, QStringLiteral( "默认文字颜色" ) );
   if( c.isValid() && c.name() != Settings::instance().chatDefaultTextColor() )
   {
     Settings::instance().setChatDefaultTextColor( c.name() );
@@ -2015,7 +2019,8 @@ void GuiChat::selectForegroundColor()
 
 void GuiChat::selectSystemColor()
 {
-  QColor c = QColorDialog::getColor( QColor( Settings::instance().chatSystemTextColor() ), this );
+  QColor c = ShadowColorPanel::pickForAction( sender(), QColor( Settings::instance().chatSystemTextColor() ),
+    this, QStringLiteral( "系统提示文字颜色" ) );
   if( c.isValid() && c.name() != Settings::instance().chatSystemTextColor() )
   {
     Settings::instance().setChatSystemTextColor( c.name() );

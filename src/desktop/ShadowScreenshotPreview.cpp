@@ -1,4 +1,5 @@
 #include "ShadowScreenshotPreview.h"
+#include "ShadowPopup.h"
 
 #include <QApplication>
 #include <QButtonGroup>
@@ -540,7 +541,7 @@ ShadowScreenshotPreview::ShadowScreenshotPreview( const QPixmap& image, const QR
     } );
   }
   connect( color, &QPushButton::clicked, this, [color, colors]() {
-    colors->popup( color->mapToGlobal( QPoint( 0, color->height() ) ) );
+    ShadowPopup::showMenuAtGlobal( colors, QRect( color->mapToGlobal( QPoint() ), color->size() ) );
   } );
   m_undo = button( "undo", "ShadowScreenshotUndo", QStringLiteral( "撤销 (Ctrl+Z)" ) );
   m_redo = button( "redo", "ShadowScreenshotRedo", QStringLiteral( "重做 (Ctrl+Y)" ) );
