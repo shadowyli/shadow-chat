@@ -1,4 +1,5 @@
 #include "ShadowPopup.h"
+#include "ShadowStyle.h"
 #include <QApplication>
 #include <QAbstractButton>
 #include <QEvent>
@@ -227,9 +228,7 @@ ShadowPopup::ShadowPopup( QWidget* parent )
   setFocusPolicy( Qt::StrongFocus );
   setProperty( "shadowPopup", true );
   setWindowTitle( QString() );
-  QFont popup_font( QStringLiteral( "Microsoft YaHei UI" ) );
-  popup_font.setPixelSize( 12 );
-  setFont( popup_font );
+  setFont( ShadowStyle::applicationFont() );
 
   QVBoxLayout* outer = new QVBoxLayout( this );
   outer->setContentsMargins( shadowMargin, shadowMargin, shadowMargin, shadowMargin );
