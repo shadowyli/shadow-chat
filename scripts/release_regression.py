@@ -28,7 +28,7 @@ def main():
     parser.add_argument('--platform', choices=('windows', 'offscreen'), default='windows')
     parser.add_argument('--dev-preview-modes', nargs='+', choices=(
         'all', 'reply', 'local-send', 'history', 'welcome', 'corners',
-        'startup-size', 'messagebox', 'sidebar',
+        'startup-size', 'messagebox', 'sidebar', 'profile-status',
     ), default=['all'])
     args = parser.parse_args()
     for name in args.tests:

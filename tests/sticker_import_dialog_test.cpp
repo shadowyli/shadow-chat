@@ -153,7 +153,7 @@ private slots:
     owner.resize(700,500);
     owner.move(20,20);
     QToolButton anchor(&owner);
-    anchor.setGeometry(200,440,30,30);
+    anchor.setGeometry(350,440,30,30);
     owner.show();
     QCoreApplication::processEvents();
     GuiStickerPicker picker(workspace.path(),&owner);
@@ -162,8 +162,19 @@ private slots:
     QVERIFY(picker.isVisible());
     QVERIFY(!picker.isModal());
     QVERIFY(picker.windowFlags().testFlag(Qt::Popup));
-    QCOMPARE(picker.x(),anchor.mapToGlobal(QPoint()).x());
+    const QRect initialAnchor(anchor.mapToGlobal(QPoint()),anchor.size());
+    const QRect initialFrame=picker.frameGeometry();
+    const QRect initialScreen=anchor.screen()->availableGeometry();
+    qInfo("anchor=%d,%d %dx%d popup-frame=%d,%d %dx%d screen=%d,%d %dx%d dpr=%.2f",
+      initialAnchor.x(),initialAnchor.y(),initialAnchor.width(),initialAnchor.height(),
+      initialFrame.x(),initialFrame.y(),initialFrame.width(),initialFrame.height(),
+      initialScreen.x(),initialScreen.y(),initialScreen.width(),initialScreen.height(),picker.devicePixelRatioF());
+    const QString proofDirectory=qEnvironmentVariable("SHADOWCHAT_UI_PROOF_DIR");
+    if(!proofDirectory.isEmpty())
+      QVERIFY(picker.grab().save(proofDirectory+"/anchored-popup.png"));
+    QCOMPARE(picker.x()+picker.width()/2,initialAnchor.center().x());
     QCOMPARE(picker.y()+picker.height()+6,anchor.mapToGlobal(QPoint()).y());
+    QVERIFY(initialScreen.contains(initialFrame));
     QVERIFY(!picker.findChild<QLabel*>("StickerHeading"));
     QTest::keyClick(picker.findChild<QListWidget*>("StickerGrid"),Qt::Key_Escape);
     QVERIFY(!picker.isVisible());
@@ -171,17 +182,42 @@ private slots:
     QTest::mouseClick(&owner,Qt::LeftButton,Qt::NoModifier,QPoint(5,5));
     QVERIFY(!picker.isVisible());
     picker.showAbove(&anchor);
-    anchor.move(220,450);
+    QVERIFY(picker.isVisible());
+    const QPoint beforeAnchorMove=picker.pos();
+    anchor.move(390,450);
     QCoreApplication::processEvents();
     QCoreApplication::processEvents();
-    QCOMPARE(picker.x(),anchor.mapToGlobal(QPoint()).x());
+    QTRY_COMPARE(picker.pos(),beforeAnchorMove+QPoint(40,10));
+    QCOMPARE(picker.x()+picker.width()/2,QRect(anchor.mapToGlobal(QPoint()),anchor.size()).center().x());
     QCOMPARE(picker.y()+picker.height()+6,anchor.mapToGlobal(QPoint()).y());
-    anchor.move(owner.width()-anchor.width()-5,450);
+    const QPoint beforeOwnerMove=picker.pos();
+    owner.move(owner.pos()+QPoint(35,20));
     QCoreApplication::processEvents();
     QCoreApplication::processEvents();
+    QTRY_COMPARE(picker.pos(),beforeOwnerMove+QPoint(35,20));
+
     const QRect screen=anchor.screen()->availableGeometry();
-    QVERIFY(picker.x()>=screen.left()+8);
-    QVERIFY(picker.geometry().right()<=screen.right()-8);
+    anchor.move(0,450);
+    owner.move(screen.left(),owner.pos().y());
+    QTRY_COMPARE(picker.frameGeometry().left(),screen.left());
+    QVERIFY(screen.contains(picker.frameGeometry()));
+    QVERIFY(picker.frameGeometry().contains(QPoint(QRect(anchor.mapToGlobal(QPoint()),anchor.size()).center().x(),
+                                                   picker.frameGeometry().center().y())));
+    QCOMPARE(picker.y()+picker.height()+6,anchor.mapToGlobal(QPoint()).y());
+
+    anchor.move(owner.width()-anchor.width(),450);
+    owner.move(screen.right()-owner.frameGeometry().width()+1,owner.pos().y());
+    QTRY_COMPARE(picker.frameGeometry().right(),screen.right());
+    QVERIFY(screen.contains(picker.frameGeometry()));
+    QVERIFY(picker.frameGeometry().contains(QPoint(QRect(anchor.mapToGlobal(QPoint()),anchor.size()).center().x(),
+                                                   picker.frameGeometry().center().y())));
+    QCOMPARE(picker.y()+picker.height()+6,anchor.mapToGlobal(QPoint()).y());
+
+    anchor.move(0,0);
+    owner.move(screen.left(),screen.top());
+    const QRect topAnchor(anchor.mapToGlobal(QPoint()),anchor.size());
+    QTRY_COMPARE(picker.y(),topAnchor.bottom()+1+6);
+    QVERIFY(screen.contains(picker.frameGeometry()));
     owner.hide();
     QVERIFY(!picker.isVisible());
   }
@@ -241,7 +277,14 @@ private slots:
     QVERIFY(createLibrary(workspace.path(),512));
     QElapsedTimer elapsed;
     elapsed.start();
-    GuiStickerPicker picker(workspace.path());
+    QWidget owner;
+    owner.resize(700,500);
+    owner.move(20,20);
+    QToolButton anchor(&owner);
+    anchor.setGeometry(350,440,30,30);
+    owner.show();
+    QCoreApplication::processEvents();
+    GuiStickerPicker picker(workspace.path(),&owner);
     QListWidget* grid=picker.findChild<QListWidget*>("StickerGrid");
     QCOMPARE(grid->count(),513);
     QVERIFY(picker.findChildren<QMovie*>().isEmpty());
@@ -251,9 +294,14 @@ private slots:
     QVERIFY(!grid->item(1)->toolTip().contains("synthetic-511"));
     picker.findChild<QLineEdit*>("StickerSearch")->clear();
     QCOMPARE(grid->count(),513);
-    picker.show();
+    picker.showAbove(&anchor);
     QTest::qWait(80);
     auto movies=picker.findChildren<QMovie*>("StickerVisibleMovie");
+    const QRect firstStickerRect=grid->visualItemRect(grid->item(1));
+    qInfo("animation picker-visible=%d grid-visible=%d active-popup=%d viewport=%dx%d first-item=%d,%d %dx%d movies=%d",
+      picker.isVisible(),grid->isVisible(),QApplication::activePopupWidget()==&picker,
+      grid->viewport()->width(),grid->viewport()->height(),firstStickerRect.x(),firstStickerRect.y(),
+      firstStickerRect.width(),firstStickerRect.height(),movies.size());
     QVERIFY(!movies.isEmpty());
     QVERIFY(movies.size()<=12);
     QMovie* first=movies.first();
