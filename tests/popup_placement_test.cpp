@@ -12,6 +12,7 @@
 #include "GuiMessageEdit.h"
 #include "ShadowComposerFormatBar.h"
 #include "ShadowDialogChrome.h"
+#include "ShadowStyle.h"
 #include "Settings.h"
 #include "IconManager.h"
 #include "Random.h"
@@ -287,9 +288,11 @@ int main( int argc, char** argv )
   flushEvents();
   ShadowCalendarPopup* calendar = birthday->findChild<ShadowCalendarPopup*>();
   CHECK( calendar && calendar->isVisible() );
-  CHECK( QFontInfo( calendar->yearButton()->font() ).family().contains( QStringLiteral( "YaHei" ) ) );
+  const QString popup_font_family = QFontInfo( ShadowStyle::applicationFont() ).family();
+  CHECK( !popup_font_family.isEmpty() );
+  CHECK( QFontInfo( calendar->yearButton()->font() ).family() == popup_font_family );
   foreach( QToolButton* day, calendar->findChildren<QToolButton*>( QStringLiteral( "calendarDay" ) ) )
-    CHECK( QFontInfo( day->font() ).family().contains( QStringLiteral( "YaHei" ) ) );
+    CHECK( QFontInfo( day->font() ).family() == popup_font_family );
   CHECK( available.contains( calendar->geometry() ) );
   CHECK( qAbs( calendar->geometry().center().x() - birthday->mapToGlobal( birthday->rect().center() ).x() ) < available.width() / 2 );
   calendar->yearButton()->click();
