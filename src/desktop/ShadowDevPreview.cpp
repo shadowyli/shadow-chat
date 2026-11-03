@@ -287,7 +287,7 @@ bool ShadowDevPreview::checkArguments( int argc, char** argv, QString* error )
 
 QUrl ShadowDevPreview::previewUpdateSource()
 {
-  return QUrl( QStringLiteral( "http://127.0.0.1:5173/updates/shadowchat.json" ) );
+  return QUrl( QStringLiteral( "http://127.0.0.1:35173/updates/shadowchat.json" ) );
 }
 
 bool ShadowDevPreview::configure( const QStringList& arguments, QString* error, const QUrl& updateSource )

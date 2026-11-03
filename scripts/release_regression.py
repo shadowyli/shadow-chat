@@ -25,6 +25,7 @@ def main():
     ])
     parser.add_argument('--scale-factors', nargs='+', choices=('1', '1.5', '2'), default=['1', '1.5', '2'])
     parser.add_argument('--runtime-dir', type=Path)
+    parser.add_argument('--history-video-fixture', type=Path)
     parser.add_argument('--platform', choices=('windows', 'offscreen'), default='windows')
     parser.add_argument('--dev-preview-modes', nargs='+', choices=(
         'all', 'reply', 'local-send', 'history', 'welcome', 'corners',
@@ -34,6 +35,8 @@ def main():
     for name in args.tests:
         if not re.fullmatch(r'[a-z_]+', name) or not (ROOT/'tests'/(name+'_test.pro')).is_file():
             parser.error('Unknown release test project: '+name)
+    if 'history_panel_layout' in args.tests and 'video_preview' not in args.tests and not args.history_video_fixture:
+        parser.error('history_panel_layout requires video_preview in the same run or --history-video-fixture')
     qmake = shutil.which('qmake')
     nmake = shutil.which('nmake')
     if not qmake or not nmake:
@@ -114,6 +117,11 @@ def main():
                     test_environment['QT_SCALE_FACTOR'] = scale
                     for mode in modes:
                         arguments = [] if mode == 'all' else ['--'+mode+'-only']
+                        if name == 'history_panel_layout':
+                            fixture = args.history_video_fixture or directory/'video_preview'/('synthetic-red-blue-'+scale+'.mp4')
+                            if not fixture.is_file() or fixture.stat().st_size <= 1000:
+                                raise RuntimeError('Synthetic history video fixture is missing: '+str(fixture))
+                            arguments.append(str(fixture.resolve()))
                         result = subprocess.run([str(target), *arguments], cwd=workspace, env=test_environment,
                                                 stdout=stream, stderr=subprocess.STDOUT, timeout=90,
                                                 creationflags=0x08000000)
