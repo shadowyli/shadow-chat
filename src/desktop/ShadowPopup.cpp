@@ -239,11 +239,12 @@ ShadowPopup::ShadowPopup( QWidget* parent )
     "QScrollArea#ShadowPopupScroll,QScrollArea#ShadowPopupScroll>QWidget{background:transparent;border:0;}" ) );
   m_content = new QWidget;
   m_content->setObjectName( QStringLiteral( "ShadowPopupContent" ) );
-  m_content->setAttribute( Qt::WA_TranslucentBackground, true );
   m_contentLayout = new QVBoxLayout( m_content );
   m_contentLayout->setContentsMargins( 14, 12, 14, 12 );
   m_contentLayout->setSpacing( 8 );
   m_scroll->setWidget( m_content );
+  m_content->setAutoFillBackground( false );
+  m_scroll->viewport()->setAutoFillBackground( false );
   outer->addWidget( m_scroll );
   qApp->installEventFilter( this );
 
