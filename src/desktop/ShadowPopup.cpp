@@ -4,6 +4,7 @@
 #include <QAbstractButton>
 #include <QEvent>
 #include <QFont>
+#include <QFontInfo>
 #include <QGuiApplication>
 #include <QHideEvent>
 #include <QKeyEvent>
@@ -251,7 +252,9 @@ ShadowPopup::ShadowPopup( QWidget* parent )
   outer->addWidget( m_scroll );
   qApp->installEventFilter( this );
 
+  const QString popup_font_family = QFontInfo( font() ).family().replace( QLatin1Char( '\'' ), QStringLiteral( "\\'" ) );
   setStyleSheet( QStringLiteral(
+    "QWidget#ShadowPopupContent,QWidget#ShadowPopupContent *{font-family:'%1';}"
     "QWidget#ShadowPopupContent{background:transparent;color:#34445E;font-size:12px;}"
     "QLabel{background:transparent;color:#34445E;}"
     "QToolButton{background:transparent;border:1px solid transparent;border-radius:6px;color:#5F6B7A;padding:4px;}"
@@ -261,7 +264,7 @@ ShadowPopup::ShadowPopup( QWidget* parent )
     "QPushButton:hover{background:#EAF0FC;border-color:#B6C9ED;}"
     "QPushButton:focus{border-color:#2463EB;}"
     "QPushButton[role=primary]{background:#2463EB;color:white;border-color:#2463EB;}"
-    "QPushButton[role=primary]:hover{background:#1D52CB;}" ) );
+    "QPushButton[role=primary]:hover{background:#1D52CB;}" ).arg( popup_font_family ) );
 }
 
 ShadowPopup::~ShadowPopup()
