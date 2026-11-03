@@ -8,6 +8,7 @@
 #include "GuiEditVCard.h"
 #include "GuiVCard.h"
 #include "GuiStickerPicker.h"
+#include "ShadowStickerStore.h"
 #include "GuiMessageEdit.h"
 #include "ShadowComposerFormatBar.h"
 #include "ShadowDialogChrome.h"
@@ -457,6 +458,11 @@ int main( int argc, char** argv )
   }
   format_host.close();
 
+  QImage sticker_image( 12, 12, QImage::Format_RGB32 );
+  sticker_image.fill( QColor( "#4381CA" ) );
+  const QString sticker_source = fixture.filePath( "sticker-cell.png" );
+  CHECK( sticker_image.save( sticker_source ) );
+  CHECK( ShadowStickerStore( fixture.path() ).addFile( sticker_source ) );
   GuiStickerPicker stickers( fixture.path(), &host );
   host.activateWindow();
   host.raise();
@@ -464,6 +470,21 @@ int main( int argc, char** argv )
   stickers.showAbove( color_anchor ); QTest::qWait( 30 );
   CHECK( stickers.isVisible() );
   CHECK( available.contains( stickers.frameGeometry() ) );
+  QListWidget* sticker_grid = stickers.findChild<QListWidget*>( "StickerGrid" );
+  CHECK( sticker_grid && sticker_grid->count() == 2 );
+  const QRect sticker_cell = sticker_grid->visualItemRect( sticker_grid->item( 1 ) );
+  CHECK( sticker_cell.width() >= sticker_grid->iconSize().width() &&
+    sticker_cell.height() >= sticker_grid->iconSize().height() );
+  CHECK( sticker_grid->viewport()->rect().contains( sticker_cell.center() ) &&
+    sticker_grid->viewport()->visibleRegion().contains( sticker_cell.center() ) &&
+    sticker_grid->itemAt( sticker_cell.center() ) == sticker_grid->item( 1 ) );
+  CHECK( saveProof( &stickers, "sticker-before-send.png" ) );
+  QSignalSpy sticker_sent( &stickers, &GuiStickerPicker::stickerSelected );
+  QTest::mouseClick( sticker_grid->viewport(), Qt::LeftButton, Qt::NoModifier, sticker_cell.center() );
+  CHECK( !stickers.isVisible() && sticker_sent.count() == 1 &&
+    sticker_sent.first().first().toString() == ShadowStickerStore( fixture.path() ).list().first().path );
+  stickers.showAbove( color_anchor ); QTest::qWait( 30 );
+  std::puts( "PASS lazy sticker thumbnails reserve visible hit targets and an actual grid click selects the original file" );
   const QPoint sticker_before = stickers.pos();
   host.move( host.pos() + QPoint( -20, -15 ) ); QTest::qWait( 20 );
   std::printf( "sticker-follow before=%d,%d actual=%d,%d expected=%d,%d size=%dx%d visible=%d active-owner=%d\n",
