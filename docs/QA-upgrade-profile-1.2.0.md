@@ -1,6 +1,6 @@
 # 1.2.0 旧版 profile 实际读取 QA
 
-日期：2026-11-03。测试文件：
+日期：2026-11-04。最终生产构建提交：`24da404fb75cec5cb2f0eef849b65c7c8bf6910f`。测试文件：
 
 - `tests/upgrade_profile_test.cpp`
 - `tests/upgrade_profile_test.pro`
@@ -105,7 +105,7 @@ current\upgrade_profile_test.exe verify <fixture> 1.2.0
 
 ## 当前冻结状态
 
-两文件已编译并完成双 reader 通过验证。当前源码指纹：
+两文件已编译并完成双 reader 通过验证，并由最终 `install-passed.json` 的覆盖升级验收再次核对。当前源码指纹：
 
 - `tests/upgrade_profile_test.cpp`: `a10514dabe49099bd758d2a0bd833c242231ae7d05fada0061ba80c6216dd28a`
 - `tests/upgrade_profile_test.pro`: `02837bed2bde7169f213b390c940582585ac0ed360cc865d96b7eef818c04a5f`

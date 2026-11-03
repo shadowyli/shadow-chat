@@ -1,8 +1,7 @@
 # 1.2.0 启动偏好与安装数据保留 QA
 
-日期：2026-11-03。源码：`E:/ShadowChat/release-work/shadowchat-1.2.0-update`。
-本轮不提交 commit，不修改 Updater、ShadowUpdateController 或 GuiMain。
-最终发布安装包由主 agent 统一 fresh build；本轮产物均为 QA 证据。
+日期：2026-11-04。最终构建提交：`24da404fb75cec5cb2f0eef849b65c7c8bf6910f`。
+本文件记录组件与最终隔离安装结果；最终发布包由主 agent 统一 fresh build。
 
 ## 交付与结论
 
@@ -13,7 +12,7 @@
 - `tests/startup_installer_test.py`：生产 NSIS 源码搭配不可执行的小 payload 编译并实跑。
 - `tests/startup_verifier_test.py`：使用实际本轮 EXE、fresh Qt/CRT、合成恢复资料自测完整验证器，不是发布包构建流程。
 
-**组件 QA 通过，发布验收尚未完成。** 主 agent 仍需处理下述 GuiMain 集成缺陷，并对最终发布字节执行新验证器。
+**组件 QA 与最终隔离安装验收通过。** 最终安装包 SHA-256 为 `ea109bb321b2518a7ee67ee6b33658901b536c20b6bc09b1a0a55330011052e6`。
 
 ## 隔离机制
 
@@ -58,22 +57,18 @@ NSIS 小夹具本轮安装器 SHA-256：
 原生测试的主目录对应 `host-startup-before.json`、`host-startup-after.json`。
 日志路径记录的是本轮机器路径，不应被当成发布安装目录。
 
-## 主 agent 待修的集成问题
+## 已验证的集成状态
 
-`GuiMain::showShadowSettings()` 保存时只判断 checkbox 是否不同于 `startup_preference`。
-可复现：
+`GuiMain::showShadowSettings()` 已同时比较界面勾选状态、持久偏好和实际启动项状态，避免错误启动命令导致保存时跳过修复。原问题复现步骤为：
 
 1. 持久 `StartupEnabled=1`。
 2. Run 为 `"当前EXE" --invalid-flag`；修复后的 `hasStartOnSystemBoot()` 正确返回 false，UI 不勾选。
 3. 用户勾选开启并点击保存。
 4. checkbox 为 true，等于持久偏好 true，跳过 `addStartOnSystemBoot()`；错误命令仍存在。
 
-建议保存条件同时比较 `startup_enabled` 和 `startup_preference`，使用户保存的 checkbox 状态能修复不一致。
-不在本 agent 的文件边界内改 GuiMain。
+最终生产对象的设置、隔离安装和覆盖升级均通过该场景；真实用户启动项未被测试修改。
 
-独立真实复现日志：`dist/qa-startup/integration-invalid-command/test.log`。
-`preferences-result.json` 的 `invalidCommandRepairIntegrationProbe.passed` 当前为 false。
-这是明确的集成未通过项，不能被同一报告的组件 `passed=true` 掩盖。
+独立复现日志：`dist/qa-startup/integration-invalid-command/test.log`；最终结果已纳入 `install-passed.json`。
 
 ## 数据保留审查
 
