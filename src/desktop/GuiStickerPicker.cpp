@@ -12,6 +12,7 @@ class StickerDelegate : public QStyledItemDelegate
 {
 public:
   explicit StickerDelegate(StickerGrid* grid);
+  QSize sizeHint(const QStyleOptionViewItem& option,const QModelIndex& index) const override;
   void paint(QPainter* painter,const QStyleOptionViewItem& option,const QModelIndex& index) const override;
 private:
   StickerGrid* m_grid;
@@ -121,6 +122,11 @@ private:
 };
 
 StickerDelegate::StickerDelegate(StickerGrid* grid):QStyledItemDelegate(grid),m_grid(grid){}
+
+QSize StickerDelegate::sizeHint(const QStyleOptionViewItem&,const QModelIndex&) const
+{
+  return m_grid->gridSize();
+}
 
 void StickerDelegate::paint(QPainter* painter,const QStyleOptionViewItem& option,const QModelIndex& index) const
 {
