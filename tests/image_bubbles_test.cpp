@@ -225,6 +225,7 @@ int main( int argc, char** argv )
   CHECK( transcript->horizontalScrollBar()->maximum() == 0 );
   for( const QRectF& area : transcript->bubbleFrameRects() )
     CHECK( area.right() <= transcript->viewport()->width() + 1 );
+  transcript->moveCursor( QTextCursor::Start );
   CHECK( transcript->find( QStringLiteral( "手动调下这个" ) ) );
   CHECK( transcript->textCursor().selectedText() == QStringLiteral( "手动调下这个" ) );
   host.grab().save( QDir::currentPath() + "/image-bubbles-narrow.png" );
