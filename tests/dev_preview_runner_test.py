@@ -15,6 +15,29 @@ spec.loader.exec_module(runner)
 
 
 class PreviewRunnerTests(unittest.TestCase):
+    def test_changed_production_archives_preview_objects_before_reuse(self):
+        original_output = runner.OUT
+        runner.OUT = original_output / "tests" / ("reuse-" + uuid.uuid4().hex)
+        try:
+            runner.initialize()
+            production = runner.OUT / "fixture-production"
+            for name in ("objects", "generated"):
+                (production / name).mkdir(parents=True)
+                (production / name / "fixture").write_text("first", encoding="utf-8")
+            first = runner.prepare_production_workspace({"sourceExecutableSha256": "a" * 64}, production)
+            self.assertEqual((first / "objects/fixture").read_text(encoding="utf-8"), "first")
+            (first / "objects/fixture").write_text("incremental", encoding="utf-8")
+            runner.prepare_production_workspace({"sourceExecutableSha256": "a" * 64}, production)
+            self.assertEqual((first / "objects/fixture").read_text(encoding="utf-8"), "incremental")
+            (production / "objects/fixture").write_text("new", encoding="utf-8")
+            second = runner.prepare_production_workspace({"sourceExecutableSha256": "b" * 64}, production)
+            self.assertEqual((second / "objects/fixture").read_text(encoding="utf-8"), "new")
+            archives = list(runner.OUT.glob("production-before-*"))
+            self.assertEqual(len(archives), 1)
+            self.assertEqual((archives[0] / "objects/fixture").read_text(encoding="utf-8"), "incremental")
+        finally:
+            runner.OUT = original_output
+
     def test_preview_reuses_public_update_build_arguments(self):
         configuration = {"releaseEnvironment": "local",
                          "qmakeArguments": ["SHADOWCHAT_ENV=local", "CONFIG+=no_batch"]}
