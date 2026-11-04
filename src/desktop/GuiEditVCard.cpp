@@ -30,9 +30,11 @@
 #include "UserManager.h"
 #include "ShadowDialogStyle.h"
 #include "ShadowStyle.h"
+#include "ShadowColorPanel.h"
 #include <QActionGroup>
 #include <QClipboard>
 #include <QMenu>
+#include <QMouseEvent>
 #include <QScopedValueRollback>
 #include <QScreen>
 #include <QShowEvent>
@@ -60,6 +62,8 @@ GuiEditVCard::GuiEditVCard( QWidget *parent )
 {
   setupUi( this );
   setObjectName( "GuiEditVCard" );
+  ShadowPopup::installMenuTracking();
+  qApp->installEventFilter( this );
   setProperty( "shadowDialogTitleHidden", true );
   setWindowTitle( QStringLiteral( "我的资料 · 影聊" ) );
   setWindowIcon( IconManager::instance().icon( "profile-edit.png" ) );
@@ -67,23 +71,28 @@ GuiEditVCard::GuiEditVCard( QWidget *parent )
 
   mp_lTitle->setProperty( "role", "title" );
   mp_lIdentity->setProperty( "role", "hint" );
-  mp_lEmailHint->setProperty( "role", "hint" );
   mp_pbOk->setProperty( "role", "primary" );
   ShadowDialogStyle::apply( this );
   setMinimumSize( 360, 320 );
-  mp_advanced->show();
-  connect( mp_pbAdvanced, &QPushButton::toggled, this, [this]( bool expanded ) {
-    mp_advanced->setVisible( expanded );
-    mp_pbAdvanced->setText( expanded ? QStringLiteral( "收起更多资料" ) : QStringLiteral( "展开更多资料" ) );
-    resizeProfilePage();
-    QTimer::singleShot( 0, this, [this]() { resizeProfilePage(); } );
-  } );
-  mp_deBirthday->setToolTip( tr( "If you don't want to show the year to other users use 1900. To remove your birthday use 01/01/1900" ) );
+
+  foreach( QLabel* label, QList<QLabel*>() << mp_lNickname << mp_lEmail << mp_lInfo << mp_lBirthday
+                                          << mp_lPhone << mp_lColor )
+  {
+    label->setAlignment( Qt::AlignRight | Qt::AlignVCenter );
+    label->setMinimumWidth( 64 );
+    label->setSizePolicy( QSizePolicy::Fixed, QSizePolicy::Preferred );
+  }
+  formLayout->setColumnMinimumWidth( 0, 64 );
+  formLayout->setColumnStretch( 1, 1 );
+  formLayout->setAlignment( mp_lInfo, Qt::AlignRight | Qt::AlignTop );
+  mp_pbChangePhoto->setFixedWidth( 88 );
+  mp_leEmail->setReadOnly( true );
+  mp_leEmail->setFocusPolicy( Qt::StrongFocus );
+  mp_leEmail->setToolTip( QStringLiteral( "登录账号只读，可选中复制；切换账号请使用主菜单的退出登录。" ) );
 
   connect( mp_pbOk, SIGNAL( clicked() ), this, SLOT( onOkClicked() ) );
   connect( mp_pbCancel, SIGNAL( clicked() ), this, SLOT( reject() ) );
   connect( mp_pbChangePhoto, SIGNAL( clicked() ), this, SLOT( changePhoto() ) );
-  connect( mp_pbRemovePhoto, SIGNAL( clicked() ), this, SLOT( removePhoto() ) );
   connect( mp_pbColor, SIGNAL( clicked() ), this, SLOT( changeUserColor() ) );
   connect( mp_pbRegenerateHash, SIGNAL( clicked() ), this, SLOT( regenerateHash() ) );
 
@@ -123,7 +132,7 @@ GuiEditVCard::GuiEditVCard( QWidget *parent )
   m_cardStatus->setAccessibleName( QStringLiteral( "切换工作状态" ) );
   QMenu* statusMenu = new QMenu( m_cardStatus );
   QActionGroup* statuses = new QActionGroup( statusMenu );
-  for( int status : QList<int>() << User::Online << User::Busy << User::Away )
+  for( int status : QList<int>{ User::Online, User::Busy, User::Away } )
   {
     QAction* action = statusMenu->addAction( Bee::userStatusToString( status ) );
     action->setData( status );
@@ -245,6 +254,11 @@ GuiEditVCard::GuiEditVCard( QWidget *parent )
     "QLabel[role=title]{font-size:22px;} QLabel[role=hint]{font-size:12px;}"
     "QLabel#profileCardNickname{font-size:20px;color:#17243B;}"
     "QLabel[empty=true]{color:#94A3B8;}"
+    "QLineEdit,QPlainTextEdit,QDateEdit{min-height:20px;}"
+    "QDateEdit QLineEdit{background:transparent;border:0;padding:0;}"
+    "QDateEdit[empty=true] QLineEdit{color:#94A3B8;}"
+    "QLineEdit#mp_leEmail{color:#52647f;}"
+    "QPushButton#mp_pbChangePhoto,QPushButton#mp_pbColor{min-height:24px;}"
     "QPushButton#editMyProfile{background:transparent;border:0;padding:0;min-height:0;}"
     "QPushButton#editMyProfile:hover{background:#D7E6FC;}"
     "QPushButton#editMyProfile:focus{border:1px solid #2463EB;}"
@@ -260,6 +274,7 @@ GuiEditVCard::GuiEditVCard( QWidget *parent )
 
 void GuiEditVCard::showProfileEditor( QWidget* target )
 {
+  m_cardAnchored = false;
   m_profilePages->setCurrentIndex( 1 );
   resizeProfilePage();
   target->setFocus( Qt::OtherFocusReason );
@@ -329,11 +344,60 @@ void GuiEditVCard::resizeProfilePage()
   scroll->viewport()->update();
   if( isVisible() )
   {
+    if( m_cardAnchored )
+    {
+      placeCard();
+      return;
+    }
     const int left = available.left() + 16;
     const int top = available.top() + 16;
     move( qBound( left, x(), qMax( left, available.right() - width() - 15 ) ),
           qBound( top, y(), qMax( top, available.bottom() - height() - 15 ) ) );
   }
+}
+
+void GuiEditVCard::showAt( QWidget* anchor )
+{
+  m_cardAnchor = anchor;
+  m_cardAnchored = anchor != Q_NULLPTR;
+  setModal( false );
+  show();
+  placeCard();
+  raise();
+  activateWindow();
+}
+
+void GuiEditVCard::placeCard()
+{
+  if( !m_cardAnchored || !m_cardAnchor || m_profilePages->currentIndex() != 0 )
+    return;
+  const QRect anchor( m_cardAnchor->mapToGlobal( QPoint() ), m_cardAnchor->size() );
+  setGeometry( ShadowPopup::placeGeometry( anchor, size(),
+    ShadowPopup::availableGeometryFor( anchor.center() ), ShadowPopup::Automatic, 6 ) );
+}
+
+bool GuiEditVCard::eventFilter( QObject* watched, QEvent* event )
+{
+  if( !isVisible() || !m_cardAnchored || !m_cardAnchor )
+    return QDialog::eventFilter( watched, event );
+  QWidget* widget = qobject_cast<QWidget*>( watched );
+  if( widget && (widget == m_cardAnchor || widget->isAncestorOf( m_cardAnchor )) )
+  {
+    if( event->type() == QEvent::Move || event->type() == QEvent::Resize || event->type() == QEvent::LayoutRequest )
+      placeCard();
+    if( event->type() == QEvent::Hide ||
+        (event->type() == QEvent::WindowStateChange && widget->isMinimized()) )
+      reject();
+  }
+  QWidget* active_popup = QApplication::activePopupWidget();
+  if( event->type() == QEvent::MouseButtonPress && widget &&
+      (!active_popup || !isAncestorOf( active_popup )) && !isAncestorOf( widget ) && widget != this &&
+      !frameGeometry().contains( static_cast<QMouseEvent*>( event )->globalPos() ) )
+  {
+    reject();
+    return widget == m_cardAnchor || m_cardAnchor->isAncestorOf( widget );
+  }
+  return QDialog::eventFilter( watched, event );
 }
 
 void GuiEditVCard::showEvent( QShowEvent* event )
@@ -358,21 +422,22 @@ void GuiEditVCard::setUserColor( const QString& new_value )
   mp_leNickname->setPalette( palette );
   palette.setColor( QPalette::Foreground, c );
   mp_lNickname->setPalette( palette );
-  if( m_vCard.photo().isNull() )
-    mp_lPhoto->setPixmap( Avatar::create( currentAvatarName(), m_userColor, QSize( 96, 96 ) ) );
+  mp_lColorValue->setText( c.name().toUpper() );
+  if( m_photo.isNull() )
+    mp_lPhoto->setPixmap( Avatar::create( currentAvatarName(), m_userColor, mp_lPhoto->size() ) );
 }
 
 void GuiEditVCard::setUser( const User& u )
 {
   m_vCard = u.vCard();
+  m_photo = m_vCard.photo();
+  m_savedUserColor = u.color();
   m_accountEmail = u.accountName().trimmed();
   setUserColor( u.color() );
   m_regenerateUserHash = false;
   loadVCard();
   mp_lIdentity->setText( QStringLiteral( "正在编辑自己的资料，同事会看到你的昵称和头像。" ) );
-  mp_leEmail->setReadOnly( !m_accountEmail.isEmpty() );
-  if( !m_accountEmail.isEmpty() ) mp_leEmail->setText( m_accountEmail );
-  mp_leEmail->setToolTip( QStringLiteral( "切换账号请使用主菜单的退出登录；修改资料不会更换账号或聊天记录。" ) );
+  mp_leEmail->setReadOnly( true );
   m_cardNickname->setText( m_vCard.nickName().isEmpty() ? u.name() : m_vCard.nickName() );
   m_cardEmail->setText( m_accountEmail.isEmpty() ? m_vCard.email() : m_accountEmail );
   m_cardInfo->setText( m_vCard.info().isEmpty() ? QStringLiteral( "输入个性签名" ) : m_vCard.info() );
@@ -395,8 +460,6 @@ void GuiEditVCard::setUser( const User& u )
   foreach( QLabel* label, QList<QLabel*>() << m_cardNickname << m_cardEmail << m_cardInfo << m_cardPhone )
     label->setTextFormat( Qt::PlainText );
   m_profilePages->setCurrentIndex( 0 );
-  mp_pbAdvanced->setChecked( true );
-  mp_advanced->show();
   resizeProfilePage();
 }
 
@@ -416,16 +479,17 @@ void GuiEditVCard::loadVCard()
     mp_leNickname->setToolTip( tr( "Disabled by system administrator" ) );
   }
   if( m_vCard.birthday().isValid() )
-    mp_deBirthday->setDate( m_vCard.birthday() );
+    mp_deBirthday->setBirthday( m_vCard.birthday() );
   else
-    mp_deBirthday->setDate( QDate( 1900, 1, 1 ) );
+    mp_deBirthday->setBirthday( QDate() );
 
-  mp_leEmail->setText( m_vCard.email() );
+  mp_leEmail->setReadOnly( true );
+  mp_leEmail->setText( m_accountEmail.isEmpty() ? m_vCard.email() : m_accountEmail );
 
-  if( m_vCard.photo().isNull() )
-    mp_lPhoto->setPixmap( Avatar::create( currentAvatarName(), m_userColor, QSize( 96, 96 ) ) );
+  if( m_photo.isNull() )
+    mp_lPhoto->setPixmap( Avatar::create( currentAvatarName(), m_userColor, mp_lPhoto->size() ) );
   else
-    mp_lPhoto->setPixmap( m_vCard.photo().scaled( 96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation ) );
+    mp_lPhoto->setPixmap( m_photo.scaled( mp_lPhoto->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation ) );
 
   mp_lePhone->setText( m_vCard.phoneNumber() );
 
@@ -467,22 +531,26 @@ void GuiEditVCard::changePhoto()
   QPixmap pix = QPixmap::fromImage( img.scaled( 96, 96, Qt::KeepAspectRatio ) );
   if( !pix.isNull() )
   {
-    mp_lPhoto->setPixmap( pix );
-    m_vCard.setPhoto( pix );
+    m_photo = pix;
+    mp_lPhoto->setPixmap( pix.scaled( mp_lPhoto->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation ) );
   }
 }
 
-void GuiEditVCard::removePhoto()
+void GuiEditVCard::reject()
 {
-  mp_lPhoto->setPixmap( Avatar::create( currentAvatarName(), m_userColor, QSize( 96, 96 ) ) );
-  m_vCard.setPhoto( QPixmap() );
+  m_photo = m_vCard.photo();
+  setUserColor( m_savedUserColor );
+  m_regenerateUserHash = false;
+  loadVCard();
+  QDialog::reject();
 }
 
 void GuiEditVCard::changeUserColor()
 {
-  QColor c = QColorDialog::getColor( QColor( Settings::instance().chatFontColor() ), this );
-  if( c.isValid() )
-    setUserColor( c.name() );
+  const QColor selected = ShadowColorPanel::pick( mp_pbColor, QColor( m_userColor ), this,
+                                                 QStringLiteral( "昵称颜色" ) );
+  if( selected.isValid() )
+    setUserColor( selected.name() );
 }
 
 bool GuiEditVCard::checkLineEdit( QLineEdit* ple, const QString& msg )
@@ -517,11 +585,11 @@ bool GuiEditVCard::checkData()
 void GuiEditVCard::saveVCard()
 {
   m_vCard.setNickName( mp_leNickname->text().simplified() );
-  if( mp_deBirthday->date() != QDate( 1900, 1, 1 ) )
-    m_vCard.setBirthday( mp_deBirthday->date() );
+  if( mp_deBirthday->hasBirthday() )
+    m_vCard.setBirthday( mp_deBirthday->birthday() );
   else
     m_vCard.setBirthday( QDate() );
-  if( m_accountEmail.isEmpty() ) m_vCard.setEmail( mp_leEmail->text().simplified() );
+  m_vCard.setPhoto( m_photo );
   m_vCard.setPhoneNumber( mp_lePhone->text().simplified() );
   m_vCard.setInfo( mp_teInfo->toPlainText().trimmed() );
 }

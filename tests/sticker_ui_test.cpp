@@ -38,7 +38,15 @@ int main(int argc,char** argv)
   // Real received file anchor -> production context action -> independent favorite copy.
   const QString received=workspace.filePath("received-original.png");QImage original(79,61,QImage::Format_ARGB32);original.fill(QColor("#fd8b51"));CHECK(original.save(received));const QByteArray originalBytes=bytes(received);QTextBrowser* transcript=widget.findChild<QTextBrowser*>("GuiChatViewer");CHECK(transcript);transcript->setHtml(QString("<a href=\"%1\"><img src=\"%1\" width=\"79\" height=\"61\"></a>").arg(QUrl::fromLocalFile(received).toString()));QCoreApplication::processEvents();QPoint anchor;
   for(int y=0;y<100&&anchor.isNull();++y)for(int x=0;x<150;++x)if(!transcript->anchorAt(QPoint(x,y)).isEmpty()){anchor=QPoint(x,y);break;}CHECK(!anchor.isNull());bool favorited=false;
-  QTimer::singleShot(20,[&](){foreach(QMenu* menu,widget.findChildren<QMenu*>())foreach(QAction* action,menu->actions())if(action->objectName()=="FavoriteStickerAction"){action->trigger();favorited=true;menu->close();}});
+  QTimer menuDriver;menuDriver.setInterval(20);int menuAttempts=0;
+  QObject::connect(&menuDriver,&QTimer::timeout,&widget,[&](){
+    ++menuAttempts;
+    foreach(QMenu* menu,widget.findChildren<QMenu*>())foreach(QAction* action,menu->actions())if(action->objectName()=="FavoriteStickerAction"){
+      action->trigger();favorited=true;menu->close();menuDriver.stop();return;
+    }
+    if(menuAttempts>=50)menuDriver.stop();
+  });
+  menuDriver.start();
   CHECK(QMetaObject::invokeMethod(&widget,"customContextMenu",Qt::DirectConnection,Q_ARG(QPoint,anchor)));CHECK(favorited);ShadowStickerStore store(workspace.path());CHECK(store.list().size()==importedItems.size()+1);CHECK(store.addFile(received));CHECK(store.list().size()==importedItems.size()+1);CHECK(bytes(received)==originalBytes);
   GuiStickerPicker management(workspace.path());management.show();management.findChild<QAction*>("StickerManageFavorites")->trigger();QListWidget* grid=management.findChild<QListWidget*>("StickerGrid");CHECK(grid);const QString favoriteId=QString::fromLatin1(QCryptographicHash::hash(originalBytes,QCryptographicHash::Sha256).toHex());QListWidgetItem* favorite=Q_NULLPTR;for(int i=0;i<grid->count();++i)if(grid->item(i)->data(Qt::UserRole).toString()==favoriteId)favorite=grid->item(i);CHECK(favorite);const QString favoritePath=favorite->data(Qt::UserRole+1).toString();CHECK(favoritePath!=received);CHECK(bytes(favoritePath)==originalBytes);grid->setCurrentItem(favorite);management.findChild<QPushButton*>("StickerRemove")->click();CHECK(!QFileInfo::exists(favoritePath));CHECK(bytes(received)==originalBytes);CHECK(store.list().size()==importedItems.size());CHECK(childReload(workspace.path(),importedItems.size()));
   std::puts("PASS actual composer popup/production ZIP importer/grid click sends original bytes; received-image context favorite deduplicates; remove preserves received original; independent process restart/isolation");return 0;

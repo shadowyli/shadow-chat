@@ -15,6 +15,54 @@ spec.loader.exec_module(runner)
 
 
 class PreviewRunnerTests(unittest.TestCase):
+    def test_changed_production_archives_preview_objects_before_reuse(self):
+        original_output = runner.OUT
+        runner.OUT = original_output / "tests" / ("reuse-" + uuid.uuid4().hex)
+        try:
+            runner.initialize()
+            production = runner.OUT / "fixture-production"
+            for name in ("objects", "generated"):
+                (production / name).mkdir(parents=True)
+                (production / name / "fixture").write_text("first", encoding="utf-8")
+            first = runner.prepare_production_workspace({"sourceExecutableSha256": "a" * 64}, production)
+            self.assertEqual((first / "objects/fixture").read_text(encoding="utf-8"), "first")
+            (first / "objects/fixture").write_text("incremental", encoding="utf-8")
+            runner.prepare_production_workspace({"sourceExecutableSha256": "a" * 64}, production)
+            self.assertEqual((first / "objects/fixture").read_text(encoding="utf-8"), "incremental")
+            (production / "objects/fixture").write_text("new", encoding="utf-8")
+            second = runner.prepare_production_workspace({"sourceExecutableSha256": "b" * 64}, production)
+            self.assertEqual((second / "objects/fixture").read_text(encoding="utf-8"), "new")
+            archives = list(runner.OUT.glob("production-before-*"))
+            self.assertEqual(len(archives), 1)
+            self.assertEqual((archives[0] / "objects/fixture").read_text(encoding="utf-8"), "incremental")
+        finally:
+            runner.OUT = original_output
+
+    def test_preview_reuses_public_update_build_arguments(self):
+        configuration = {"releaseEnvironment": "local",
+                         "qmakeArguments": ["SHADOWCHAT_ENV=local", "CONFIG+=no_batch"]}
+        arguments = runner.preview_qmake_arguments(configuration)
+        self.assertEqual(arguments, configuration["qmakeArguments"])
+        self.assertFalse(any("SHADOWCHAT_LOCAL_UPDATE_PORT" in argument for argument in arguments))
+        arguments.append("independent-copy")
+        self.assertNotIn("independent-copy", configuration["qmakeArguments"])
+
+    def test_preview_preserves_explicit_loopback_build_arguments(self):
+        arguments = ["SHADOWCHAT_ENV=local", "CONFIG+=no_batch", "SHADOWCHAT_LOCAL_UPDATE_PORT=5199"]
+        self.assertEqual(runner.preview_qmake_arguments(
+            {"releaseEnvironment": "local", "qmakeArguments": arguments}), arguments)
+
+    def test_preview_rejects_mixed_or_missing_build_environment(self):
+        for configuration in (
+            {"releaseEnvironment": "dev", "qmakeArguments": ["SHADOWCHAT_ENV=dev"]},
+            {"releaseEnvironment": "local", "qmakeArguments": ["CONFIG+=no_batch"]},
+            {"releaseEnvironment": "local", "qmakeArguments": ["SHADOWCHAT_ENV=local", "SHADOWCHAT_ENV=main"]},
+            {"releaseEnvironment": "local", "qmakeArguments": ["SHADOWCHAT_ENV=local", "-after"]},
+            {"releaseEnvironment": "local", "qmakeArguments": ["SHADOWCHAT_ENV=local", 5173]},
+        ):
+            with self.assertRaises(RuntimeError):
+                runner.preview_qmake_arguments(configuration)
+
     def test_outside_paths_rejected(self):
         for filename in (ROOT / "src/release/ShadowChat.exe", ROOT / "dist/local/production/bin/ShadowChat.exe",
                          ROOT.parent / "ShadowChat.exe", runner.OUT / "../other/ShadowChat.exe"):

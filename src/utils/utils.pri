@@ -6,7 +6,10 @@ HEADERS += utils/BeeUtils.h \
   utils/HttpDownloader.h \
   utils/SpellChecker.h \
   utils/SpellCheckerHighlighter.h \
-  utils/Updater.h
+  utils/Updater.h \
+  utils/ShadowUpdateManifest.h \
+  utils/ShadowGitHubRelease.h \
+  utils/ShadowGitHubFallback.h
 
 SOURCES += utils/BeeUtils.cpp \
   utils/GAnalytics.cpp \

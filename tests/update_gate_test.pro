@@ -8,6 +8,11 @@ SOURCES += update_gate_test.cpp
 DEFINES += SHADOWCHAT_SAFE_BUILD MAKE_BEEBEEP_PORTABLE BEEBEEP_USE_VOICE_CHAT BEEBEEP_USE_HUNSPELL HUNSPELL_STATIC BEEBEEP_USE_QXT BEEBEEP_USE_SHAREDESKTOP
 objects = $$files(../src/release/*.obj)
 objects -= ../src/release/Main.obj
+!isEmpty(SHADOWCHAT_PREVIEW_BUILD) {
+  INCLUDEPATH += $$SHADOWCHAT_PREVIEW_BUILD/generated
+  objects = $$files($$SHADOWCHAT_PREVIEW_BUILD/objects/*.obj)
+  objects -= $$SHADOWCHAT_PREVIEW_BUILD/objects/Main.obj
+}
 PRE_TARGETDEPS += $$objects
-LIBS += $$objects user32.lib wtsapi32.lib shell32.lib
+LIBS += $$objects user32.lib wtsapi32.lib shell32.lib gdi32.lib
 win32-msvc*: QMAKE_CXXFLAGS += /utf-8

@@ -10,6 +10,7 @@
 #include "ShadowAvatarInteractions.h"
 #include "ShadowStyle.h"
 #include "UserManager.h"
+#include <QCursor>
 #include <QtTest>
 #include <cstdio>
 
@@ -77,6 +78,33 @@ static GuiVCard* visibleCard( GuiMain& window )
   foreach( GuiVCard* card, window.findChildren<GuiVCard*>() )
     if( card->isVisible() )
       return card;
+  return Q_NULLPTR;
+}
+
+static QWidget* outsideClickTarget( GuiMain& window, GuiVCard* card, QPoint* globalPoint )
+{
+  QWidget* central = window.centralWidget();
+  if( !central || !central->isVisible() || !card || !card->isVisible() || !card->screen() )
+    return Q_NULLPTR;
+  QRegion candidates( QRect( central->mapToGlobal( QPoint() ), central->size() ) );
+  candidates &= card->screen()->availableGeometry();
+  candidates -= card->frameGeometry();
+  for( const QRect& rectangle : candidates )
+  {
+    const QPoint points[] = { rectangle.center(), rectangle.topLeft(), rectangle.topRight(),
+                              rectangle.bottomLeft(), rectangle.bottomRight() };
+    for( const QPoint& point : points )
+    {
+      QWidget* target = QApplication::widgetAt( point );
+      if( target && target->window() == &window &&
+          (target == central || central->isAncestorOf( target )) && target->isVisible() &&
+          target->visibleRegion().contains( target->mapFromGlobal( point ) ) )
+      {
+        *globalPoint = point;
+        return target;
+      }
+    }
+  }
   return Q_NULLPTR;
 }
 
@@ -163,6 +191,7 @@ int main( int argc, char** argv )
   window.resize( 1000, 720 );
   window.show();
   flushEvents();
+  QCursor::setPos( window.centralWidget()->mapToGlobal( window.centralWidget()->rect().center() ) );
   ExternalOpenProbe external;
   QDesktopServices::setUrlHandler( QStringLiteral( "shadowuser" ), &external, "capture" );
   CHECK( route( window, profileLink( peer ), direct.id() ) );
@@ -196,7 +225,29 @@ int main( int argc, char** argv )
   CHECK( !visibleCard( window ) );
   CHECK( route( window, profileLink( offline ), group.id() ) );
   CHECK( visibleCard( window ) && visibleCard( window )->property( "profileUserId" ).toULongLong() == offline.id() );
-  QTest::mouseClick( window.centralWidget(), Qt::LeftButton, Qt::NoModifier, QPoint( 2, 2 ) );
+  card = visibleCard( window );
+  QPoint outsideGlobal;
+  QWidget* outsideTarget = outsideClickTarget( window, card, &outsideGlobal );
+  if( !outsideTarget )
+  {
+    CHECK( card->screen() );
+    window.move( card->screen()->availableGeometry().topLeft() );
+    flushEvents();
+    CHECK( visibleCard( window ) == card );
+    outsideTarget = outsideClickTarget( window, card, &outsideGlobal );
+  }
+  CHECK( outsideTarget );
+  CHECK( card->screen()->availableGeometry().contains( outsideGlobal ) );
+  CHECK( !card->frameGeometry().contains( outsideGlobal ) );
+  CHECK( window.centralWidget()->rect().contains( window.centralWidget()->mapFromGlobal( outsideGlobal ) ) );
+  CHECK( outsideTarget->window() == &window );
+  CHECK( outsideTarget == window.centralWidget() || window.centralWidget()->isAncestorOf( outsideTarget ) );
+  CHECK( outsideTarget->visibleRegion().contains( outsideTarget->mapFromGlobal( outsideGlobal ) ) );
+  CHECK( QApplication::widgetAt( outsideGlobal ) == outsideTarget );
+  std::printf( "Outside click=%d,%d popup=%d,%d %dx%d target=%s\n",
+    outsideGlobal.x(), outsideGlobal.y(), card->frameGeometry().x(), card->frameGeometry().y(),
+    card->frameGeometry().width(), card->frameGeometry().height(), outsideTarget->metaObject()->className() );
+  QTest::mouseClick( outsideTarget, Qt::LeftButton, Qt::NoModifier, outsideTarget->mapFromGlobal( outsideGlobal ) );
   flushEvents();
   CHECK( !visibleCard( window ) );
   CHECK( route( window, profileLink( stranger ), direct.id() ) );

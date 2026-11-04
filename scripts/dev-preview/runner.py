@@ -167,6 +167,18 @@ def toolchain():
     return configuration, qmake, nmake, environment
 
 
+def preview_qmake_arguments(configuration):
+    arguments = configuration.get("qmakeArguments")
+    if configuration.get("releaseEnvironment") != "local" or not isinstance(arguments, list):
+        raise RuntimeError("Native preview requires the recorded local build arguments")
+    if any(not isinstance(argument, str) for argument in arguments):
+        raise RuntimeError("Invalid recorded preview build arguments")
+    environments = [argument for argument in arguments if argument.startswith("SHADOWCHAT_ENV=")]
+    if environments != ["SHADOWCHAT_ENV=local"] or "-after" in arguments:
+        raise RuntimeError("Native preview build environment differs from local production")
+    return list(arguments)
+
+
 def fingerprint():
     snapshot = hashlib.sha256()
     for base in (ROOT / "src", ROOT / "locale", ROOT / "scripts/dev-preview"):
@@ -244,6 +256,26 @@ def verify():
     write_json(OUT / "logs/verification.json", {"utc": utc(), "results": results, "runnerTests": True})
 
 
+def prepare_production_workspace(configuration, production=None):
+    workspace = managed(OUT / "production")
+    workspace.mkdir(exist_ok=True)
+    reuse = workspace / "reuse.json"
+    recorded = read_json(reuse) if reuse.exists() else None
+    if recorded and recorded.get("sourceSha256") != configuration["sourceExecutableSha256"]:
+        archived = managed(OUT / ("production-before-" + uuid.uuid4().hex[:8]))
+        if workspace.is_symlink() or workspace.resolve().parent != OUT.resolve() or archived.exists():
+            raise RuntimeError("Unsafe native preview production archive")
+        workspace.rename(archived)
+        workspace.mkdir()
+        recorded = None
+    if not recorded:
+        production = production or ROOT / "dist/local/production"
+        for name in ("objects", "generated"):
+            shutil.copytree(production / name, managed(workspace / name), dirs_exist_ok=True, copy_function=shutil.copy2)
+        write_json(reuse, {"production": str(production), "sourceSha256": configuration["sourceExecutableSha256"], "utc": utc()})
+    return workspace
+
+
 def build():
     configuration, qmake, nmake, environment = toolchain()
     production = ROOT / "dist/local/production"
@@ -251,15 +283,10 @@ def build():
         raise RuntimeError("Expected verified " + version() + " local production build")
     if digest(production / "bin/ShadowChat.exe") != configuration["sourceExecutableSha256"]:
         raise RuntimeError("Verified production executable identity changed")
-    workspace = managed(OUT / "production")
-    workspace.mkdir(exist_ok=True)
-    if not (workspace / "reuse.json").exists():
-        for name in ("objects", "generated"):
-            shutil.copytree(production / name, managed(workspace / name), dirs_exist_ok=True, copy_function=shutil.copy2)
-        write_json(workspace / "reuse.json", {"production": str(production), "sourceSha256": configuration["sourceExecutableSha256"], "utc": utc()})
+    workspace = prepare_production_workspace(configuration)
     log = OUT / "logs/build.log"
     arguments = [str(qmake), str(ROOT / "src/src.pro"), "-o", "Makefile",
-                 "SHADOWCHAT_ENV=local", "SHADOWCHAT_LOCAL_UPDATE_PORT=5173", "CONFIG+=no_batch", "-after"]
+                 *preview_qmake_arguments(configuration), "-after"]
     arguments += [name + "=" + str(workspace / subdirectory).replace("\\", "/") for name, subdirectory in
                   (("DESTDIR", "bin"), ("OBJECTS_DIR", "objects"), ("MOC_DIR", "generated"), ("UI_DIR", "generated"), ("RCC_DIR", "generated"))]
     run_logged(arguments, workspace, log, environment)
