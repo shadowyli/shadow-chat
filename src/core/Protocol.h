@@ -53,8 +53,14 @@ public:
   QByteArray pingMessage() const;
   QByteArray pongMessage() const;
   QByteArray broadcastMessage( const QHostAddress& ) const;
+  bool isShadowChatBroadcastMessage( const Message& ) const;
+  int listenerPortFromBroadcastMessage( const Message&, bool* ok = Q_NULLPTR ) const;
   QHostAddress hostAddressFromBroadcastMessage( const Message& ) const;
   QByteArray helloMessage( const QString& public_key, bool encrypted_connection, bool data_compressed ) const;
+  bool isShadowChatHelloMessage( const Message& ) const;
+  QString shadowChatIdentityMarker() const;
+  bool isShadowChatNetworkAddress( const NetworkAddress& ) const;
+  bool isShadowChatUser( const User& ) const;
   QByteArray testQuestionMessage( const NetworkAddress& ) const;
   bool isTestQuestionMessage( const Message& ) const;
   QByteArray testAnswerMessage( const NetworkAddress&, bool test_is_accepted, const QString& answer_msg = "Ok" ) const;

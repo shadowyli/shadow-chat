@@ -87,9 +87,10 @@ bool NetworkManager::isMainInterfaceUp() const
     return false;
   }
 
-  foreach( NetworkEntry ne, m_networkEntries )
+  const QList<NetworkEntry> current_network_entries = availableNetworkEntries();
+  foreach( NetworkEntry ne, current_network_entries )
   {
-    if( m_localInterfaceHardwareAddress == ne.hardware() )
+    if( m_localInterfaceHardwareAddress == ne.hardware() && m_localHostAddress == ne.hostAddress() )
       return true;
   }
 
@@ -150,6 +151,8 @@ NetworkEntry NetworkManager::firstNetworkEntry( bool use_ipv4 ) const
 
 bool NetworkManager::searchLocalHostAddress()
 {
+  const QString previous_hardware_address = m_localInterfaceHardwareAddress;
+  const QHostAddress previous_host_address = m_localHostAddress;
   m_localHostAddress = Settings::instance().useIPv6() ? QHostAddress::LocalHostIPv6 : QHostAddress::LocalHost;
   m_localBroadcastAddress = QHostAddress();
   m_localHostAddressScopeId = "";
@@ -193,6 +196,21 @@ bool NetworkManager::searchLocalHostAddress()
         qDebug() << "Checking preferred subnet from RC:" << preferred_subnet;
         if( forceLocalSubnet( preferred_subnet.trimmed() ) )
           return true;
+      }
+    }
+  }
+
+  if( !previous_hardware_address.isEmpty() )
+  {
+    foreach( NetworkEntry network_entry, m_networkEntries )
+    {
+      if( network_entry.hardware() == previous_hardware_address &&
+          (previous_host_address.isNull() || network_entry.hostAddress().protocol() == previous_host_address.protocol()) )
+      {
+        qDebug() << "Reusing network interface after configuration refresh:"
+                 << qPrintable( previous_hardware_address ) << qPrintable( network_entry.hostAddress().toString() );
+        setLocalHostAddress( network_entry );
+        return true;
       }
     }
   }

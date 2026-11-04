@@ -19,7 +19,7 @@ output.mkdir(parents=True, exist_ok=True)
 payload = output/'payload'
 payload.mkdir(exist_ok=True)
 (payload/'ShadowChat.exe').write_bytes(b'SYNTHETIC QA PAYLOAD - DO NOT EXECUTE\r\n')
-shutil.copy2(ROOT/'packaging/shadowchat.ico', payload/'shadowchat-1.2.0.ico')
+shutil.copy2(ROOT/'packaging/shadowchat.ico', payload/'shadowchat-1.2.1.ico')
 installer = output/'qa-installer.exe'
 compiler = Path('E:/ShadowChat/beebeep-code-r1557/.tools/NSIS/makensis.exe')
 commands = []
@@ -75,7 +75,7 @@ def check(enabled, name):
     checks.append({'name':name,'enabled':enabled,'productionStateUnchanged':True,'dataSha256':file_hashes(data)})
 
 try:
-    execute([compiler,'/INPUTCHARSET','UTF8','/DAPP_VERSION=1.2.0','/DAPP_CHANNEL=beta',
+    execute([compiler,'/INPUTCHARSET','UTF8','/DAPP_VERSION=1.2.1','/DAPP_CHANNEL=beta',
              '/DAPP_ENVIRONMENT=local','/DAPP_WEB=https://example.test/shadowchat',
              '/DPAYLOAD='+str(payload),'/DOUTPUT='+str(installer),ROOT/'packaging/shadowchat-installer.nsi'],'compile')
     require_installer_isolation(installer)

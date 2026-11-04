@@ -25,6 +25,7 @@
 #include "ChatManager.h"
 #include "GuiCreateGroup.h"
 #include "IconManager.h"
+#include "Protocol.h"
 #include "Settings.h"
 #include "ShadowDialogStyle.h"
 #include "ShadowStyle.h"
@@ -110,6 +111,8 @@ void GuiCreateGroup::loadData()
   QTreeWidgetItem* item;
   foreach( User u, UserManager::instance().userList().toList() )
   {
+    if( !u.isLocal() && !Protocol::instance().isShadowChatUser( u ) )
+      continue;
     item = new QTreeWidgetItem( mp_twUsers );
     item->setIcon( 0, Bee::avatarForUser( u, QSize(32,32), true ) );
     item->setText( 0, u.name() );

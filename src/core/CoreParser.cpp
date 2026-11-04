@@ -373,16 +373,8 @@ void Core::parseGroupMessage( const User& u, const Message& m )
         }
         else
         {
-          UserRecord ur( User::nameFromPath( user_path ), "", "", "" );
-          ur.setNetworkAddress( NetworkAddress::fromString( User::hostAddressAndPortFromPath( user_path ) ) );
-          if( !ur.networkAddressIsValid() )
-            qWarning() << "(obsolete) Invalid network address found in user" << qPrintable( user_path ) << "from group request of" << qPrintable( u.name() );
-          user_tmp = Protocol::instance().createTemporaryUser( ur );
-          qDebug() << "(obsolete) Group chat request for" << qPrintable( cmd.groupName() ) << "from" << qPrintable( u.name() ) << "has created temporary user" << user_tmp.id() << qPrintable( user_tmp.name() );
-          UserManager::instance().setUser( user_tmp );
-          createPrivateChat( user_tmp );
-          emit userChanged( user_tmp );
-          ul.set( user_tmp );
+          qWarning() << "Skipped unknown member from obsolete group request because it has no verified ShadowChat identity:"
+                     << qPrintable( user_path );
         }
       }
     }
@@ -400,11 +392,9 @@ void Core::parseGroupMessage( const User& u, const Message& m )
 
           if( !group_member.isValid() )
           {
-            group_member = Protocol::instance().createTemporaryUser( ur );
-            UserManager::instance().setUser( group_member );
-            qDebug() << "Temporary user" << group_member.id() << qPrintable( group_member.name() ) << "is created after request of" << qPrintable( u.name() ) << "for group" << qPrintable( cmd.groupName() );
-            createPrivateChat( group_member );
-            emit userChanged( group_member );
+            qWarning() << "Skipped unknown member from group request because it has no verified ShadowChat identity:"
+                       << qPrintable( ur.name() );
+            continue;
           }
 
           ul.set( group_member );
