@@ -3906,7 +3906,7 @@ QString GuiMain::sendBlockReason( const Chat& chat, bool files ) const
   const UserList recipients = chat.isDefault() ? UserManager::instance().userList()
     : UserManager::instance().userList().fromUsersId( chat.usersId() );
   for( const User& user : recipients.toList() )
-    if( user.isValid() && !user.isLocal() )
+    if( Protocol::instance().isShadowChatUser( user ) && !user.isLocal() )
       return QString();
   return QStringLiteral( "未发送：会话中没有有效的接收方。" );
 }
@@ -3978,6 +3978,12 @@ void GuiMain::onNewChatMessage( const Chat& c, const ChatMessage& cm )
   if( !c.isValid() )
   {
     qWarning() << "Invalid chat" << c.name() << "found in GuiMain::onNewChatMessage(...)";
+    return;
+  }
+  if( c.isPrivate() && !Protocol::instance().isShadowChatUser(
+        UserManager::instance().findUser( c.privateUserId() ) ) )
+  {
+    qWarning() << "Ignored a private message without a verified ShadowChat peer:" << c.id();
     return;
   }
 
@@ -4575,6 +4581,12 @@ void GuiMain::showChat( VNumber chat_id )
   if( !c.isValid() )
   {
     qWarning() << "Invalid chat" << chat_id << "found in GuiMain::showChat(...)";
+    return;
+  }
+  if( c.isPrivate() && !Protocol::instance().isShadowChatUser(
+        UserManager::instance().findUser( c.privateUserId() ) ) )
+  {
+    qWarning() << "Refused to open a private chat without a verified ShadowChat peer:" << chat_id;
     return;
   }
 

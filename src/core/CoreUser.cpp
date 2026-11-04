@@ -226,7 +226,7 @@ void Core::saveUsersAndGroups()
   {
     foreach( User u, UserManager::instance().userList().toList() )
     {
-      if( !u.isLocal() )
+      if( !u.isLocal() && Protocol::instance().isShadowChatUser( u ) )
       {
         qDebug() << "Saving user" << qPrintable( u.name() );
         save_data.append( Protocol::instance().saveUser( u ) );
@@ -420,7 +420,7 @@ void Core::sendLocalConnectedUsersTo( const User& to_user )
   {
     foreach( User u, UserManager::instance().userList().toList() )
     {
-      if( u.isLocal() || u == to_user )
+      if( u.isLocal() || u == to_user || !Protocol::instance().isShadowChatUser( u ) )
         continue;
 
       if( isUserConnected( u.id() ) )
@@ -444,7 +444,7 @@ void Core::sendLocalConnectedUsersTo( const User& to_user )
   msg_to_send = Protocol::instance().userRecordListToHiveMessage( user_record_list );
   foreach( User u, UserManager::instance().userList().toList() )
   {
-    if( u.isLocal() || u == to_user )
+    if( u.isLocal() || u == to_user || !Protocol::instance().isShadowChatUser( u ) )
       continue;
 
     if( u.protocolVersion() >= HIVE_PROTO_VERSION && isUserConnected( u.id() ) )

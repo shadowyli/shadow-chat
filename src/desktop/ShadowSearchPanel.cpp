@@ -2,6 +2,7 @@
 #include "BeeUtils.h"
 #include "ChatManager.h"
 #include "HistoryRecord.h"
+#include "Protocol.h"
 #include "Settings.h"
 #include "ShadowStyle.h"
 #include "UserManager.h"
@@ -287,7 +288,7 @@ void ShadowSearchPanel::refresh()
   QVector<SearchResult> messages;
   for( const User& user : UserManager::instance().userList().toList() )
   {
-    if( !user.isValid() || user.isLocal() ) continue;
+    if( !user.isValid() || user.isLocal() || !Protocol::instance().isShadowChatUser( user ) ) continue;
     const QString detail = user.workgroups().join( QStringLiteral( " · " ) );
     if( !user.name().contains( query, Qt::CaseInsensitive ) &&
         !detail.contains( query, Qt::CaseInsensitive ) &&
@@ -306,7 +307,7 @@ void ShadowSearchPanel::refresh()
       for( VNumber userId : chat.usersId() )
       {
         const User user = UserManager::instance().findUser( userId );
-        if( user.isValid() && user.name().contains( query, Qt::CaseInsensitive ) ) matchingMembers << user.name();
+        if( Protocol::instance().isShadowChatUser( user ) && user.name().contains( query, Qt::CaseInsensitive ) ) matchingMembers << user.name();
       }
       if( (chat.name().contains( query, Qt::CaseInsensitive ) || !matchingMembers.isEmpty()) && groups.size() < ResultLimit )
         groups.append( SearchResult{ chat.id(), 2, chat.name(),

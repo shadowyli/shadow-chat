@@ -26,6 +26,7 @@
 #include "ChatManager.h"
 #include "IconManager.h"
 #include "MessageManager.h"
+#include "Protocol.h"
 #include "Settings.h"
 #include "UserManager.h"
 #include "ShadowConversationPreferences.h"
@@ -214,6 +215,13 @@ void GuiChatList::updateChat( const Chat& c )
     return;
 
   GuiChatItem* item = itemFromChatId( c.id() );
+  if( c.isPrivate() && !Protocol::instance().isShadowChatUser(
+        UserManager::instance().findUser( c.privateUserId() ) ) )
+  {
+    delete item;
+    updateEmptyState();
+    return;
+  }
   if( c.isDefault() )
   {
     delete item;

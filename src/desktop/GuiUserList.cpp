@@ -239,6 +239,13 @@ void GuiUserList::setUser( const User& u, bool sort_users )
     return;
 
   QList<GuiUserItem*> items = itemsFromUserId( u.id() );
+  if( !Protocol::instance().isShadowChatUser( u ) )
+  {
+    foreach( GuiUserItem* item, items )
+      removeUserItem( item );
+    return;
+  }
+
   if( !u.isStatusConnected() && Settings::instance().showOnlyOnlineUsers() )
   {
     if( !items.isEmpty() )

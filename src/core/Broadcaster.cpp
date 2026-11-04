@@ -325,14 +325,14 @@ void Broadcaster::readBroadcastDatagram()
     }
 
     Message m = Protocol::instance().toMessage( datagram, 1 );
-    if( !m.isValid() || m.type() != Message::Beep )
+    if( !Protocol::instance().isShadowChatBroadcastMessage( m ) )
     {
-      qWarning() << "Broadcaster has received an invalid datagram from" << qPrintable( sender_ip.toString());
+      qDebug() << "Broadcaster ignored a non-ShadowChat discovery datagram from" << qPrintable( sender_ip.toString() );
       continue;
     }
 
     bool ok = false;
-    int sender_listener_port = m.text().toInt( &ok );
+    int sender_listener_port = Protocol::instance().listenerPortFromBroadcastMessage( m, &ok );
     if( !ok )
     {
       qWarning() << "Broadcaster has received an invalid listener port from" << qPrintable( sender_ip.toString() );
@@ -390,6 +390,8 @@ int Broadcaster::updateUsersFromHive()
   int hive_users_to_contact = 0;
   foreach( NetworkAddress na, Hive::instance().networkAddresses() )
   {
+    if( !Protocol::instance().isShadowChatNetworkAddress( na ) )
+      continue;
     User u = UserManager::instance().findUserByNetworkAddress( na );
     if( u.isValid() && u.isStatusConnected() )
       continue;
@@ -454,16 +456,16 @@ QList<NetworkAddress> Broadcaster::updateAddressesToSearchUsers()
     return network_address_list;
   }
 
-  if( !m_isMulticastDatagramSent || Settings::instance().broadcastToLocalSubnetAlways() )
+  const QHostAddress primary_broadcast = NetworkManager::instance().localBroadcastAddress();
+  if( !primary_broadcast.isNull() )
   {
-    addHostAddress( NetworkManager::instance().localBroadcastAddress() );
-    m_isMulticastDatagramSent = false;
-    network_address_list.append( NetworkAddress( NetworkManager::instance().localBroadcastAddress(), static_cast<quint16>( Settings::instance().defaultBroadcastPort() ) ) );
+    addHostAddress( primary_broadcast );
+    network_address_list.append( NetworkAddress( primary_broadcast, static_cast<quint16>( Settings::instance().defaultBroadcastPort() ) ) );
   }
 
   foreach( QHostAddress ha, NetworkManager::instance().localBroadcastAddresses() )
   {
-    if( ha != NetworkManager::instance().localBroadcastAddress() )
+    if( !ha.isNull() && ha != primary_broadcast )
     {
       addHostAddress( ha );
       network_address_list.append( NetworkAddress( ha, static_cast<quint16>( Settings::instance().defaultBroadcastPort() ) ) );
@@ -482,7 +484,7 @@ QList<NetworkAddress> Broadcaster::updateAddressesToSearchUsers()
   {
     foreach( User u, UserManager::instance().userList().toList() )
     {
-      if( !u.isStatusConnected() && addNetworkAddress( u.networkAddress(), false ) )
+      if( Protocol::instance().isShadowChatUser( u ) && !u.isStatusConnected() && addNetworkAddress( u.networkAddress(), false ) )
       {
         network_address_list.append( u.networkAddress() );
         offline_users_to_add++;
