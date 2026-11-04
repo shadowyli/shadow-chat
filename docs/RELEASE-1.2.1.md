@@ -1,6 +1,8 @@
-# 影聊 1.2.1 修复版说明（真实三机验收中）
+# 影聊 1.2.1 测试版说明
 
-<!-- release-status: real-three-pc-pending -->
+<!-- release-status: prerelease-for-real-three-pc-testing -->
+
+本版以 GitHub prerelease 形式提供给 A、B、C 三台真实 Windows 电脑测试。发布下载不代表真实三机验收已通过；最终结论以三台电脑的矩阵、截图和诊断 ZIP 为准。
 
 ## 更新内容
 
@@ -18,8 +20,8 @@
 - 最终验收必须使用同一个 1.2.1 候选安装包，在 A、B、C 三台真实 Windows 电脑上执行。
 - Qt Test、offscreen、合成用户、回环网络和模拟客户端不得作为最终交付结论。
 - 三台电脑必须完成六向发现、六向消息收发，以及 BeeBEEP／旧同源客户端不显示的检查。
-- 当前版本处于候选阶段，真实三机结果未填满前不得发布 `v1.2.1-test`。
+- 当前版本用于真实三机测试；结果未填满前不得将 prerelease 提升为正式稳定版，也不得声称三机验收通过。
 
 真实测试表见 [QA-1.2.1-REAL-3PC.md](QA-1.2.1-REAL-3PC.md)。
 
-当前三机候选包 SHA-256 为 `32d4d9e4dceba5d4b47a8dd118e05a9486b89e128c546b5b3bb0c3f6042a4ad9`，仅供 A/B/C 真实验收。完成矩阵前不作为公开 Release 发布。
+当前三机测试包 SHA-256 为 `32d4d9e4dceba5d4b47a8dd118e05a9486b89e128c546b5b3bb0c3f6042a4ad9`，仅供 A/B/C 真实验收。完成矩阵前保持 prerelease 状态。
