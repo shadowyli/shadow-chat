@@ -30,6 +30,7 @@
 #include "UserManager.h"
 #include "ShadowConversationPreferences.h"
 #include "ShadowConversationDelegate.h"
+#include "ShadowPopup.h"
 #include <QDataStream>
 #include <QScrollArea>
 
@@ -344,7 +345,7 @@ void GuiChatList::refreshQuickAccess()
       togglePinSelected();
     } );
     connect( button, &QWidget::customContextMenuRequested, this, [button, pinMenu]( const QPoint& point ) {
-      pinMenu->popup( button->mapToGlobal( point ) );
+      ShadowPopup::showMenuAtGlobal( pinMenu, QRect( button->mapToGlobal( point ), QSize( 1, 1 ) ) );
     } );
     connect( button, &QToolButton::clicked, this, [this, chatId]() {
       setActiveChat( chatId );

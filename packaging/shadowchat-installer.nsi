@@ -1,6 +1,17 @@
 Unicode true
 
 !include "MUI2.nsh"
+!include "FileFunc.nsh"
+
+Var SC_QA_ID
+Var SC_QA_ROOT
+Var SC_PREF_KEY
+Var SC_RUN_KEY
+Var SC_UNINSTALL_KEY
+Var SC_DESKTOP
+Var SC_PROGRAMS
+Var SC_ORIGINAL_INSTDIR
+Var SC_APP_ARGUMENTS
 
 !define APP_NAME "影聊"
 !define APP_EXE "ShadowChat.exe"
@@ -50,11 +61,13 @@ VIAddVersionKey /LANG=2052 "FileVersion" "${APP_VERSION}"
 VIAddVersionKey /LANG=2052 "CompanyName" "${APP_PUBLISHER}"
 VIAddVersionKey /LANG=2052 "FileDescription" "影聊安装程序"
 VIAddVersionKey /LANG=2052 "LegalCopyright" "BeeBEEP contributors and shadowyli"
+VIAddVersionKey /LANG=2052 "ShadowChatIsolation" "1"
 
 !define MUI_ABORTWARNING
 !define MUI_ICON "${ROOT}\src\beebeep.ico"
 !define MUI_UNICON "${ROOT}\src\beebeep.ico"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${APP_EXE}"
+!define MUI_FINISHPAGE_RUN_FUNCTION RunInstalledApplication
 !define MUI_FINISHPAGE_RUN_TEXT "启动影聊"
 !define MUI_FINISHPAGE_LINK "查看影聊项目主页"
 !define MUI_FINISHPAGE_LINK_LOCATION "${APP_WEB}"
@@ -67,6 +80,89 @@ VIAddVersionKey /LANG=2052 "LegalCopyright" "BeeBEEP contributors and shadowyli"
 !insertmacro MUI_UNPAGE_INSTFILES
 
 !insertmacro MUI_LANGUAGE "SimpChinese"
+
+!macro RegistrationInitializer FUNCTION_NAME
+Function ${FUNCTION_NAME}
+  SetShellVarContext current
+  SetRegView 32
+  StrCpy $SC_PREF_KEY "Software\shadowyli\ShadowChat"
+  StrCpy $SC_RUN_KEY "Software\Microsoft\Windows\CurrentVersion\Run"
+  StrCpy $SC_UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat"
+  StrCpy $SC_DESKTOP "$DESKTOP"
+  StrCpy $SC_PROGRAMS "$SMPROGRAMS\影聊"
+  StrCpy $SC_APP_ARGUMENTS ""
+  StrCmp $SC_QA_ID "" registration_ready
+  StrLen $0 $SC_QA_ID
+  IntCmp $0 32 0 invalid_namespace invalid_namespace
+  System::Call 'shlwapi::StrSpnW(w "$SC_QA_ID", w "0123456789abcdef")i.r0'
+  IntCmp $0 32 0 invalid_namespace invalid_namespace
+  StrCpy $SC_QA_ROOT "$TEMP\ShadowChat-QA-$SC_QA_ID"
+  StrCpy $SC_PREF_KEY "Software\shadowyli\ShadowChat-QA\$SC_QA_ID\Preferences"
+  StrCpy $SC_RUN_KEY "Software\shadowyli\ShadowChat-QA\$SC_QA_ID\Startup"
+  StrCpy $SC_UNINSTALL_KEY "Software\shadowyli\ShadowChat-QA\$SC_QA_ID\Uninstall"
+  StrCpy $SC_DESKTOP "$SC_QA_ROOT\shell\Desktop"
+  StrCpy $SC_PROGRAMS "$SC_QA_ROOT\shell\Programs\影聊"
+  StrCpy $SC_APP_ARGUMENTS '--profile-root "$SC_QA_ROOT\documents\影聊\accounts"'
+  StrCpy $INSTDIR "$SC_QA_ROOT\program"
+  Goto registration_ready
+  invalid_namespace:
+    SetErrorLevel 3
+    Abort
+  registration_ready:
+FunctionEnd
+!macroend
+
+!insertmacro RegistrationInitializer InitializeRegistration
+!insertmacro RegistrationInitializer un.InitializeRegistration
+
+Function .onInit
+  StrCpy $SC_QA_ID ""
+  ${GetParameters} $0
+  ClearErrors
+  ${GetOptions} $0 "/SHADOWCHAT-QA=" $SC_QA_ID
+  IfErrors normal_registration
+  StrCmp $SC_QA_ID "" invalid_qa_argument
+  Goto initialize_registration
+  normal_registration:
+    IfFileExists "$INSTDIR\shadowchat-qa.ini" invalid_qa_argument
+    StrCpy $1 "$TEMP\ShadowChat-QA-"
+    StrLen $2 $1
+    StrCpy $3 $INSTDIR $2
+    StrCmp $1 $3 invalid_qa_argument
+  initialize_registration:
+  Call InitializeRegistration
+  Return
+  invalid_qa_argument:
+    SetErrorLevel 3
+    Abort
+FunctionEnd
+
+Function un.onInit
+  StrCpy $SC_ORIGINAL_INSTDIR "$INSTDIR"
+  StrCpy $SC_QA_ID ""
+  IfFileExists "$INSTDIR\shadowchat-qa.ini" read_uninstall_namespace
+  StrCpy $1 "$TEMP\ShadowChat-QA-"
+  StrLen $2 $1
+  StrCpy $3 $INSTDIR $2
+  StrCmp $1 $3 invalid_uninstall_namespace initialize_uninstaller
+  read_uninstall_namespace:
+  ReadINIStr $SC_QA_ID "$INSTDIR\shadowchat-qa.ini" "Isolation" "Namespace"
+  StrCmp $SC_QA_ID "" invalid_uninstall_namespace
+  initialize_uninstaller:
+  Call un.InitializeRegistration
+  StrCmp $SC_QA_ID "" uninstall_ready
+  StrCmp $INSTDIR $SC_ORIGINAL_INSTDIR uninstall_ready
+  invalid_uninstall_namespace:
+    SetErrorLevel 3
+    Abort
+  uninstall_ready:
+FunctionEnd
+
+Function RunInstalledApplication
+  StrCmp $SC_QA_ID "" 0 launch_complete
+    Exec '"$INSTDIR\${APP_EXE}"'
+  launch_complete:
+FunctionEnd
 
 Section "影聊" SEC_MAIN
   SectionIn RO
@@ -86,12 +182,12 @@ Section "影聊" SEC_MAIN
     Abort
   ready_to_install:
   ClearErrors
-  ReadRegDWORD $1 HKCU "Software\shadowyli\ShadowChat" "StartupEnabled"
+  ReadRegDWORD $1 HKCU "$SC_PREF_KEY" "StartupEnabled"
   IfErrors startup_legacy startup_selected
   startup_legacy:
-    ReadRegStr $2 HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "ShadowChat"
+    ReadRegStr $2 HKCU "$SC_RUN_KEY" "ShadowChat"
     StrCmp $2 "" 0 startup_default
-    ReadRegStr $2 HKCU "Software\shadowyli\ShadowChat" "InstallLocation"
+    ReadRegStr $2 HKCU "$SC_PREF_KEY" "InstallLocation"
     StrCmp $2 "" startup_default
     StrCpy $1 0
     Goto startup_selected
@@ -102,40 +198,46 @@ Section "影聊" SEC_MAIN
   File /r "${PAYLOAD}\*.*"
 
   WriteUninstaller "$INSTDIR\卸载影聊.exe"
-  WriteRegStr HKCU "Software\shadowyli\ShadowChat" "InstallLocation" "$INSTDIR"
-  WriteRegDWORD HKCU "Software\shadowyli\ShadowChat" "StartupEnabled" $1
+  StrCmp $SC_QA_ID "" isolation_marker_complete
+    WriteINIStr "$INSTDIR\shadowchat-qa.ini" "Isolation" "Namespace" "$SC_QA_ID"
+  isolation_marker_complete:
+  WriteRegStr HKCU "$SC_PREF_KEY" "InstallLocation" "$INSTDIR"
+  WriteRegDWORD HKCU "$SC_PREF_KEY" "StartupEnabled" $1
   StrCmp $1 0 startup_disabled
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "ShadowChat" '"$INSTDIR\${APP_EXE}"'
+    WriteRegStr HKCU "$SC_RUN_KEY" "ShadowChat" '"$INSTDIR\${APP_EXE}"'
     Goto startup_complete
   startup_disabled:
-    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "ShadowChat"
+    DeleteRegValue HKCU "$SC_RUN_KEY" "ShadowChat"
   startup_complete:
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat" "DisplayName" "影聊"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat" "DisplayVersion" "${APP_VERSION}"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat" "Publisher" "${APP_PUBLISHER}"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat" "URLInfoAbout" "${APP_WEB}"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat" "DisplayIcon" "$INSTDIR\${APP_ICON},0"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat" "UninstallString" '"$INSTDIR\卸载影聊.exe"'
-  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat" "NoModify" 1
-  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat" "NoRepair" 1
+  WriteRegStr HKCU "$SC_UNINSTALL_KEY" "DisplayName" "影聊"
+  WriteRegStr HKCU "$SC_UNINSTALL_KEY" "DisplayVersion" "${APP_VERSION}"
+  WriteRegStr HKCU "$SC_UNINSTALL_KEY" "Publisher" "${APP_PUBLISHER}"
+  WriteRegStr HKCU "$SC_UNINSTALL_KEY" "URLInfoAbout" "${APP_WEB}"
+  WriteRegStr HKCU "$SC_UNINSTALL_KEY" "DisplayIcon" "$INSTDIR\${APP_ICON},0"
+  WriteRegStr HKCU "$SC_UNINSTALL_KEY" "UninstallString" '"$INSTDIR\卸载影聊.exe"'
+  WriteRegDWORD HKCU "$SC_UNINSTALL_KEY" "NoModify" 1
+  WriteRegDWORD HKCU "$SC_UNINSTALL_KEY" "NoRepair" 1
 
-  CreateDirectory "$SMPROGRAMS\影聊"
-  CreateShortcut "$SMPROGRAMS\影聊\影聊.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_ICON}" 0
-  CreateShortcut "$SMPROGRAMS\影聊\卸载影聊.lnk" "$INSTDIR\卸载影聊.exe" "" "$INSTDIR\${APP_ICON}" 0
-  CreateShortcut "$DESKTOP\影聊.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_ICON}" 0
-  System::Call 'shell32::SHChangeNotify(i 0x00002000, i 0x1005, w "$DESKTOP\影聊.lnk", p 0)'
-  System::Call 'shell32::SHChangeNotify(i 0x00002000, i 0x1005, w "$SMPROGRAMS\影聊\影聊.lnk", p 0)'
-  System::Call 'shell32::SHChangeNotify(i 0x00002000, i 0x1005, w "$SMPROGRAMS\影聊\卸载影聊.lnk", p 0)'
-  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0x1000, p 0, p 0)'
+  CreateDirectory "$SC_PROGRAMS"
+  CreateDirectory "$SC_DESKTOP"
+  CreateShortcut "$SC_PROGRAMS\影聊.lnk" "$INSTDIR\${APP_EXE}" "$SC_APP_ARGUMENTS" "$INSTDIR\${APP_ICON}" 0
+  CreateShortcut "$SC_PROGRAMS\卸载影聊.lnk" "$INSTDIR\卸载影聊.exe" "" "$INSTDIR\${APP_ICON}" 0
+  CreateShortcut "$SC_DESKTOP\影聊.lnk" "$INSTDIR\${APP_EXE}" "$SC_APP_ARGUMENTS" "$INSTDIR\${APP_ICON}" 0
+  StrCmp $SC_QA_ID "" 0 shell_refresh_complete
+    System::Call 'shell32::SHChangeNotify(i 0x00002000, i 0x1005, w "$SC_DESKTOP\影聊.lnk", p 0)'
+    System::Call 'shell32::SHChangeNotify(i 0x00002000, i 0x1005, w "$SC_PROGRAMS\影聊.lnk", p 0)'
+    System::Call 'shell32::SHChangeNotify(i 0x00002000, i 0x1005, w "$SC_PROGRAMS\卸载影聊.lnk", p 0)'
+    System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0x1000, p 0, p 0)'
+  shell_refresh_complete:
 SectionEnd
 
 Section "Uninstall"
   SetShellVarContext current
-  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "ShadowChat"
-  Delete "$DESKTOP\影聊.lnk"
-  RMDir /r "$SMPROGRAMS\影聊"
-  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ShadowChat"
-  DeleteRegKey HKCU "Software\shadowyli\ShadowChat"
+  DeleteRegValue HKCU "$SC_RUN_KEY" "ShadowChat"
+  Delete "$SC_DESKTOP\影聊.lnk"
+  RMDir /r "$SC_PROGRAMS"
+  DeleteRegKey HKCU "$SC_UNINSTALL_KEY"
+  DeleteRegKey HKCU "$SC_PREF_KEY"
   RMDir /r "$INSTDIR"
-  MessageBox MB_OK|MB_ICONINFORMATION "影聊已卸载。你的个人资料和聊天记录仍保留在用户数据目录中，重新安装后可以继续使用。" /SD IDOK
+  MessageBox MB_OK|MB_ICONINFORMATION "影聊已卸载，开机启动项已移除。你的个人资料和聊天记录仍保留在用户数据目录中，重新安装后可以继续使用。" /SD IDOK
 SectionEnd

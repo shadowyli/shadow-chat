@@ -1,4 +1,5 @@
 #include "GuiStickerPicker.h"
+#include "ShadowPopup.h"
 #include "ShadowStickerStore.h"
 #include "ShadowStyle.h"
 #include <QtWidgets>
@@ -11,6 +12,7 @@ class StickerDelegate : public QStyledItemDelegate
 {
 public:
   explicit StickerDelegate(StickerGrid* grid);
+  QSize sizeHint(const QStyleOptionViewItem& option,const QModelIndex& index) const override;
   void paint(QPainter* painter,const QStyleOptionViewItem& option,const QModelIndex& index) const override;
 private:
   StickerGrid* m_grid;
@@ -121,6 +123,11 @@ private:
 
 StickerDelegate::StickerDelegate(StickerGrid* grid):QStyledItemDelegate(grid),m_grid(grid){}
 
+QSize StickerDelegate::sizeHint(const QStyleOptionViewItem&,const QModelIndex&) const
+{
+  return m_grid->gridSize();
+}
+
 void StickerDelegate::paint(QPainter* painter,const QStyleOptionViewItem& option,const QModelIndex& index) const
 {
   QStyleOptionViewItem cell(option);
@@ -150,18 +157,14 @@ QIcon addStickerIcon()
 }
 
 GuiStickerPicker::GuiStickerPicker(const QString& accountFolder,QWidget* parent)
-  :QDialog(parent),m_accountFolder(accountFolder),m_recent(false),m_managing(false),m_positionPending(false)
+  :ShadowPopup(parent),m_accountFolder(accountFolder),m_recent(false),m_managing(false)
 {
   setObjectName("ShadowStickerPicker");
   setProperty("shadowDialogChromeSkip",true);
-  setWindowFlags(Qt::Popup|Qt::FramelessWindowHint);
-  setModal(false);
   setWindowTitle(QStringLiteral("我的收藏"));
-  qApp->installEventFilter(this);
-  resize(480,300);
-  setMinimumSize(280,180);
-  setStyleSheet(QStringLiteral(
-    "QDialog#ShadowStickerPicker{background:#FFFFFF;border:1px solid #DCE3EC;border-radius:10px;}"
+  setPreferredWidth(480);
+  setPlacement(Above);
+  setStyleSheet(styleSheet()+QStringLiteral(
     "QLabel{background:transparent;color:#7A8798;font-size:11px;}"
     "QListWidget{background:#FFFFFF;border:0;outline:0;}"
     "QListWidget::item{border:1px solid transparent;border-radius:6px;padding:3px;}"
@@ -176,7 +179,7 @@ GuiStickerPicker::GuiStickerPicker(const QString& accountFolder,QWidget* parent)
     "QPushButton:hover{color:#2878EF;}"
     "QMenu{background:white;color:#34445E;border:1px solid #DFE6EE;padding:5px;}"
     "QMenu::item{padding:7px 18px;}QMenu::item:selected{background:#EAF2FF;}" ));
-  QVBoxLayout* layout=new QVBoxLayout(this);
+  QVBoxLayout* layout=contentLayout();
   layout->setContentsMargins(8,8,8,1);
   layout->setSpacing(4);
   m_search=new QLineEdit(this);
@@ -188,6 +191,7 @@ GuiStickerPicker::GuiStickerPicker(const QString& accountFolder,QWidget* parent)
   layout->addWidget(m_search);
   connect(m_search,&QLineEdit::textChanged,this,&GuiStickerPicker::refresh);
   m_grid=new StickerGrid(this);
+  m_grid->setMinimumHeight(180);
   m_grid->setObjectName("StickerGrid");
   m_grid->setAccessibleName(QStringLiteral("收藏表情列表"));
   m_grid->setViewMode(QListView::IconMode);
@@ -285,61 +289,12 @@ GuiStickerPicker::GuiStickerPicker(const QString& accountFolder,QWidget* parent)
 void GuiStickerPicker::showAbove(QWidget* anchor)
 {
   if(!anchor)return;
-  if(m_anchor)m_anchor->removeEventFilter(this);
-  if(m_owner)m_owner->removeEventFilter(this);
   m_anchor=anchor;
-  m_owner=anchor->window();
+  setAnchor(anchor);
+  setFocusOnClose(anchor);
   refresh();
-  show();
-  positionAboveAnchor();
-  raise();
+  showPopup();
   m_grid->setFocus();
-}
-
-void GuiStickerPicker::positionAboveAnchor()
-{
-  QWidget* anchor=m_anchor;
-  if(!anchor||!isVisible())return;
-  const QRect screen=anchor->screen()?anchor->screen()->availableGeometry():QApplication::desktop()->availableGeometry();
-  resize(qMin(480,screen.width()-16),qMin(300,screen.height()-16));
-  const QPoint origin=anchor->mapToGlobal(QPoint());
-  int positionY=origin.y()-height()-6;
-  if(positionY<screen.top()+8)positionY=origin.y()+anchor->height()+6;
-  move(qBound(screen.left()+8,origin.x(),screen.right()-width()-7),
-    qBound(screen.top()+8,positionY,screen.bottom()-height()-7));
-}
-
-void GuiStickerPicker::scheduleAnchorPosition()
-{
-  if(m_positionPending)return;
-  m_positionPending=true;
-  QTimer::singleShot(0,this,[this]() {
-    m_positionPending=false;
-    if(isVisible())positionAboveAnchor();
-  });
-}
-
-bool GuiStickerPicker::eventFilter(QObject* watched,QEvent* event)
-{
-  if(isVisible()&&event->type()==QEvent::MouseButtonPress)
-  {
-    QWidget* widget=qobject_cast<QWidget*>(watched);
-    const auto* mouse=static_cast<QMouseEvent*>(event);
-    if(widget&&widget!=m_anchor&&!isAncestorOf(widget)&&!frameGeometry().contains(mouse->globalPos()))hide();
-  }
-  if(isVisible()&&event->type()==QEvent::KeyPress&&
-     static_cast<QKeyEvent*>(event)->key()==Qt::Key_Escape)
-  {
-    QWidget* widget=qobject_cast<QWidget*>(watched);
-    if(widget&&(widget==this||isAncestorOf(widget))){hide();return true;}
-  }
-  if(watched==m_owner||watched==m_anchor)
-  {
-    if(event->type()==QEvent::Hide)hide();
-    else if(event->type()==QEvent::Move||event->type()==QEvent::Resize||
-            event->type()==QEvent::LayoutRequest)scheduleAnchorPosition();
-  }
-  return QDialog::eventFilter(watched,event);
 }
 
 void GuiStickerPicker::refresh()
@@ -382,7 +337,8 @@ void GuiStickerPicker::activateSticker(QListWidgetItem* item)
   if(!isVisible()||!item)return;
   if(item->data(Qt::UserRole+2).toBool())
   {
-    m_addMenu->popup(m_grid->viewport()->mapToGlobal(m_grid->visualItemRect(item).bottomLeft()));
+    ShadowPopup::showMenuAtGlobal(m_addMenu,
+    QRect(m_grid->viewport()->mapToGlobal(m_grid->visualItemRect(item).bottomLeft()),QSize(1,1)));
     return;
   }
   if(m_managing)return;

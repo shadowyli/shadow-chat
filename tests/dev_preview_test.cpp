@@ -32,6 +32,7 @@
 #include "ShadowWindowShape.h"
 #include <QTcpServer>
 #include <QtWidgets>
+#include <cstdlib>
 #include <cstdio>
 
 #define CHECK(value) do { if( !(value) ) { std::fprintf( stderr, "FAIL line %d: %s\n", __LINE__, #value ); return 1; } } while(false)
@@ -146,32 +147,99 @@ static int verifyProfileStatus( GuiMain& window )
   if( !wasConnected )
     CHECK( beeCore->start() );
   const int originalStatus = Settings::instance().localUser().status();
-  bool verified = false;
-  std::puts( "Checking profile status integration" );
-  QTimer::singleShot( 100, &window, [&]() {
-    QDialog* profile = qobject_cast<QDialog*>( QApplication::activeModalWidget() );
-    if( !profile ) return;
-    std::puts( "Profile modal opened" );
-    QPushButton* status = profile->findChild<QPushButton*>( "profileCardStatus" );
-    if( status && status->menu() )
+  struct RestoreCore
+  {
+    int status;
+    bool wasConnected;
+    ~RestoreCore()
     {
-      for( QAction* action : status->menu()->actions() )
-        if( action->data().toInt() == User::Busy ) action->trigger();
-      verified = Settings::instance().localUser().status() == User::Busy &&
-        status->menu()->actions().at( 1 )->isChecked();
-      for( QAction* action : status->menu()->actions() )
-        if( action->data().toInt() == originalStatus ) action->trigger();
+      if( Settings::instance().localUser().status() != status )
+        beeCore->setLocalUserStatus( status );
+      if( !wasConnected )
+        beeCore->stop();
     }
-    profile->grab().save( QDir::currentPath() + "/ui-031-profile-card.png" );
-    profile->reject();
+  } restoreCore = { originalStatus, wasConnected };
+  QObject observer;
+  QList<int> statusChanges;
+  QObject::connect( beeCore, &Core::userChanged, &observer, [&]( const User& user ) {
+    if( user.isLocal() )
+      statusChanges.append( user.status() );
   } );
+  auto waitFor = []( const std::function<bool()>& condition ) {
+    QElapsedTimer elapsed;
+    elapsed.start();
+    while( !condition() && elapsed.elapsed() < 3000 )
+    {
+      QEventLoop loop;
+      QTimer::singleShot( 10, &loop, &QEventLoop::quit );
+      loop.exec();
+    }
+    return condition();
+  };
+  auto click = []( QWidget* widget ) {
+    const QPoint point = widget->rect().center();
+    const QPoint global = widget->mapToGlobal( point );
+    QMouseEvent press( QEvent::MouseButtonPress, point, global, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
+    QMouseEvent release( QEvent::MouseButtonRelease, point, global, Qt::LeftButton, Qt::NoButton, Qt::NoModifier );
+    QApplication::sendEvent( widget, &press );
+    QApplication::sendEvent( widget, &release );
+  };
+  std::puts( "Checking profile status integration" );
   QToolButton* profileButton = window.findChild<QToolButton*>( "ShadowTitleProfile" );
   CHECK( profileButton && profileButton->isVisible() );
-  profileButton->click();
-  CHECK( verified && Settings::instance().localUser().status() == originalStatus );
-  if( !wasConnected )
-    beeCore->stop();
-  std::puts( "PASS profile status integration: native card updates Core and restores the previous state" );
+  QPointer<QDialog> profile;
+  click( profileButton );
+  CHECK( waitFor( [&]() {
+    for( QDialog* dialog : window.findChildren<QDialog*>( "GuiEditVCard" ) )
+      if( dialog->isVisible() && dialog->inherits( "GuiEditVCard" ) )
+        profile = dialog;
+    return profile && profile->isVisible();
+  } ) );
+  CHECK( !profile->isModal() && profile->windowModality() == Qt::NonModal );
+  CHECK( QApplication::activeModalWidget() == Q_NULLPTR && window.isEnabled() );
+  const QRect anchor( profileButton->mapToGlobal( QPoint() ), profileButton->size() );
+  CHECK( qAbs( profile->geometry().top() - anchor.bottom() - 7 ) <= 2 ||
+    qAbs( anchor.top() - profile->geometry().bottom() - 7 ) <= 2 );
+  const QRect available = QApplication::desktop()->availableGeometry( profileButton );
+  const int expectedLeft = qBound( available.left(), anchor.center().x() - profile->width() / 2,
+    qMax( available.left(), available.right() - profile->width() + 1 ) );
+  CHECK( qAbs( profile->geometry().left() - expectedLeft ) <= 2 );
+  QPushButton* status = profile->findChild<QPushButton*>( "profileCardStatus" );
+  CHECK( status && status->isVisible() && status->menu() );
+  QAction* busyAction = Q_NULLPTR;
+  QAction* targetAction = Q_NULLPTR;
+  QAction* restoreAction = Q_NULLPTR;
+  const int targetStatus = originalStatus == User::Busy ? User::Online : User::Busy;
+  for( QAction* action : status->menu()->actions() )
+  {
+    if( action->data().toInt() == User::Busy ) busyAction = action;
+    if( action->data().toInt() == targetStatus ) targetAction = action;
+    if( action->data().toInt() == originalStatus ) restoreAction = action;
+  }
+  CHECK( busyAction && targetAction && restoreAction && targetAction != restoreAction );
+  CHECK( restoreAction->isChecked() && !targetAction->isChecked() );
+  targetAction->trigger();
+  CHECK( waitFor( [&]() {
+    return Settings::instance().localUser().status() == targetStatus &&
+      !statusChanges.isEmpty() && statusChanges.last() == targetStatus && targetAction->isChecked();
+  } ) );
+  CHECK( busyAction->isChecked() == (targetStatus == User::Busy) );
+  CHECK( beeCore->isConnected() && profile && profile->isVisible() );
+  CHECK( profile->grab().save( QDir::currentPath() + "/ui-031-profile-card.png" ) );
+  const int changesBeforeRestore = statusChanges.size();
+  restoreAction->trigger();
+  CHECK( waitFor( [&]() {
+    return Settings::instance().localUser().status() == originalStatus &&
+      statusChanges.size() > changesBeforeRestore && statusChanges.last() == originalStatus && restoreAction->isChecked();
+  } ) );
+  CHECK( busyAction->isChecked() == (originalStatus == User::Busy) );
+  QPushButton* close = profile->findChild<QPushButton*>( "closeMyProfile" );
+  CHECK( close && close->isVisible() );
+  click( close );
+  CHECK( waitFor( [&]() { return !profile || !profile->isVisible(); } ) );
+  CHECK( QApplication::activeModalWidget() == Q_NULLPTR && window.isEnabled() );
+  CHECK( Settings::instance().localUser().status() == originalStatus );
+  std::puts( "PASS profile status integration: asynchronous nonmodal anchored card updates Core and restores the previous state" );
   return 0;
 }
 
@@ -1162,14 +1230,26 @@ static int verifyWelcome( GuiMain& window )
   bool fileSelected=false;
   QTimer pickerDriver;
   QObject::connect(&pickerDriver,&QTimer::timeout,&dialog,[&]() {
-    QFileDialog* picker=qobject_cast<QFileDialog*>(QApplication::activeModalWidget());
+    QFileDialog* picker=dialog.findChild<QFileDialog*>();
     if(!picker)return;
-    pickerDriver.stop();
-    picker->selectFile(imagePath);
-    fileSelected=QMetaObject::invokeMethod(picker,"accept",Qt::DirectConnection);
+    QLineEdit* fileName=picker->findChild<QLineEdit*>("fileNameEdit");
+    if(!fileName)return;
+    fileName->setText(QDir::toNativeSeparators(imagePath));
+    const bool invoked=QMetaObject::invokeMethod(picker,"accept",Qt::DirectConnection);
+    fileSelected=invoked&&picker->result()==QDialog::Accepted&&
+      picker->selectedFiles().contains(imagePath);
+    if(fileSelected)pickerDriver.stop();
   });
+  QTimer pickerGuard;
+  pickerGuard.setSingleShot(true);
+  QObject::connect(&pickerGuard,&QTimer::timeout,&dialog,[&]() {
+    std::fprintf(stderr,"FAIL: welcome avatar file picker timed out\n");
+    std::exit(1);
+  });
+  pickerGuard.start(5000);
   pickerDriver.start(30);
   avatar->click();
+  pickerGuard.stop();
   pickerDriver.stop();
   QApplication::setAttribute(Qt::AA_DontUseNativeDialogs,nativeDialogsDisabled);
   CHECK(fileSelected&&!dialog.avatar().isNull());

@@ -60,8 +60,10 @@ static int peer( int argc, char** argv )
   QObject::connect( &app, &BeeApplication::tickEvent, &core, &Core::onTickEvent );
   bool sent = false, received = false, denied = false, textAck = false, fileAck = false, transferring = false, dissolved = false, forbidden = false, repeated = false;
   int receivedFiles = 0, uploadedFiles = 0, incomingImagePreviews = 0;
+  int lastResumeProgress = 0;
   QSet<QString> incomingAlbums;
   QElapsedTimer elapsed; elapsed.start();
+  QElapsedTimer resumeProgress; resumeProgress.start();
   QObject::connect( &core, &Core::newChatMessage, [&]( const Chat&, const ChatMessage& message ) {
     if( name == "beta" && phase == "images" && message.isImagePreview() )
     {
@@ -99,7 +101,15 @@ static int peer( int argc, char** argv )
     }
   } );
   QObject::connect( &core, &Core::fileTransferMessage, [&]( VNumber, const User&, const FileInfo& file, const QString&, FileTransferPeer::TransferState state ) {
-    if( file.isDownload() && state == FileTransferPeer::Completed ) ++receivedFiles;
+    if( file.isDownload() && state == FileTransferPeer::Completed )
+    {
+      ++receivedFiles;
+      if( phase == "resume" && receivedFiles != lastResumeProgress )
+      {
+        lastResumeProgress = receivedFiles;
+        resumeProgress.restart();
+      }
+    }
     if( !file.isDownload() && state == FileTransferPeer::Completed )
     {
       ++uploadedFiles;
@@ -237,7 +247,24 @@ static int peer( int argc, char** argv )
     { timer.stop(); QTimer::singleShot( 1000, &app, [&]() { app.exit( forbidden ? 11 : 0 ); } ); }
   } );
   timer.start( 250 );
-  QTimer::singleShot( phase == "resume" ? 360000 : 35000, &app, [&]() { std::fprintf( stderr, "GROUP TIMEOUT %s %s received=%d files=%d textAck=%d fileAck=%d group=%d owner=%d\n", qPrintable( phase ), qPrintable( name ), received, receivedFiles, textAck, fileAck, project().isValid(), core.isLocalGroupOwner( project().id() ) ); app.exit( 3 ); } );
+  QTimer resumeWatchdog;
+  if( phase == "resume" )
+  {
+    resumeWatchdog.setInterval( 1000 );
+    QObject::connect( &resumeWatchdog, &QTimer::timeout, &app, [&]() {
+      if( elapsed.elapsed() > 540000 || (lastResumeProgress > 0 && resumeProgress.elapsed() > 90000) )
+      {
+        std::fprintf( stderr, "GROUP TIMEOUT %s %s received=%d files=%d textAck=%d fileAck=%d group=%d owner=%d progressIdle=%lld total=%lld\n",
+          qPrintable( phase ), qPrintable( name ), received, receivedFiles, textAck, fileAck,
+          project().isValid(), core.isLocalGroupOwner( project().id() ),
+          static_cast<long long>( resumeProgress.elapsed() ), static_cast<long long>( elapsed.elapsed() ) );
+        app.exit( 3 );
+      }
+    } );
+    resumeWatchdog.start();
+  }
+  else
+    QTimer::singleShot( 35000, &app, [&]() { std::fprintf( stderr, "GROUP TIMEOUT %s %s received=%d files=%d textAck=%d fileAck=%d group=%d owner=%d\n", qPrintable( phase ), qPrintable( name ), received, receivedFiles, textAck, fileAck, project().isValid(), core.isLocalGroupOwner( project().id() ) ); app.exit( 3 ); } );
   const int result = app.exec(); core.stop(); settings.save(); app.cleanUp();
   return result;
 }

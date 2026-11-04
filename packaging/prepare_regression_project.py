@@ -17,9 +17,13 @@ objects = (args.production_root/'objects').resolve().as_posix()
 text = text.replace('$$PWD/../src/release', objects).replace('../src/release', objects)
 text = text.replace('../src/', (ROOT/'src').as_posix()+'/')
 text = text.replace('../locale/', (ROOT/'locale').as_posix()+'/')
-lines = []
+text = text.replace('$$PWD', source.parent.as_posix())
+lines = ['SHADOWCHAT_PREVIEW_BUILD = '+args.production_root.resolve().as_posix()]
 for line in text.splitlines():
-    match = re.match(r'(\s*(?:SOURCES|HEADERS|FORMS)\s*\+=\s*)(.*)', line)
+    include = re.fullmatch(r'\s*include\(([^)]+)\)\s*', line)
+    if include and not Path(include.group(1)).is_absolute():
+        line = 'include('+(source.parent/include.group(1)).resolve().as_posix()+')'
+    match = re.match(r'(\s*(?:SOURCES|HEADERS|FORMS)\s*(?:\+=|=)\s*)(.*)', line)
     if match:
         values = []
         for item in match.group(2).split():
