@@ -485,6 +485,14 @@ void ConnectionSocket::checkHelloMessage( const QByteArray& array_data )
     return;
   }
 
+  if( !Protocol::instance().isShadowChatHelloMessage( m ) )
+  {
+    qWarning() << "ConnectionSocket rejected a peer without a valid ShadowChat identity from"
+               << qPrintable( m_networkAddress.toString() );
+    emit abortRequest();
+    return;
+  }
+
   if( Settings::instance().acceptConnectionsOnlyFromWorkgroups() )
   {
     if( !Protocol::instance().acceptConnectionFromWorkgroup( m ) )

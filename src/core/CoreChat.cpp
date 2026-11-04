@@ -726,6 +726,13 @@ void Core::sendRefuseMessageToGroupChat( const Chat& group_chat )
 
 bool Core::sendMessageToLocalNetwork( const User& to_user, const Message& m )
 {
+  if( !Protocol::instance().isShadowChatUser( to_user ) )
+  {
+    qWarning() << "Blocked message delivery to a user without a verified ShadowChat identity:"
+               << to_user.id() << qPrintable( to_user.name() );
+    return false;
+  }
+
   Connection* c = connection( to_user.id() );
   if( !c )
   {
