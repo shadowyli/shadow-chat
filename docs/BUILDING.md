@@ -87,6 +87,15 @@ set "SHADOWCHAT_MAKENSIS_PATH=C:\Program Files (x86)\NSIS\makensis.exe"
 python packaging\build_installer.py --environment local
 ```
 
+安装包完成后，可从同一份已验证载荷生成便携 ZIP：
+
+```bat
+python packaging\build_portable.py --environment local
+```
+
+脚本会逐文件核对 `release-build.json` 中的安装载荷清单，并写入
+`dist\local\portable-build.json`。载荷不一致或同名 ZIP 已存在时会停止，避免覆盖候选包。
+
 打包还需要已核验的 x86 TLS 运行库、Visual Studio x86 CRT 和本机私密恢复输入。
 默认 `delivery-private` 目录须有匹配的恢复哈希配置及负责人文件，
 也可用 `SHADOWCHAT_RECOVERY_DIR` 指定私密目录；不要提交或公开这些文件。
