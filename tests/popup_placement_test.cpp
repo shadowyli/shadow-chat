@@ -32,6 +32,9 @@
 #include <QTemporaryDir>
 #include <QtTest>
 #include <cstdio>
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#endif
 
 #define CHECK(value) do { if( !(value) ) { std::fprintf( stderr, "FAIL line %d: %s\n", __LINE__, #value ); return 1; } } while( false )
 
@@ -124,11 +127,19 @@ static int verifyMenu( QMenu* menu, QWidget* trigger, const QString& name )
 {
   CHECK( menu && trigger );
   QWidget* owner = trigger->window();
+  owner->raise();
   owner->activateWindow();
+  QTest::qWait( 80 );
   trigger->setFocus();
   menu->popup( trigger->mapToGlobal( QPoint( 0, trigger->height() ) ) );
   QTest::qWait( 30 );
   CHECK( menu->isVisible() );
+  CHECK( menu->windowFlags().testFlag( Qt::FramelessWindowHint ) );
+  CHECK( menu->testAttribute( Qt::WA_TranslucentBackground ) );
+#ifdef Q_OS_WIN
+  CHECK( GetWindowLongPtrW( reinterpret_cast<HWND>( menu->winId() ), GWL_EXSTYLE ) & WS_EX_LAYERED );
+  CHECK( !(GetWindowLongPtrW( reinterpret_cast<HWND>( menu->winId() ), GWL_STYLE ) & WS_CAPTION) );
+#endif
   const QRect available = trigger->screen()->availableGeometry();
   CHECK( available.contains( menu->frameGeometry() ) );
   owner->move( owner->pos() + QPoint( -24, 15 ) );
@@ -139,6 +150,28 @@ static int verifyMenu( QMenu* menu, QWidget* trigger, const QString& name )
   CHECK( completeShadow( menu ) );
   CHECK( opaqueCard( menu, name ) );
   CHECK( saveProof( menu, name + QStringLiteral( ".png" ) ) );
+  if( QGuiApplication::platformName() == QStringLiteral( "windows" ) )
+  {
+    QTest::qWait( 200 );
+    CHECK( menu->isVisible() && QApplication::activePopupWidget() == menu );
+    const QRect rectangle = menu->frameGeometry();
+    const QPixmap native = menu->screen()->grabWindow( 0, rectangle.x(), rectangle.y(), rectangle.width(), rectangle.height() );
+    CHECK( !native.isNull() && native.save( proofDir() + "/" + name + "-native-screen.png" ) );
+    const QImage pixels = native.toImage();
+    const QColor edge = pixels.pixelColor( pixels.width()/2, 1 );
+    bool capturedContent = false;
+    for( int vertical = 0; vertical < pixels.height() && !capturedContent; ++vertical )
+      for( int horizontal = 0; horizontal < pixels.width(); ++horizontal )
+      {
+        const QColor sample = pixels.pixelColor( horizontal, vertical );
+        if( sample.red() > 30 || sample.green() > 30 || sample.blue() > 30 )
+        { capturedContent = true; break; }
+      }
+    if( capturedContent )
+      CHECK( edge.red() > 30 || edge.green() > 30 || edge.blue() > 30 );
+    else
+      std::printf( "NATIVE_SCREEN_CAPTURE_UNAVAILABLE %s: whole desktop crop is black; WGC/manual review required\n", qPrintable( name ) );
+  }
   QTest::keyClick( menu, Qt::Key_Escape );
   flushEvents();
   CHECK( !menu->isVisible() && owner->isVisible() );
@@ -195,6 +228,9 @@ int main( int argc, char** argv )
   QWidget owner;
   owner.setGeometry( QRect( available.center() - QPoint( 260, 190 ), QSize( 520, 380 ) ) );
   owner.show();
+  owner.raise();
+  owner.activateWindow();
+  QTest::qWait( 100 );
   owner.activateWindow();
   flushEvents();
   ShadowPopup popup( &owner );
@@ -519,6 +555,23 @@ int main( int argc, char** argv )
   window.resize( qMin( 1000, available.width() - 60 ), qMin( 650, available.height() - 60 ) );
   window.move( available.topLeft() + QPoint( 35, 20 ) );
   window.show(); QTest::qWait( 50 );
+  QWidget* rail = window.findChild<QWidget*>( "ShadowNavRail" );
+  CHECK( rail );
+  const QImage railPixels = rail->grab().toImage();
+  const qreal railRatio = railPixels.devicePixelRatio();
+  CHECK( railPixels.pixelColor( qRound( 2*railRatio ), qRound( (rail->height()-3)*railRatio ) ).rgb() ==
+    QColor( "#030a0a" ).rgb() );
+  bool checkedNavigation = false;
+  for( QToolButton* button : rail->findChildren<QToolButton*>( "ShadowNavButton" ) )
+    if( button->isChecked() )
+    {
+      const QImage pixels = button->grab().toImage();
+      const qreal ratio = pixels.devicePixelRatio();
+      CHECK( pixels.pixelColor( qRound( button->width()/2*ratio ), qRound( (button->height()-4)*ratio ) ).rgb() ==
+        QColor( "#e93d34" ).rgb() );
+      checkedNavigation = true;
+    }
+  CHECK( checkedNavigation );
   QMenu* main_menu = window.findChild<QMenu*>( "ShadowMainMenu" );
   CHECK( main_menu );
   QWidget* main_trigger = main_menu->parentWidget();
@@ -569,6 +622,21 @@ int main( int argc, char** argv )
   QTest::mouseClick( &window, Qt::LeftButton, Qt::NoModifier, QPoint( 10, window.height()-10 ) );
   flushEvents();
   CHECK( !self_card );
+  bool statusPassed = false;
+  QTimer::singleShot( 100, &window, [&]() {
+    QDialog* dialog = qobject_cast<QDialog*>( QApplication::activeModalWidget() );
+    if( dialog && dialog->objectName() == "ShadowConnectionStatusDialog" )
+    {
+      QLabel* summary = dialog->findChild<QLabel*>( "ConnectionStatusSummary" );
+      QPlainTextEdit* logs = dialog->findChild<QPlainTextEdit*>( "ConnectionDiagnosticLog" );
+      statusPassed = summary && logs && logs->isHidden() &&
+        summary->text().contains( QStringLiteral( "已验证在线联系人" ) ) &&
+        !summary->text().contains( "BeeBEEP" ) && saveProof( dialog, "connection-status.png" );
+      dialog->reject();
+    }
+  } );
+  CHECK( QMetaObject::invokeMethod( &window, "showModernActivities", Qt::DirectConnection ) );
+  CHECK( statusPassed );
   window.hide();
   std::puts( "PASS actual GuiMain menu and nested workspace menu follow the main window; Escape preserves the parent menu" );
   std::puts( "PASS actual self avatar opens an anchored card, follows the main window, edits in a reachable dialog and dismisses outside" );
@@ -590,6 +658,35 @@ int main( int argc, char** argv )
   flushEvents();
   std::puts( "PASS actual public profile follows owner, remains on screen and closes from a focused child" );
 
+  qputenv( "SHADOWCHAT_OPAQUE_MENUS", "1" );
+  host.activateWindow();
+  QMenu fallback( &host );
+  fallback.addAction( QStringLiteral( "兼容菜单测试" ) );
+  fallback.popup( host.mapToGlobal( QPoint( 30, 50 ) ) );
+  QTest::qWait( 40 );
+  CHECK( fallback.property( "shadowMenuOpaque" ).toBool() );
+  CHECK( !fallback.testAttribute( Qt::WA_TranslucentBackground ) && !fallback.mask().isEmpty() );
+  const QImage fallbackPixels = fallback.grab().toImage();
+  const QColor fallbackCenter = fallbackPixels.pixelColor( fallbackPixels.width()/2, fallbackPixels.height()/2 );
+  CHECK( fallbackCenter.alpha() == 255 );
+  CHECK( saveProof( &fallback, "menu-opaque-fallback.png" ) );
+  QTest::keyClick( &fallback, Qt::Key_Escape );
+  CHECK( !fallback.isVisible() );
+  qunsetenv( "SHADOWCHAT_OPAQUE_MENUS" );
+  std::puts( "PASS forced compositor fallback uses a masked white card without transparent margins" );
+
+  if( qEnvironmentVariableIsSet( "SHADOWCHAT_NATIVE_QA_HOLD" ) )
+  {
+    window.setWindowTitle( "ShadowChat 1.2.2 native QA" );
+    window.show();
+    window.raise();
+    window.activateWindow();
+    QTimer::singleShot( 250, &window, [main_menu,main_trigger]() {
+      main_menu->popup( main_trigger->mapToGlobal( QPoint( 0, main_trigger->height() ) ) );
+    } );
+    QTimer::singleShot( 120000, &app, &QCoreApplication::quit );
+    app.exec();
+  }
   host.close();
   moving_owner.close();
   owner.close();

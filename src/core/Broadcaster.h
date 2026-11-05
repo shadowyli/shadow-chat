@@ -35,6 +35,8 @@ class Broadcaster : public QObject
 public:
   explicit Broadcaster( QObject* );
   bool startBroadcastServer();
+  bool isListening() const { return mp_receiverSocket->state() == QAbstractSocket::BoundState; }
+  QString listenerError() const { return mp_receiverSocket->errorString(); }
   void stopBroadcasting();
 
   void onTickEvent( int );

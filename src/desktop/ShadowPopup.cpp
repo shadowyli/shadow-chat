@@ -9,6 +9,7 @@
 #include <QHideEvent>
 #include <QKeyEvent>
 #include <QMenu>
+#include <QLibrary>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -73,9 +74,19 @@ protected:
           state.widget->isVisible() && state.widget->window()->isActiveWindow() )
         state.widget->setFocus( Qt::OtherFocusReason );
     }
-    if( menu && event->type() == QEvent::Paint )
+    if( menu && menu->property( "shadowMenuOpaque" ).toBool() &&
+        (event->type() == QEvent::Show || event->type() == QEvent::Resize) )
+    {
+      QPainterPath outline;
+      outline.addRoundedRect( QRectF( menu->rect() ), 9, 9 );
+      menu->setMask( QRegion( outline.toFillPolygon().toPolygon() ) );
+    }
+    if( menu && event->type() == QEvent::Paint && !menu->property( "shadowMenuOpaque" ).toBool() )
     {
       QPainter painter( menu );
+      painter.setCompositionMode( QPainter::CompositionMode_Source );
+      painter.fillRect( menu->rect(), Qt::transparent );
+      painter.setCompositionMode( QPainter::CompositionMode_SourceOver );
       ShadowPopup::paintCard( &painter, menu->rect().adjusted( ShadowPopup::shadowMargin,
         ShadowPopup::shadowMargin, -ShadowPopup::shadowMargin, -ShadowPopup::shadowMargin ) );
     }
@@ -115,8 +126,28 @@ private:
     if( menu->property( "shadowMenuPrepared" ).toBool() )
       return;
     menu->setProperty( "shadowMenuPrepared", true );
+    menu->setWindowFlag( Qt::FramelessWindowHint, true );
     menu->setWindowFlag( Qt::NoDropShadowWindowHint, true );
-    menu->setAttribute( Qt::WA_TranslucentBackground );
+    bool opaque = qEnvironmentVariableIsSet( "SHADOWCHAT_OPAQUE_MENUS" );
+#ifdef Q_OS_WIN
+    QLibrary compositor( QStringLiteral( "dwmapi" ) );
+    typedef long (__stdcall *CompositionQuery)( int* );
+    const CompositionQuery query = reinterpret_cast<CompositionQuery>( compositor.resolve( "DwmIsCompositionEnabled" ) );
+    int enabled = 0;
+    opaque = opaque || !query || query( &enabled ) < 0 || !enabled;
+#endif
+    menu->setProperty( "shadowMenuOpaque", opaque );
+    menu->setAttribute( Qt::WA_TranslucentBackground, !opaque );
+    if( opaque )
+    {
+      menu->setStyleSheet( menu->styleSheet() + QStringLiteral(
+        "QMenu{background:#FFFFFF;color:#34445E;border:1px solid #DCE3EC;border-radius:9px;padding:6px;menu-scrollable:1;}"
+        "QMenu::item{padding:7px 22px 7px 12px;border-radius:5px;}"
+        "QMenu::item:selected{background:#EAF2FF;color:#2457B8;}"
+        "QMenu::separator{height:1px;background:#E8EDF4;margin:4px 6px;}" ) );
+      observe( menu );
+      return;
+    }
     menu->setStyleSheet( menu->styleSheet() + QStringLiteral(
       "QMenu{background:transparent;color:#34445E;border:0;padding:16px;menu-scrollable:1;}"
       "QMenu::item{padding:7px 22px 7px 12px;border-radius:5px;}"
@@ -498,7 +529,7 @@ void ShadowPopup::paintCard( QPainter* painter, const QRect& card_rect, int radi
   for( int distance = shadowMargin; distance >= 1; --distance )
   {
     QColor shade( 23, 36, 59 );
-    shade.setAlphaF( 0.014f + 0.010f * ( shadowMargin - distance + 1 ) );
+    shade.setAlphaF( 0.005f + 0.002f * ( shadowMargin - distance + 1 ) );
     painter->setBrush( shade );
     const QRect layer = card_rect.adjusted( -distance, -distance, distance, distance );
     painter->drawRoundedRect( layer, radius + distance, radius + distance );

@@ -2944,11 +2944,96 @@ void GuiMain::showModernOrganization()
 
 void GuiMain::showModernActivities()
 {
-  m_modernPrimaryPage = 3;
-  mp_tabMain->setCurrentWidget( mp_home );
-  mp_modernSectionTitle->setText( QStringLiteral( "系统活动" ) );
-  mp_modernSectionHint->setText( QStringLiteral( "连接状态与诊断信息" ) );
-  updateModernNavigation();
+  QDialog dialog( this );
+  dialog.setObjectName( "ShadowConnectionStatusDialog" );
+  dialog.setWindowTitle( QStringLiteral( "连接与安全状态" ) );
+  dialog.resize( 580, 440 );
+  ShadowDialogStyle::apply( &dialog );
+  QVBoxLayout* layout = new QVBoxLayout( &dialog );
+  layout->setContentsMargins( 22, 18, 22, 18 );
+  QLabel* title = new QLabel( QStringLiteral( "影聊 · 连接与安全" ), &dialog );
+  title->setObjectName( "ConnectionStatusTitle" );
+  layout->addWidget( title );
+  QLabel* status = new QLabel( &dialog );
+  status->setObjectName( "ConnectionStatusSummary" );
+  status->setWordWrap( true );
+  status->setTextFormat( Qt::PlainText );
+  status->setTextInteractionFlags( Qt::TextSelectableByMouse );
+  layout->addWidget( status );
+  QLabel* boundary = new QLabel( QStringLiteral(
+    "联系人数量仅代表本机已建立的连接，不代表其他成员之间互通。\n"
+    "仅连接已验证的影聊客户端；资料保存在本机，备份未加密。\n"
+    "网络或安全策略限制需由管理员核查，请勿关闭安全软件。" ), &dialog );
+  boundary->setWordWrap( true );
+  layout->addWidget( boundary );
+  QPushButton* details = new QPushButton( QStringLiteral( "展开诊断日志" ), &dialog );
+  details->setObjectName( "ConnectionDiagnosticToggle" );
+  details->setCheckable( true );
+  layout->addWidget( details );
+  QPlainTextEdit* logs = new QPlainTextEdit( &dialog );
+  logs->setObjectName( "ConnectionDiagnosticLog" );
+  logs->setReadOnly( true );
+  logs->setMaximumBlockCount( 200 );
+  logs->hide();
+  layout->addWidget( logs );
+  connect( details, &QPushButton::toggled, &dialog, [logs,details]( bool expanded ) {
+    details->setText( expanded ? QStringLiteral( "收起诊断日志" ) : QStringLiteral( "展开诊断日志" ) );
+    logs->setVisible( expanded );
+    if( expanded )
+    {
+      QFile file( Settings::instance().logFilePath() );
+      QStringList selected;
+      if( file.open( QIODevice::ReadOnly ) )
+      {
+        file.seek( qMax( Q_INT64_C(0), file.size() - 65536 ) );
+        const QStringList lines = QString::fromUtf8( file.readAll() ).split( '\n' );
+        for( const QString& line : lines )
+        {
+          const QRegularExpression expression( QStringLiteral(
+            "ShadowChatNetwork:\\s+(?:discovery-invalid-size|discovery-identity-rejected|discovery-accepted|"
+            "connection-requested|connection-policy-rejected-same-host|handshake-identity-rejected|"
+            "handshake-connected|connection-error|send-identity-rejected|send-no-connection|send-failed|"
+            "delivery-ack|group-config-deferred-capacity|group-config-deferred|group-config-invalid)"
+            "\\s+QHostAddress\\(\"[0-9A-Fa-f:.%]+\"\\)(?:\\s+\\d+)+\\s*$" ) );
+          const QRegularExpressionMatch match = expression.match( line );
+          if( match.hasMatch() ) selected.append( match.captured().trimmed() );
+        }
+      }
+      logs->setPlainText( selected.isEmpty() ? QStringLiteral( "暂无本次连接诊断记录。可采集三机诊断包进一步排查。" ) : selected.join( '\n' ) );
+    }
+  });
+  QPushButton* diagnostics = new QPushButton( QStringLiteral( "打开诊断采集工具所在目录" ), &dialog );
+  diagnostics->setObjectName( "ConnectionDiagnosticFolder" );
+  layout->addWidget( diagnostics );
+  connect( diagnostics, &QPushButton::clicked, &dialog, []() {
+    const QString folder = QDir( QCoreApplication::applicationDirPath() ).filePath( "diagnostics" );
+    QDesktopServices::openUrl( QUrl::fromLocalFile( QFileInfo( folder ).isDir() ? folder : Settings::instance().logPath() ) );
+  });
+  auto refresh = [status]() {
+    const QVariantMap state = beeCore ? beeCore->networkDiagnostics() : QVariantMap();
+    QString interfaceName = QStringLiteral( "未选择有效网卡" );
+    const QHostAddress address = NetworkManager::instance().localHostAddress();
+    for( const QNetworkInterface& adapter : QNetworkInterface::allInterfaces() )
+      for( const QNetworkAddressEntry& entry : adapter.addressEntries() )
+        if( entry.ip() == address ) interfaceName = adapter.humanReadableName();
+    status->setText( QStringLiteral( "连接：%1\n网卡：%2\n本机地址：%3\n聊天监听 TCP：%4\n发现监听 UDP：%5\n已验证在线联系人：%6" )
+      .arg( beeCore && beeCore->isConnected() ? QStringLiteral( "已启动" ) : QStringLiteral( "未连接" ) )
+      .arg( interfaceName, address.isNull() ? QStringLiteral( "暂无" ) : address.toString() )
+      .arg( state.value( "tcpListening" ).toBool() ? QString::number( state.value( "tcpPort" ).toInt() ) :
+        QStringLiteral( "未监听（%1）" ).arg( state.value( "tcpError" ).toString() ) )
+      .arg( state.value( "udpListening" ).toBool() ? QString::number( state.value( "udpPort" ).toInt() ) :
+        QStringLiteral( "未监听（%1）" ).arg( state.value( "udpError" ).toString() ) )
+      .arg( state.value( "verifiedPeers" ).toInt() ) );
+  };
+  QTimer timer;
+  connect( &timer, &QTimer::timeout, &dialog, refresh );
+  timer.start( 1000 );
+  refresh();
+  QDialogButtonBox* buttons = new QDialogButtonBox( QDialogButtonBox::Close, &dialog );
+  buttons->button( QDialogButtonBox::Close )->setText( QStringLiteral( "关闭" ) );
+  connect( buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject );
+  layout->addWidget( buttons );
+  dialog.exec();
 }
 
 void GuiMain::showModernSavedChats()

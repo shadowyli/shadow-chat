@@ -22,6 +22,7 @@ public:
   QString accountFolder() const { return m_accountFolder; }
 signals:
   void stickerSelected(const QString& originalPath);
+  void importFinished(bool success);
 protected:
   virtual int execArchiveDialog( QFileDialog& dialog );
   virtual QString defaultArchiveDirectory() const;
@@ -30,6 +31,7 @@ private:
   static QString preferredArchiveDirectory( const QString& previous, const QString& downloads,
                                            const QString& documents, const QString& home );
   void chooseArchive();
+  void startArchiveImport(const QString&);
   void removeSelected();
   void chooseImages();
   void activateSticker( QListWidgetItem* );
@@ -42,5 +44,6 @@ private:
   QPointer<QWidget> m_anchor;
   bool m_recent;
   bool m_managing;
+  bool m_importing = false;
 };
 #endif

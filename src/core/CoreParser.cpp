@@ -273,9 +273,79 @@ void Core::parseChatMessage( const User& u, const Message& m )
     qWarning() << "Invalid flag found in chat message from" << qPrintable( u.path() );
 }
 
+namespace
+{
+struct PendingGroupRequest
+{
+  QString senderHash;
+  Message message;
+  bool hadGroup = false;
+  Group expectedGroup;
+};
+
+class PendingGroupRequests : public QObject
+{
+public:
+  explicit PendingGroupRequests( QObject* parent ) : QObject( parent ), retrying( false ), scheduled( false )
+  { setObjectName( "ShadowPendingGroupRequests" ); }
+  QMap<QString,PendingGroupRequest> requests;
+  PendingGroupRequest active;
+  bool retrying;
+  bool scheduled;
+};
+}
+
 void Core::parseGroupMessage( const User& u, const Message& m )
 {
+  PendingGroupRequests* pending = static_cast<PendingGroupRequests*>(
+    findChild<QObject*>( "ShadowPendingGroupRequests", Qt::FindDirectChildrenOnly ) );
+  if( !pending )
+  {
+    pending = new PendingGroupRequests( this );
+    connect( this, &Core::userChanged, pending, [this,pending]( const User& changed ) {
+      if( pending->scheduled || pending->requests.isEmpty() || !changed.isStatusConnected() ||
+          !Protocol::instance().isShadowChatUser( changed ) ) return;
+      pending->scheduled = true;
+      QTimer::singleShot( 0, pending, [this,pending]() {
+        pending->scheduled = false;
+        const QMap<QString,PendingGroupRequest> requests = pending->requests;
+        for( auto entry = requests.constBegin(); entry != requests.constEnd(); ++entry )
+        {
+          const Chat current = ChatManager::instance().findChatByPrivateId( entry.key(), true, ID_INVALID );
+          const Group& expected = entry.value().expectedGroup;
+          if( isGroupDissolved( entry.key() ) ||
+              (entry.value().hadGroup && (!current.isValid() || !current.hasUser( ID_LOCAL_USER ) ||
+                current.lastModified() != expected.lastModified() || current.name() != expected.name() ||
+                current.group().ownerHash() != expected.ownerHash() || current.usersId() != expected.usersId())) ||
+              (!entry.value().hadGroup && current.isValid()) )
+          { pending->requests.remove( entry.key() ); continue; }
+          const User sender = UserManager::instance().findUserByHash( entry.value().senderHash );
+          if( !sender.isStatusConnected() || !Protocol::instance().isShadowChatUser( sender ) ) continue;
+          bool ready = true;
+          for( const UserRecord& record : Protocol::instance().userRecordsFromGroupRequestMessage( entry.value().message ) )
+            if( !Protocol::instance().isShadowChatUser(
+                  Protocol::instance().recognizeUser( record, Settings::instance().userRecognitionMethod() ) ) )
+            { ready = false; break; }
+          if( !ready ) continue;
+          pending->active = entry.value();
+          pending->retrying = true;
+          pending->requests.remove( entry.key() );
+          parseGroupMessage( sender, entry.value().message );
+          pending->retrying = false;
+        }
+      } );
+    } );
+  }
   ChatMessageData cmd = Protocol::instance().dataFromChatMessage( m );
+  if( m.hasFlag( Message::Request ) && cmd.groupId().isEmpty() )
+  {
+    qWarning() << "ShadowChatNetwork: group-config-invalid" << u.networkAddress().hostAddress()
+               << u.networkAddress().hostPort() << 0;
+    return;
+  }
+  const bool retry = pending->retrying && u.hash() == pending->active.senderHash &&
+    m.id() == pending->active.message.id() && m.flags() == pending->active.message.flags() &&
+    m.data() == pending->active.message.data() && m.text() == pending->active.message.text();
 
   if( m.hasFlag( Message::Request ) )
   {
@@ -296,7 +366,7 @@ void Core::parseGroupMessage( const User& u, const Message& m )
     {
       if( cmd.groupLastModified().isValid() && group_chat.lastModified().isValid() )
       {
-        if( cmd.groupLastModified() <= group_chat.lastModified() )
+        if( cmd.groupLastModified() <= group_chat.lastModified() && !retry )
         {
 #ifdef BEEBEEP_DEBUG
           qDebug() << "Group chat request for" << qPrintable( cmd.groupName() ) << "from" << qPrintable( u.name() ) << "is skipped because it has old timestamp:" << qPrintable( cmd.groupLastModified().toString( Qt::ISODate ) );
@@ -338,6 +408,7 @@ void Core::parseGroupMessage( const User& u, const Message& m )
     }
 
     UserList ul;
+    QList<UserRecord> unresolved;
     ul.set( u ); // User from request
     ul.set( Settings::instance().localUser() );
 
@@ -361,7 +432,7 @@ void Core::parseGroupMessage( const User& u, const Message& m )
         }
 
         User user_tmp = UserManager::instance().findUserByNickname( User::nameFromPath( user_path ) );
-        if( user_tmp.isValid() )
+        if( user_tmp.isValid() && Protocol::instance().isShadowChatUser( user_tmp ) )
         {
           if( !user_tmp.isLocal() )
           {
@@ -390,10 +461,11 @@ void Core::parseGroupMessage( const User& u, const Message& m )
           if( group_member.isLocal() )
             continue;
 
-          if( !group_member.isValid() )
+          if( !group_member.isValid() || !Protocol::instance().isShadowChatUser( group_member ) )
           {
             qWarning() << "Skipped unknown member from group request because it has no verified ShadowChat identity:"
                        << qPrintable( ur.name() );
+            unresolved.append( ur );
             continue;
           }
 
@@ -404,6 +476,16 @@ void Core::parseGroupMessage( const User& u, const Message& m )
         qDebug() << "Group chat request for" << qPrintable( cmd.groupName() ) << "from" << qPrintable( u.name() ) << "makes this group private";
     }
 
+    if( !unresolved.isEmpty() &&
+        (!Protocol::instance().isShadowChatUser( u ) || u.hash().isEmpty() ||
+         m.text().toUtf8().size() + m.data().toUtf8().size() > 65536 ||
+         (pending->requests.size() >= 64 && !pending->requests.contains( cmd.groupId() ))) )
+    {
+      qWarning() << "ShadowChatNetwork: group-config-deferred-capacity" << u.networkAddress().hostAddress()
+                 << u.networkAddress().hostPort() << unresolved.size();
+      showMessage( QStringLiteral( "群成员验证等待队列不可用，请在成员连接后重试。" ), 5000 );
+      return;
+    }
     if( group_chat.isValid() )
     {
       qDebug() << "Group chat request for" << qPrintable( cmd.groupName() ) << "from" << qPrintable( u.name() ) << "is accepted with timestamp" << qPrintable( cmd.groupLastModified().toString( Qt::ISODate ) );
@@ -440,10 +522,25 @@ void Core::parseGroupMessage( const User& u, const Message& m )
       else
         qWarning() << "Unable to create group chat" << qPrintable( cmd.groupName() ) << "from user" << qPrintable( u.name() ) << "because members are minus than 2";
     }
+    if( !unresolved.isEmpty() )
+    {
+      PendingGroupRequest request;
+      request.senderHash = u.hash();
+      request.message = m;
+      const Chat current = ChatManager::instance().findChatByPrivateId( cmd.groupId(), true, ID_INVALID );
+      request.hadGroup = current.isValid();
+      if( request.hadGroup ) request.expectedGroup = current.group();
+      pending->requests.insert( cmd.groupId(), request );
+      qDebug() << "ShadowChatNetwork: group-config-deferred" << u.networkAddress().hostAddress()
+               << u.networkAddress().hostPort() << unresolved.size();
+    }
+    else
+      pending->requests.remove( cmd.groupId() );
   }
   else if( m.hasFlag( Message::Refused ) )
   {
     removeUserFromGroupChat( u, cmd.groupId() );
+    pending->requests.remove( cmd.groupId() );
   }
   else if( m.hasFlag( Message::Delete ) )
   {

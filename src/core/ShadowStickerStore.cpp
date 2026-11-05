@@ -4,7 +4,7 @@
 
 namespace {
 const qint64 MaxImageBytes = 16 * 1024 * 1024;
-const qint64 MaxArchiveBytes = 256 * 1024 * 1024;
+const qint64 MaxArchiveBytes = Q_INT64_C(1073741824);
 const int MaxEntries = 5000;
 bool fail( QString* error, const QString& value ) { if( error ) *error = value; return false; }
 bool safePath( const QString& supplied )
@@ -84,6 +84,9 @@ bool ShadowStickerStore::save( const QList<Sticker>& stickers, QString* error ) 
 bool ShadowStickerStore::addImages( const QList<QPair<QString,QByteArray> >& images, QString* error, int* added, int* duplicates )
 {
   if( error ) error->clear(); if( added ) *added = 0; if( duplicates ) *duplicates = 0;
+  if( !QDir().mkpath( m_folder ) ) return fail( error, QStringLiteral( "无法创建表情目录。" ) );
+  QLockFile lock( QDir( m_folder ).filePath( ".write.lock" ) );
+  if( !lock.tryLock() ) return fail( error, QStringLiteral( "表情库正在更新，请稍后再试。" ) );
   QList<Sticker> stickers; if( !load( &stickers, error ) ) return false;
   QSet<QString> existing; foreach( const Sticker& sticker, stickers ) existing.insert( sticker.id );
   if( !QDir().mkpath( m_folder ) ) return fail( error, QStringLiteral( "无法创建表情目录。" ) );
@@ -101,15 +104,22 @@ bool ShadowStickerStore::addImages( const QList<QPair<QString,QByteArray> >& ima
     if( !staged.open( QIODevice::WriteOnly ) || staged.write( image.second ) != image.second.size() ) return fail( error, QStringLiteral( "写入表情失败，请检查磁盘空间。" ) );
     staged.close(); pending.append( sticker ); existing.insert( id );
   }
+  if( !installStaged( stage.path(), pending, stickers, error ) ) return false;
+  if( added ) *added = pending.size(); if( duplicates ) *duplicates = duplicateCount;
+  return true;
+}
+
+bool ShadowStickerStore::installStaged( const QString& stage, const QList<Sticker>& pending,
+                                       QList<Sticker> stickers, QString* error )
+{
   QStringList installed;
   foreach( const Sticker& sticker, pending )
   {
-    if( QFile::exists( sticker.path ) || !QFile::rename( stage.filePath( sticker.id + "." + sticker.format ), sticker.path ) )
+    if( QFile::exists( sticker.path ) || !QFile::rename( QDir( stage ).filePath( sticker.id + "." + sticker.format ), sticker.path ) )
     { foreach( const QString& path, installed ) QFile::remove( path ); return fail( error, QStringLiteral( "无法保存表情，已有同名文件或目录权限不足。" ) ); }
     installed << sticker.path; stickers.append( sticker );
   }
   if( !save( stickers, error ) ) { foreach( const QString& path, installed ) QFile::remove( path ); return false; }
-  if( added ) *added = pending.size(); if( duplicates ) *duplicates = duplicateCount;
   return true;
 }
 
@@ -120,11 +130,14 @@ bool ShadowStickerStore::addFile( const QString& path, QString* error )
   return addImages( QList<QPair<QString,QByteArray> >() << qMakePair( QFileInfo( path ).fileName(), file.readAll() ), error, Q_NULLPTR, Q_NULLPTR );
 }
 
-bool ShadowStickerStore::importZip( const QString& path, QString* error, int* added, int* duplicates )
+bool ShadowStickerStore::importZip( const QString& path, QString* error, int* added, int* duplicates,
+                                   const std::function<void(int,int)>& progress )
 {
   if( error ) error->clear(); if( added ) *added = 0; if( duplicates ) *duplicates = 0;
   QFile archive( path );
-  if( !archive.open( QIODevice::ReadOnly ) || archive.size() > MaxArchiveBytes || archive.size() < 22 ) return fail( error, QStringLiteral( "无法读取ZIP，或压缩包超过256MB。" ) );
+  if( !archive.open( QIODevice::ReadOnly ) ) return fail( error, QStringLiteral( "无法读取ZIP，请检查文件权限。" ) );
+  if( archive.size() > MaxArchiveBytes ) return fail( error, QStringLiteral( "ZIP压缩包不能超过1GiB（1,073,741,824字节）。" ) );
+  if( archive.size() < 22 ) return fail( error, QStringLiteral( "ZIP损坏或为空。" ) );
   QZipReader reader( &archive ); const auto entries = reader.fileInfoList();
   if( reader.status() != QZipReader::NoError || entries.isEmpty() || entries.size() > MaxEntries ) return fail( error, QStringLiteral( "ZIP损坏、为空，或条目超过5000个。" ) );
   qint64 total = 0; QSet<QString> paths;
@@ -132,25 +145,54 @@ bool ShadowStickerStore::importZip( const QString& path, QString* error, int* ad
   {
     if( !safePath( entry.filePath ) || entry.isSymLink || !entry.isValid() || paths.contains( entry.filePath ) ) return fail( error, QStringLiteral( "ZIP含有不安全路径、链接或重复条目，已拒绝导入。" ) );
     paths.insert( entry.filePath );
-    if( entry.size < 0 || entry.size > MaxImageBytes || entry.size > MaxArchiveBytes - total ) return fail( error, QStringLiteral( "ZIP单项超过16MB或解压总量超过256MB。" ) );
+    if( entry.size < 0 ) return fail( error, QStringLiteral( "ZIP条目大小无效。" ) );
+    if( entry.size > MaxImageBytes ) return fail( error, QStringLiteral( "ZIP单项不能超过16MiB，请拆分过大的表情文件。" ) );
+    if( entry.size > MaxArchiveBytes - total ) return fail( error, QStringLiteral( "ZIP解压总量不能超过1GiB（1,073,741,824字节）。" ) );
     total += entry.size;
   }
-  QList<QPair<QString,QByteArray> > images;
+  if( !QDir().mkpath( m_folder ) ) return fail( error, QStringLiteral( "无法创建表情目录。" ) );
+  QLockFile lock( QDir( m_folder ).filePath( ".write.lock" ) );
+  if( !lock.tryLock() ) return fail( error, QStringLiteral( "表情库正在更新，请稍后再试。" ) );
+  QList<Sticker> stickers;
+  if( !load( &stickers, error ) ) return false;
+  QSet<QString> existing;
+  foreach( const Sticker& sticker, stickers ) existing.insert( sticker.id );
+  QTemporaryDir stage( QDir( m_folder ).filePath( ".import-XXXXXX" ) );
+  if( !stage.isValid() ) return fail( error, QStringLiteral( "无法创建导入临时目录。" ) );
+  QList<Sticker> pending;
+  int duplicateCount = 0, processed = 0, imageCount = 0;
   foreach( const QZipReader::FileInfo& entry, entries )
   {
+    if( progress ) progress( ++processed, entries.size() );
     if( !entry.isFile ) continue;
     const QString suffix = QFileInfo( entry.filePath ).suffix().toLower();
     if( !(QStringList() << "png" << "jpg" << "jpeg" << "gif" << "webp").contains( suffix ) ) continue;
     QByteArray bytes = reader.fileData( entry.filePath );
     if( reader.status() != QZipReader::NoError || bytes.size() != entry.size || crc32( bytes ) != entry.crc ) return fail( error, QStringLiteral( "ZIP图片损坏或校验失败，未导入任何表情。" ) );
-    images.append( qMakePair( entry.filePath, bytes ) );
+    ++imageCount;
+    QString format;
+    if( !imageFormat( bytes, &format, error ) ) return false;
+    const QString id = QString::fromLatin1( QCryptographicHash::hash( bytes, QCryptographicHash::Sha256 ).toHex() );
+    if( existing.contains( id ) ) { ++duplicateCount; continue; }
+    Sticker sticker;
+    sticker.id = id; sticker.format = format; sticker.name = QFileInfo( entry.filePath ).completeBaseName();
+    sticker.path = QDir( m_folder ).filePath( id + "." + format );
+    QFile staged( stage.filePath( id + "." + format ) );
+    if( !staged.open( QIODevice::WriteOnly ) || staged.write( bytes ) != bytes.size() || !staged.flush() )
+      return fail( error, QStringLiteral( "写入表情失败，请检查磁盘空间和权限。" ) );
+    staged.close();
+    pending.append( sticker ); existing.insert( id );
   }
-  if( images.isEmpty() ) return fail( error, QStringLiteral( "压缩包中没有PNG、JPG、GIF或WebP图片。" ) );
-  return addImages( images, error, added, duplicates );
+  if( !imageCount ) return fail( error, QStringLiteral( "压缩包中没有PNG、JPG、GIF或WebP图片。" ) );
+  if( !installStaged( stage.path(), pending, stickers, error ) ) return false;
+  if( added ) *added = pending.size(); if( duplicates ) *duplicates = duplicateCount;
+  return true;
 }
 
 bool ShadowStickerStore::remove( const QString& id, QString* error )
 {
+  QLockFile lock( QDir( m_folder ).filePath( ".write.lock" ) );
+  if( !lock.tryLock() ) return fail( error, QStringLiteral( "表情库正在更新，请稍后再试。" ) );
   if( error ) error->clear(); QList<Sticker> stickers; if( !load( &stickers, error ) ) return false;
   for( int i = 0; i < stickers.size(); ++i ) if( stickers[i].id == id )
   {

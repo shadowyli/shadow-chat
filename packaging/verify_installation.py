@@ -152,6 +152,11 @@ def seed_data(fixture):
     data = fixture/'documents/影聊/accounts'
     profile = data/'install-test@example.test'
     profile.mkdir(parents=True)
+    sticker_folder = profile/'stickers'
+    sticker_folder.mkdir()
+    (sticker_folder/'index.json').write_text('{"version":1,"items":[]}', encoding='utf-8')
+    (sticker_folder/'preservation-fixture.gif').write_bytes(b'GIF89a-synthetic-preservation-only')
+    (profile/'sticker-panel.ini').write_text('[General]\nrecent=synthetic-preservation-only\n', encoding='utf-8')
     fixtures = {
         'beebeep.dat': b'history-preservation-fixture',
         '.shadow-account.ini': b'[General]\nemail=install-test@example.test\nsalt=synthetic-only\npassword=synthetic-hash-only\n',
