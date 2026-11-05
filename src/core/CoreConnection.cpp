@@ -116,6 +116,7 @@ void Core::newPeerFound( const QHostAddress& sender_ip, int sender_port )
   {
     if( hasConnection( sender_ip, -1 ) )
     {
+      qDebug() << "ShadowChatNetwork: connection-policy-rejected-same-host" << sender_ip << sender_port;
       qDebug() << "New peer found" << qPrintable( sender_ip.toString() ) << "is already connected and blocked by prevent multiple connections option";
       return;
     }
@@ -133,6 +134,7 @@ void Core::newPeerFound( const QHostAddress& sender_ip, int sender_port )
   }
 
   qDebug() << "Connecting to new peer found" << qPrintable( sender_ip.toString() ) << sender_port;
+  qDebug() << "ShadowChatNetwork: connection-requested" << sender_ip << sender_port;
 
   Connection *c = createConnection();
   setupNewConnection( c );
@@ -189,6 +191,8 @@ void Core::setConnectionError( QAbstractSocket::SocketError se )
   if( c )
   {
     qWarning() << "Connection from" << qPrintable( c->networkAddress().toString() ) << "has an error:" << c->errorString() << "-" << static_cast<int>(se);
+    qWarning() << "ShadowChatNetwork: connection-error" << c->networkAddress().hostAddress()
+               << c->networkAddress().hostPort() << static_cast<int>(se);
     closeConnection( c );
   }
   else
@@ -468,6 +472,8 @@ void Core::checkUserAuthentication( const QByteArray& auth_byte_array )
   }
 
   UserManager::instance().addNewConnectedUserId( u.id() );
+  qDebug() << "ShadowChatNetwork: handshake-connected" << u.networkAddress().hostAddress()
+           << u.networkAddress().hostPort();
 }
 
 int Core::connectedUsers() const

@@ -37,6 +37,7 @@
 Protocol* Protocol::mp_instance = Q_NULLPTR;
 const QChar PROTOCOL_FIELD_SEPARATOR = QChar::ParagraphSeparator;  // 0x2029
 const QChar DATA_FIELD_SEPARATOR = QChar::LineSeparator; // 0x2028
+const QString SHADOWCHAT_IDENTITY_MARKER = QStringLiteral( "ShadowChat/1" );
 
 Protocol::Protocol()
   : m_id( ID_START ), m_fileShareListMessage( Message::Share, ID_SHARE_MESSAGE, "" )
@@ -287,18 +288,48 @@ QByteArray Protocol::pongMessage() const
 
 QByteArray Protocol::broadcastMessage( const QHostAddress& to_host_address ) const
 {
-  Message m( Message::Beep, ID_BEEP_MESSAGE, QString::number( Settings::instance().localUser().networkAddress().hostPort() ) );
+  QStringList text_fields;
+  text_fields << QString::number( Settings::instance().localUser().networkAddress().hostPort() );
+  text_fields << SHADOWCHAT_IDENTITY_MARKER;
+  Message m( Message::Beep, ID_BEEP_MESSAGE, text_fields.join( DATA_FIELD_SEPARATOR ) );
   QStringList sl;
   sl << to_host_address.toString();
+  sl << SHADOWCHAT_IDENTITY_MARKER;
   m.setData( sl.join( DATA_FIELD_SEPARATOR ) );
   return fromMessage( m, 1 );
+}
+
+bool Protocol::isShadowChatBroadcastMessage( const Message& m ) const
+{
+  if( !m.isValid() || m.type() != Message::Beep )
+    return false;
+
+  QStringList text_fields = m.text().split( DATA_FIELD_SEPARATOR, QString::KeepEmptyParts );
+  QStringList data_fields = m.data().split( DATA_FIELD_SEPARATOR, QString::KeepEmptyParts );
+  return text_fields.size() >= 2 && text_fields.at( 1 ) == SHADOWCHAT_IDENTITY_MARKER &&
+         data_fields.size() >= 2 && data_fields.at( 1 ) == SHADOWCHAT_IDENTITY_MARKER;
+}
+
+int Protocol::listenerPortFromBroadcastMessage( const Message& m, bool* ok ) const
+{
+  bool port_ok = false;
+  int listener_port = 0;
+  if( isShadowChatBroadcastMessage( m ) )
+  {
+    const QStringList text_fields = m.text().split( DATA_FIELD_SEPARATOR, QString::KeepEmptyParts );
+    listener_port = text_fields.first().toInt( &port_ok );
+    port_ok = port_ok && listener_port > 0 && listener_port <= MAX_SOCKET_PORT;
+  }
+  if( ok )
+    *ok = port_ok;
+  return port_ok ? listener_port : 0;
 }
 
 QHostAddress Protocol::hostAddressFromBroadcastMessage( const Message& m ) const
 {
   QHostAddress host_address;
 
-  if( m.data().isEmpty() )
+  if( !isShadowChatBroadcastMessage( m ) )
     return host_address;
 
   QStringList sl = m.data().split( DATA_FIELD_SEPARATOR );
@@ -361,6 +392,7 @@ QByteArray Protocol::helloMessage( const QString& public_key, bool encrypted_con
     data_list << QString( "" );
   data_list << Settings::instance().localUser().domainName();
   data_list << Settings::instance().localUser().localHostName();
+  data_list << SHADOWCHAT_IDENTITY_MARKER;
   Message m( Message::Hello, static_cast<VNumber>(Settings::instance().protocolVersion()), data_list.join( DATA_FIELD_SEPARATOR ) );
   if( !encrypted_connection )
     m.addFlag( Message::EncryptionDisabled );
@@ -368,6 +400,29 @@ QByteArray Protocol::helloMessage( const QString& public_key, bool encrypted_con
     m.addFlag( Message::Compressed );
   m.setData( Settings::instance().currentHash() );
   return fromMessage( m, 1 );
+}
+
+bool Protocol::isShadowChatHelloMessage( const Message& m ) const
+{
+  if( !m.isValid() || m.type() != Message::Hello )
+    return false;
+  const QStringList data_list = m.text().split( DATA_FIELD_SEPARATOR, QString::KeepEmptyParts );
+  return data_list.size() >= 16 && data_list.at( 15 ) == SHADOWCHAT_IDENTITY_MARKER;
+}
+
+QString Protocol::shadowChatIdentityMarker() const
+{
+  return SHADOWCHAT_IDENTITY_MARKER;
+}
+
+bool Protocol::isShadowChatNetworkAddress( const NetworkAddress& network_address ) const
+{
+  return network_address.info() == SHADOWCHAT_IDENTITY_MARKER;
+}
+
+bool Protocol::isShadowChatUser( const User& user ) const
+{
+  return user.isValid() && (user.isLocal() || isShadowChatNetworkAddress( user.networkAddress() ));
 }
 
 Message Protocol::writingMessage( const QString& chat_private_id ) const
@@ -583,6 +638,12 @@ User Protocol::recognizeUser( const UserRecord& ur, int user_recognition_method 
 
 User Protocol::createUser( const Message& hello_message, const QHostAddress& peer_address )
 {
+  if( !isShadowChatHelloMessage( hello_message ) )
+  {
+    qWarning() << "Rejected peer without a valid ShadowChat identity" << qPrintable( peer_address.toString() );
+    return User();
+  }
+
   /* Read User Field Data */
   QStringList sl = hello_message.text().split( DATA_FIELD_SEPARATOR );
   bool ok = false;
@@ -690,7 +751,9 @@ User Protocol::createUser( const Message& hello_message, const QHostAddress& pee
   /* Create User */
   User u( newId() );
   u.setName( user_name );
-  u.setNetworkAddress( NetworkAddress( peer_address, static_cast<quint16>(listener_port) ) );
+  NetworkAddress peer_network_address( peer_address, static_cast<quint16>(listener_port) );
+  peer_network_address.setInfo( SHADOWCHAT_IDENTITY_MARKER );
+  u.setNetworkAddress( peer_network_address );
   u.setStatus( user_status );
   u.setStatusChangedIn( status_changed_in );
   u.setStatusDescription( user_status_description );
@@ -734,9 +797,9 @@ QString Protocol::saveUserRecord( const UserRecord& ur, bool add_extras ) const
   QStringList sl;
   sl << ur.networkAddress().hostAddress().toString();
   sl << QString::number( ur.networkAddress().hostPort() );
+  sl << ur.networkAddress().info();
   if( add_extras )
   {
-    sl << ur.networkAddress().info();
     sl << ur.name();
     sl << ur.account();
     if( ur.isFavorite() )
@@ -1020,8 +1083,12 @@ QString Protocol::saveUser( const User& u ) const
 User Protocol::loadUser( const QString& s )
 {
   UserRecord ur = loadUserRecord( s );
-  if( ur.name().isEmpty() || !ur.networkAddressIsValid() )
+  if( ur.name().isEmpty() || !ur.networkAddressIsValid() || !isShadowChatNetworkAddress( ur.networkAddress() ) )
+  {
+    if( ur.networkAddressIsValid() && !isShadowChatNetworkAddress( ur.networkAddress() ) )
+      qWarning() << "Ignoring cached user without a verified ShadowChat identity:" << qPrintable( ur.networkAddress().toString() );
     return User();
+  }
 
   User u = createTemporaryUser( ur );
   if( !u.lastConnection().isValid() )
@@ -1216,9 +1283,10 @@ Group Protocol::loadGroup( const QString& group_data_saved )
 
       if( !u.isValid() )
       {
-        u = createTemporaryUser( ur );
-        qDebug() << "Group chat" << qPrintable( g.name() ) << "has created temporary user" << u.id() << qPrintable( u.name() );
-        UserManager::instance().setUser( u );
+        qWarning() << "Group chat" << qPrintable( g.name() )
+                   << "skipped cached member without a verified ShadowChat identity:"
+                   << qPrintable( user_nickname );
+        continue;
       }
 
       member_list.set( u );
@@ -2165,7 +2233,10 @@ Message Protocol::userRecordListToHiveMessage( const QList<UserRecord>& user_rec
 {
   QStringList msg_list;
   foreach( UserRecord ur, user_record_list )
-    msg_list.append( saveUserRecord( ur, false ) );
+  {
+    if( isShadowChatNetworkAddress( ur.networkAddress() ) )
+      msg_list.append( saveUserRecord( ur, false ) );
+  }
 
   Message m( Message::Hive, newId(), msg_list.join( PROTOCOL_FIELD_SEPARATOR ) );
   m.addFlag( Message::List );
@@ -2175,7 +2246,7 @@ Message Protocol::userRecordListToHiveMessage( const QList<UserRecord>& user_rec
 QList<UserRecord> Protocol::hiveMessageToUserRecordList( const Message& m ) const
 {
   QList<UserRecord> user_record_list;
-  if( m.type() != Message::Hive && !m.hasFlag( Message::List ) )
+  if( m.type() != Message::Hive || !m.hasFlag( Message::List ) )
     return user_record_list;
 
   QStringList sl = m.text().split( PROTOCOL_FIELD_SEPARATOR, QString::SkipEmptyParts );
@@ -2183,7 +2254,7 @@ QList<UserRecord> Protocol::hiveMessageToUserRecordList( const Message& m ) cons
   foreach( QString s, sl )
   {
     ur = loadUserRecord( s );
-    if( ur.networkAddressIsValid() )
+    if( ur.networkAddressIsValid() && isShadowChatNetworkAddress( ur.networkAddress() ) )
       user_record_list.append( ur );
   }
 

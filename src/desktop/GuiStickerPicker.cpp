@@ -3,6 +3,9 @@
 #include "ShadowStickerStore.h"
 #include "ShadowStyle.h"
 #include <QtWidgets>
+#include <QFutureInterface>
+#include <QFutureWatcher>
+#include <QThread>
 
 namespace
 {
@@ -357,6 +360,7 @@ void GuiStickerPicker::activateSticker(QListWidgetItem* item)
 
 void GuiStickerPicker::chooseImages()
 {
+  if(m_importing)return;
   hide();
   const QStringList files=QFileDialog::getOpenFileNames(parentWidget(),QStringLiteral("添加到表情"),QString(),QStringLiteral("图片 (*.png *.jpg *.jpeg *.gif *.webp)"));
   ShadowStickerStore store(m_accountFolder);
@@ -368,6 +372,7 @@ void GuiStickerPicker::chooseImages()
 
 void GuiStickerPicker::chooseArchive()
 {
+  if(m_importing)return;
   hide();
   QSettings preferences(QDir(m_accountFolder).filePath("sticker-panel.ini"),QSettings::IniFormat);
   const QString directory=preferredArchiveDirectory(preferences.value("importDirectory").toString(),
@@ -391,7 +396,52 @@ void GuiStickerPicker::chooseArchive()
       preferences.setValue("importDirectory",selected.absolutePath());
   }
   if(m_anchor)showAbove(m_anchor);else show();
-  if(!file.isEmpty())importArchive(file);
+  if(!file.isEmpty())startArchiveImport(file);
+}
+
+void GuiStickerPicker::startArchiveImport(const QString& path)
+{
+  if(m_importing)return;
+  struct ImportResult { bool success; QString error; int added=0; int duplicates=0; };
+  m_importing=true;
+  m_grid->setEnabled(false);
+  m_remove->setEnabled(false);
+  m_addMenu->setEnabled(false);
+  m_search->setEnabled(false);
+  m_status->setText(QStringLiteral("正在校验并导入表情包…"));
+  m_status->show();
+  QFutureInterface<ImportResult> progress;
+  progress.reportStarted();
+  progress.setProgressRange(0,100);
+  QFutureWatcher<ImportResult>* watcher=new QFutureWatcher<ImportResult>(this);
+  connect(watcher,&QFutureWatcher<ImportResult>::progressValueChanged,this,[this](int value) {
+    m_status->setText(QStringLiteral("正在校验并导入表情包… %1%").arg(value));
+    m_status->show();
+  });
+  connect(watcher,&QFutureWatcher<ImportResult>::finished,this,[this,watcher]() {
+    const ImportResult result=watcher->result();
+    m_importing=false;
+    m_grid->setEnabled(true);
+    m_addMenu->setEnabled(true);
+    m_search->setEnabled(true);
+    refresh();
+    m_status->setText(result.success?QStringLiteral("已添加 %1 个表情，跳过 %2 个重复项").arg(result.added).arg(result.duplicates):result.error);
+    m_status->show();
+    watcher->deleteLater();
+    emit importFinished(result.success);
+  });
+  watcher->setFuture(progress.future());
+  const QString account=m_accountFolder;
+  QThread* worker=QThread::create([account,path,progress]() mutable {
+    ImportResult result;
+    result.success=ShadowStickerStore(account).importZip(path,&result.error,&result.added,&result.duplicates,
+      [&progress](int processed,int total) { progress.setProgressValue(total?processed*99/total:0); });
+    progress.reportResult(result);
+    progress.reportFinished();
+  });
+  connect(worker,&QThread::finished,worker,&QObject::deleteLater);
+  connect(qApp,&QCoreApplication::aboutToQuit,worker,[worker]() { worker->wait(); },Qt::DirectConnection);
+  worker->start();
 }
 
 int GuiStickerPicker::execArchiveDialog(QFileDialog& dialog)
@@ -420,6 +470,7 @@ QString GuiStickerPicker::preferredArchiveDirectory(const QString& previous,cons
 
 bool GuiStickerPicker::importArchive(const QString& path)
 {
+  if(m_importing)return false;
   QString error;
   int added=0,duplicates=0;
   const bool imported=ShadowStickerStore(m_accountFolder).importZip(path,&error,&added,&duplicates);
@@ -431,6 +482,7 @@ bool GuiStickerPicker::importArchive(const QString& path)
 
 void GuiStickerPicker::removeSelected()
 {
+  if(m_importing)return;
   QListWidgetItem* item=m_grid->currentItem();
   if(!item)return;
   QString error;

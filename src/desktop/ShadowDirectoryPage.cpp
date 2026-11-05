@@ -1,6 +1,7 @@
 #include "ShadowDirectoryPage.h"
 #include "BeeUtils.h"
 #include "ChatManager.h"
+#include "Protocol.h"
 #include "Settings.h"
 #include "ShadowStyle.h"
 #include "UserManager.h"
@@ -358,7 +359,7 @@ void ShadowDirectoryPage::refresh()
   {
     for( const User& user : UserManager::instance().userList().toList() )
     {
-      if( !user.isValid() || user.isLocal() ) continue;
+      if( !user.isValid() || user.isLocal() || !Protocol::instance().isShadowChatUser( user ) ) continue;
       const QString name = user.name().trimmed().isEmpty() ? Bee::userNameToShow( user, false ) : user.name().trimmed();
       QStringList workgroups = user.workgroups();
       workgroups.removeAll( QString() );
