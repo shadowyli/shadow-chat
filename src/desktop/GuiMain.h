@@ -256,6 +256,7 @@ private slots:
   void showShadowSettings();
   void exportShadowWorkspace();
   void importShadowWorkspace();
+  void moveShadowSeat();
   void onModernSearchChanged( const QString& );
   void showModernListPanel();
 

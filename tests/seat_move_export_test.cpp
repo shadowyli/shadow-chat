@@ -1,4 +1,5 @@
 #include "ShadowWorkspaceArchive.h"
+#include "ShadowLocalAccounts.h"
 #include <QtGui/private/qzipreader_p.h>
 #include <cstdio>
 
@@ -70,5 +71,66 @@ int main( int argc, char** argv )
     !QFileInfo::exists( temporary.filePath( "new-session.ini" ) ), "non-ZIP target rejected" );
   check( readFile( metadata ) == credentials && readFile( history ) == messages && readFile( session ) == remembered,
     "export success and failure never logout, clear credentials or alter original records" );
+  const QString root = temporary.filePath( "accounts" );
+  ShadowLocalAccounts accounts( root );
+  check( accounts.create( account, "synthetic-password", &error ) &&
+    accounts.create( "other@example.test", "other-password", &error ), "two isolated accounts created" );
+  const QString accountProfile = accounts.profileFolder( account );
+  const QString accountMetadata = QDir( accountProfile ).filePath( ".shadow-account.ini" );
+  const QString accountHistory = QDir( accountProfile ).filePath( "beebeep.dat" );
+  const QString otherMetadata = QDir( accounts.profileFolder( "other@example.test" ) ).filePath( ".shadow-account.ini" );
+  const QByteArray otherCredentials = readFile( otherMetadata );
+  check( writeFile( accountHistory, messages ), "real account history seeded" );
+  accounts.rememberLogin( account );
+  const QString sessionPath = QDir( root ).filePath( "session.ini" );
+  const QByteArray sessionBefore = readFile( sessionPath );
+  const QByteArray credentialsBefore = readFile( accountMetadata );
+  check( !accounts.clearPasswordForSeatMove( "../outside", &error ) &&
+    readFile( sessionPath ) == sessionBefore && readFile( accountMetadata ) == credentialsBefore,
+    "invalid identity cannot change login or password" );
+  const QString movedArchive = temporary.filePath( "real-seat-move.zip" );
+  check( ShadowWorkspaceArchive::exportSeatMoveZip( accountProfile, movedArchive, &error ) &&
+    accounts.authenticate( account, "synthetic-password" ) && accounts.autoLoginEmail() == account,
+    "password remains usable until backup is committed" );
+  check( accounts.clearPasswordForSeatMove( account, &error ), "seat move clears credentials after successful backup" );
+  QSettings cleared( accountMetadata, QSettings::IniFormat );
+  check( !cleared.contains( "password" ) && !cleared.contains( "salt" ) &&
+    cleared.value( "email" ).toString() == account && accounts.exists( account ),
+    "password and salt removed but account identity remains" );
+  check( !accounts.autoLoginEnabled() && accounts.autoLoginEmail().isEmpty() &&
+    !accounts.authenticate( account, "synthetic-password" ),
+    "old password and automatic login are both disabled" );
+  check( !accounts.create( account, "replacement-password", &error ) &&
+    readFile( accountHistory ) == messages && readFile( otherMetadata ) == otherCredentials,
+    "anonymous recreation cannot unlock old history and other account is unchanged" );
+  accounts.rememberLogin( account );
+  accounts.setAutoLoginEnabled( true );
+  check( accounts.autoLoginEmail().isEmpty(), "stale or manually restored session cannot bypass cleared credentials" );
+  QZipReader movedReader( movedArchive );
+  const QString movedCore = temporary.filePath( "moved.beebeep-workspace" );
+  check( writeFile( movedCore, movedReader.fileData( "workspace.beebeep-workspace" ) ),
+    "backup can still be extracted after local password cleanup" );
+  movedReader.close();
+  ShadowLocalAccounts migrated( temporary.filePath( "new-computer" ) );
+  const QString migratedProfile = migrated.profileFolder( account );
+  QString restorePoint;
+  check( ShadowWorkspaceArchive::stageImport( migratedProfile, movedCore, &error ) &&
+    ShadowWorkspaceArchive::applyPendingImport( migratedProfile, &restorePoint, &error ) &&
+    migrated.setPassword( account, "new-computer-password", &error ) &&
+    migrated.authenticate( account, "new-computer-password" ) &&
+    readFile( QDir( migratedProfile ).filePath( "beebeep.dat" ) ) == messages,
+    "new computer restores original history and chooses a new password" );
+  check( accounts.setRecoveryPassword( "synthetic-recovery" ) &&
+    accounts.verifyRecoveryPassword( "synthetic-recovery" ) &&
+    accounts.setPassword( account, "recovered-password", &error ) &&
+    accounts.authenticate( account, "recovered-password" ),
+    "authorized local password recovery remains available" );
+  accounts.logout();
+  QFile sessionFile( sessionPath );
+  check( sessionFile.remove() && QDir().mkdir( sessionPath ), "invalid login target fixture created" );
+  const QByteArray recoveryCredentials = readFile( accountMetadata );
+  check( !accounts.clearPasswordForSeatMove( account, &error ) &&
+    readFile( accountMetadata ) == recoveryCredentials,
+    "login cleanup preflight failure never clears the password" );
   return failures ? 1 : 0;
 }

@@ -2017,6 +2017,9 @@ void GuiMain::createModernShell()
   QMenu* workspace_menu = more_menu->addMenu( ShadowStyle::actionIcon( QStringLiteral( "folder-open" ) ), QStringLiteral( "工作区与换机" ) );
   workspace_menu->addAction( QStringLiteral( "导出工作区…" ), this, SLOT( exportShadowWorkspace() ) );
   workspace_menu->addAction( QStringLiteral( "导入工作区…" ), this, SLOT( importShadowWorkspace() ) );
+  QAction* seat_move_action = more_menu->addAction( ShadowStyle::actionIcon( QStringLiteral( "archive" ) ),
+    QStringLiteral( "我要换座位…" ), this, SLOT( moveShadowSeat() ) );
+  seat_move_action->setObjectName( QStringLiteral( "ShadowSeatMoveAction" ) );
   QAction* auto_login_action = more_menu->addAction( QStringLiteral( "启动时自动登录" ) );
   auto_login_action->setCheckable( true );
   auto_login_action->setChecked( ShadowLocalAccounts().autoLoginEnabled() );
@@ -2755,6 +2758,61 @@ void GuiMain::exportShadowWorkspace()
 
   QMessageBox::information( this, QStringLiteral( "工作区已导出" ),
                             QStringLiteral( "个人资料、联系人、群聊、设置和聊天记录已保存。\n\n下载的附件、缓存、日志和插件没有包含在工作区中。" ) );
+}
+
+void GuiMain::moveShadowSeat()
+{
+  if( property("shadowSeatMoveBusy").toBool() ) return;
+  ShadowLocalAccounts accounts;
+  const QString profile = Settings::instance().dataFolder();
+  QSettings metadata(QDir(profile).filePath(".shadow-account.ini"),QSettings::IniFormat);
+  const QString email = ShadowLocalAccounts::normalizeEmail(metadata.value("email").toString());
+  const QString defaultName = ShadowWorkspaceArchive::seatMoveFileName(email,QDateTime::currentDateTime());
+  if( defaultName.isEmpty() ||
+      QFileInfo(profile).canonicalFilePath()!=QFileInfo(accounts.profileFolder(email)).canonicalFilePath() )
+  {
+    QMessageBox::warning(this,QStringLiteral("无法换座位"),QStringLiteral("当前账号目录校验失败，未导出或清除密码。"));
+    return;
+  }
+  if( !ShadowDialogStyle::confirm(this,QStringLiteral("我要换座位"),
+    QStringLiteral("先导出历史记录 ZIP，成功后清除本机此账号的密码与自动登录，再回到登录页。\n"
+      "本机历史保留，不删除账号。清理后在本机重登需负责人恢复密码，新电脑可从备份恢复并设置新密码。\n"
+      "ZIP 未加密，包含账号校验资料、聊天记录和设置，不含接收附件，请妥善保管。\n"
+      "当前收发会中断，取消或导出失败不会退出。"),
+    QStringLiteral("选择备份位置")) ) return;
+  const QString selected = QFileDialog::getSaveFileName(this,QStringLiteral("保存换座位历史记录备份"),
+    QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).filePath(defaultName),
+    QStringLiteral("历史记录压缩包 (*.zip)"));
+  if( selected.isEmpty() ) return;
+  const QString target = selected.endsWith(".zip",Qt::CaseInsensitive) ? selected : selected+QStringLiteral(".zip");
+  setProperty("shadowSeatMoveBusy",true);
+  QAction* action = findChild<QAction*>("ShadowSeatMoveAction");
+  if( action ) action->setEnabled(false);
+  QApplication::setOverrideCursor(Qt::WaitCursor);
+  QMetaObject::invokeMethod(beeCore,"saveUsersAndGroups",Qt::DirectConnection);
+  const bool saved = MessageManager::instance().saveMessages(true);
+  Settings::instance().save();
+  QString error;
+  const bool exported = saved && ShadowWorkspaceArchive::exportSeatMoveZip(profile,target,&error);
+  QApplication::restoreOverrideCursor();
+  setProperty("shadowSeatMoveBusy",false);
+  if( action ) action->setEnabled(true);
+  if( !exported )
+  {
+    QMessageBox::critical(this,QStringLiteral("换座位备份失败"),
+      saved ? error : QStringLiteral("聊天记录保存失败，未导出、未清除密码或退出。请检查磁盘空间和权限。"));
+    return;
+  }
+  if( !accounts.clearPasswordForSeatMove(email,&error) )
+  {
+    QMessageBox::critical(this,QStringLiteral("备份已导出，账号清理未完成"),error+QStringLiteral("\n\n备份位置：")+target);
+    return;
+  }
+  QMessageBox::information(this,QStringLiteral("换座位备份已完成"),
+    QStringLiteral("历史记录 ZIP 已保存，本机账号密码与自动登录已清除。\n"
+      "本机历史仍保留，关闭提示后回到登录页。\n\n备份位置：")+target);
+  qApp->setProperty("shadowRestartForLogin",true);
+  forceShutdown();
 }
 
 void GuiMain::importShadowWorkspace()

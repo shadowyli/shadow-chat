@@ -574,6 +574,9 @@ int main( int argc, char** argv )
   CHECK( checkedNavigation );
   QMenu* main_menu = window.findChild<QMenu*>( "ShadowMainMenu" );
   CHECK( main_menu );
+  QAction* seatMove = window.findChild<QAction*>( "ShadowSeatMoveAction" );
+  CHECK( seatMove && main_menu->actions().contains( seatMove ) &&
+    seatMove->text() == QStringLiteral( "我要换座位…" ) && seatMove->isEnabled() );
   QWidget* main_trigger = main_menu->parentWidget();
   CHECK( verifyMenu( main_menu, main_trigger, "main-menu" ) == 0 );
   main_menu->popup( main_trigger->mapToGlobal( QPoint( 0, main_trigger->height() ) ) );
