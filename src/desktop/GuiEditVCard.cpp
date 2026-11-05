@@ -140,10 +140,14 @@ GuiEditVCard::GuiEditVCard( QWidget *parent )
   QVBoxLayout* headerLayout = new QVBoxLayout( header );
   headerLayout->setContentsMargins( 18, 4, 18, 18 ); headerLayout->setSpacing( 14 );
   QHBoxLayout* avatarRow = new QHBoxLayout;
-  m_cardPhoto = new QLabel; m_cardPhoto->setObjectName( "profileCardAvatar" ); m_cardPhoto->setFixedSize( 64, 64 );
+  m_cardPhoto = new QToolButton( header );
+  m_cardPhoto->setObjectName( "profileCardAvatar" );
+  m_cardPhoto->setFixedSize( 64, 64 );
+  m_cardPhoto->setIconSize( QSize( 60, 60 ) );
+  m_cardPhoto->setCursor( Qt::PointingHandCursor );
+  m_cardPhoto->setAccessibleName( QStringLiteral( "更换头像" ) );
+  m_cardPhoto->setToolTip( QStringLiteral( "点击更换头像" ) );
   avatarRow->addWidget( m_cardPhoto );
-  QToolButton* editPhoto = profileAction( header, "profileEditPhoto", "pencil-simple", QStringLiteral( "更换头像" ) );
-  avatarRow->addWidget( editPhoto, 0, Qt::AlignBottom );
   avatarRow->addStretch();
   m_cardStatus = new QPushButton;
   m_cardStatus->setObjectName( QStringLiteral( "profileCardStatus" ) );
@@ -311,7 +315,7 @@ GuiEditVCard::GuiEditVCard( QWidget *parent )
   connect( editInfo, &QToolButton::clicked, this, [this]() { showProfileEditor( mp_teInfo ); } );
   connect( editPhone, &QToolButton::clicked, this, [this]() { showProfileEditor( mp_lePhone ); } );
   connect( editGroups, &QToolButton::clicked, this, &GuiEditVCard::editWorkgroupsInline );
-  connect( editPhoto, &QToolButton::clicked, this, &GuiEditVCard::changePhoto );
+  connect( m_cardPhoto, &QToolButton::clicked, this, &GuiEditVCard::changePhoto );
   connect( mp_leNickname, &QLineEdit::returnPressed, this, [this]() { finishInlineEdit( mp_leNickname ); } );
   connect( mp_lePhone, &QLineEdit::returnPressed, this, [this]() { finishInlineEdit( mp_lePhone ); } );
   connect( m_workgroupsEdit, &QLineEdit::returnPressed, this, [this]() { finishInlineEdit( m_workgroupsEdit ); } );
@@ -346,7 +350,10 @@ GuiEditVCard::GuiEditVCard( QWidget *parent )
     "QPushButton#profileCardStatus:hover{background:#CEDFF8;}"
     "QPushButton#profileCardStatus:focus{border-color:#2463EB;}"
     "QPushButton#profileCardStatus::menu-indicator{image:none;}"
-    "QToolButton#profileEditInfo,QToolButton#profileEditPhone,QToolButton#profileEditWorkgroups,QToolButton#profileEditPhoto,QToolButton#profileCopyEmail{padding:0;}"
+    "QToolButton#profileCardAvatar{background:transparent;border:1px solid transparent;border-radius:32px;padding:0;}"
+    "QToolButton#profileCardAvatar:hover{background:#D7E6FC;}"
+    "QToolButton#profileCardAvatar:focus{border-color:#2463EB;}"
+    "QToolButton#profileEditInfo,QToolButton#profileEditPhone,QToolButton#profileEditWorkgroups,QToolButton#profileCopyEmail{padding:0;}"
     "QLineEdit[profileInline=true]{background:#FFFFFF;padding:5px 8px;min-height:18px;border:1px solid #CFDAE8;border-radius:6px;}"
     "QPlainTextEdit[profileInline=true]{background:#FFFFFF;padding:5px 8px;border:1px solid #CFDAE8;border-radius:6px;}"
     "QLineEdit[profileInline=true]:focus,QPlainTextEdit[profileInline=true]:focus{border-color:#2463EB;}"
@@ -641,7 +648,7 @@ void GuiEditVCard::refreshCardPhoto()
   QPainterPath clip; clip.addEllipse( 0, 0, 64, 64 ); painter.setClipPath( clip );
   QPixmap scaled = source.scaled( 64, 64, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation );
   painter.drawPixmap( (64 - scaled.width()) / 2, (64 - scaled.height()) / 2, scaled ); painter.end();
-  m_cardPhoto->setPixmap( circle );
+  m_cardPhoto->setIcon( QIcon( circle ) );
 }
 
 void GuiEditVCard::loadVCard()

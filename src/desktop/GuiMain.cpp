@@ -1980,7 +1980,7 @@ void GuiMain::createModernShell()
   mp_modernMessagesButton->setObjectName( "ShadowNavButton" );
   mp_modernMessagesButton->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
   mp_modernMessagesButton->setText( QStringLiteral( "消息" ) );
-  mp_modernMessagesButton->setIcon( ShadowStyle::navigationIcon( QStringLiteral( "chats-circle" ) ) );
+  mp_modernMessagesButton->setIcon( ShadowStyle::navigationIcon( QStringLiteral( "chats-circle-fill" ) ) );
   mp_modernMessagesButton->setIconSize( QSize( 24, 24 ) );
   mp_modernMessagesButton->setToolButtonStyle( Qt::ToolButtonTextUnderIcon );
   mp_modernMessagesButton->setCheckable( true );
@@ -1993,7 +1993,7 @@ void GuiMain::createModernShell()
   mp_modernContactsButton->setObjectName( "ShadowNavButton" );
   mp_modernContactsButton->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
   mp_modernContactsButton->setText( QStringLiteral( "通讯录" ) );
-  mp_modernContactsButton->setIcon( ShadowStyle::navigationIcon( QStringLiteral( "users-three" ) ) );
+  mp_modernContactsButton->setIcon( ShadowStyle::navigationIcon( QStringLiteral( "users-three-fill" ) ) );
   mp_modernContactsButton->setIconSize( QSize( 24, 24 ) );
   mp_modernContactsButton->setToolButtonStyle( Qt::ToolButtonTextUnderIcon );
   mp_modernContactsButton->setCheckable( true );

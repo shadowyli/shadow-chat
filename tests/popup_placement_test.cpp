@@ -563,15 +563,49 @@ int main( int argc, char** argv )
     QColor( "#E8F0F4" ).rgb() );
   bool checkedNavigation = false;
   for( QToolButton* button : rail->findChildren<QToolButton*>( "ShadowNavButton" ) )
+  {
+    const QString glyph = button->text() == QStringLiteral( "消息" ) ? QStringLiteral( "chats-circle-fill" )
+      : QStringLiteral( "users-three-fill" );
+    const QImage source = QIcon( QStringLiteral( ":/images/shadowchat/icons/%1.svg" ).arg( glyph ) )
+      .pixmap( 64, 64 ).toImage();
+    CHECK( !source.isNull() );
+    for( QIcon::Mode mode : { QIcon::Normal, QIcon::Active } )
+      for( QIcon::State state : { QIcon::Off, QIcon::On } )
+      {
+        const QImage icon = button->icon().pixmap( QSize( 64, 64 ), mode, state ).toImage();
+        const QColor expected( state == QIcon::On ? "#DB6E67" : "#5F6B7A" );
+        int solidPixels = 0;
+        for( int vertical = 0; vertical < icon.height(); ++vertical )
+          for( int horizontal = 0; horizontal < icon.width(); ++horizontal )
+          {
+            const QColor pixel = icon.pixelColor( horizontal, vertical );
+            CHECK( pixel.alpha() == source.pixelColor( horizontal, vertical ).alpha() );
+            if( pixel.alpha() == 255 )
+            {
+              CHECK( pixel.rgb() == expected.rgb() );
+              ++solidPixels;
+            }
+          }
+        CHECK( solidPixels > 500 );
+      }
+    const QImage buttonPixels = button->grab().toImage();
+    const QColor textColor( button->isChecked() ? "#B83730" : "#5F6B7A" );
+    int textPixels = 0;
+    for( int vertical = buttonPixels.height()*2/3; vertical < buttonPixels.height(); ++vertical )
+      for( int horizontal = 0; horizontal < buttonPixels.width(); ++horizontal )
+        if( buttonPixels.pixelColor( horizontal, vertical ).rgb() == textColor.rgb() ) ++textPixels;
+    CHECK( textPixels > 5 );
     if( button->isChecked() )
     {
       const QImage pixels = button->grab().toImage();
       const qreal ratio = pixels.devicePixelRatio();
       CHECK( pixels.pixelColor( qRound( button->width()/2*ratio ), qRound( (button->height()-4)*ratio ) ).rgb() ==
-        QColor( "#FFF3F0" ).rgb() );
+        QColor( "#F8FBFC" ).rgb() );
       checkedNavigation = true;
     }
+  }
   CHECK( checkedNavigation );
+  std::puts( "PASS navigation uses fill glyphs, grey inactive icons/text and a pale white selected surface" );
   QMenu* main_menu = window.findChild<QMenu*>( "ShadowMainMenu" );
   CHECK( main_menu );
   QAction* seatMove = window.findChild<QAction*>( "ShadowSeatMoveAction" );

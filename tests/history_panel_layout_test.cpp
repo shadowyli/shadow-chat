@@ -1,6 +1,7 @@
 #include "BeeApplication.h"
 #include "ChatManager.h"
 #include "Core.h"
+#include "Protocol.h"
 #include "GuiSavedChat.h"
 #include "Random.h"
 #include "Settings.h"
@@ -159,14 +160,17 @@ int main( int argc, char** argv )
   User peer( 97321 );
   peer.setName( QStringLiteral( "测试同事" ) );
   peer.setHash( "history-layout-synthetic-peer" );
+  peer.setProtocolVersion( settings.protocolVersion() );
+  NetworkAddress address( QHostAddress::LocalHost, 47683 );
+  address.setInfo( Protocol::instance().shadowChatIdentityMarker() );
+  peer.setNetworkAddress( address );
   UserManager::instance().setUser( peer );
   const QDateTime base = QDateTime::currentDateTime().addSecs( -6000 );
   QString archive;
   for( int index = 0; index < 80; ++index )
     archive += record( index % 2 ? "Alice" : "Bob", base.addSecs( index * 60 ),
       QStringLiteral( "layout message %1 · 阅读位置与上下文保持" ).arg( index, 3, 10, QLatin1Char( '0' ) ) );
-  CHECK(argc>1);
-  const QString videoSource=QString::fromLocal8Bit(argv[1]);
+  const QString videoSource=argc>1?QString::fromLocal8Bit(argv[1]):qEnvironmentVariable("SHADOWCHAT_VIDEO_FIXTURE");
   CHECK(QFileInfo(videoSource).size()>1000);
   CHECK(QFile::copy(videoSource,temporary.filePath("sample.mp4")));
   const QString videoUrl=QUrl::fromLocalFile(temporary.filePath("sample.mp4")).toString();

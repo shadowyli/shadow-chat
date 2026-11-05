@@ -85,7 +85,7 @@ private:
   QStackedWidget* m_profilePages;
   bool m_resizingProfile = false;
   QLabel* m_cardNickname;
-  QLabel* m_cardPhoto;
+  QToolButton* m_cardPhoto;
   QLabel* m_cardInfo;
   QLabel* m_cardEmail;
   QLabel* m_cardPhone;

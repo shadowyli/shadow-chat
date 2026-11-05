@@ -36,6 +36,10 @@
 #include <QDesktopServices>
 #include "ShadowImageViewer.h"
 #include "ShadowStyle.h"
+#include "ShadowHistoryPresentation.h"
+#include "ShadowStickerMedia.h"
+#include "ShadowVideoPreview.h"
+#include "ShadowVideoCard.h"
 #include "ShadowDialogStyle.h"
 #include "UserManager.h"
 #include <QStyledItemDelegate>
@@ -498,8 +502,16 @@ GuiSavedChat::GuiSavedChat( QWidget* parent, bool embedded )
   mp_results->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
   mp_results->setToolTip(QString::fromUtf8("选择结果，在下方定位原始聊天；点击原文中的文件或链接打开。"));
   mp_results->setObjectName(QStringLiteral("ShadowHistoryResults"));
+  if( m_embedded )
+  {
+    mp_results->setFrameShape( QFrame::NoFrame );
+    mp_results->setStyleSheet( QStringLiteral(
+      "QListWidget#ShadowHistoryResults{background:white;border:0;border-radius:0;padding:0;outline:0;}"
+      "QListWidget#ShadowHistoryResults::item{border:0;padding:3px;}" ) );
+  }
   mp_results->setItemDelegate(new HistoryResultDelegate(mp_results));
   mp_results->installEventFilter(this);
+  mp_results->viewport()->installEventFilter(this);
   split->addWidget(mp_results);split->addWidget(mp_teSavedChat);split->setHandleWidth(12);
   if( m_embedded )
   {
@@ -697,6 +709,23 @@ int GuiSavedChat::historyRecordIndex( const QListWidgetItem* item ) const
 
 bool GuiSavedChat::eventFilter( QObject* watched, QEvent* event )
 {
+  if( watched == mp_results->viewport() && event->type() == QEvent::MouseButtonRelease &&
+      mp_categories->currentIndex() == 0 )
+  {
+    QMouseEvent* mouse = static_cast<QMouseEvent*>( event );
+    QListWidgetItem* item = mp_results->itemAt( mouse->pos() );
+    if( mouse->button() == Qt::LeftButton && historyRecordIndex( item ) >= 0 &&
+        !item->data( ThumbnailRole ).value<QPixmap>().isNull() )
+    {
+      const QRect area = mp_results->visualItemRect( item ).adjusted( 4, 2, -4, -2 );
+      const QRect thumbnail( area.left() + 49, area.top() + 36, 64, 64 );
+      if( thumbnail.contains( mouse->pos() ) )
+      {
+        const QUrl target( item->data( Qt::UserRole + 1 ).toString() );
+        QTimer::singleShot( 0, this, [this, target]() { checkAnchorClicked( target ); } );
+      }
+    }
+  }
   if( watched == mp_results && event->type() == QEvent::KeyPress && mp_categories->currentIndex() == 2 )
   {
     QKeyEvent* key = static_cast<QKeyEvent*>(event);
@@ -824,6 +853,12 @@ void GuiSavedChat::rebuildHistoryResults( bool resetReadingState )
   int resultCount=0;
   QString previousDay;
   QSet<QString> shownMedia;
+  QSet<QString> stickerMedia;
+  for( const HistoryRecord& record : m_records )
+    for( const QString& target : record.media )
+      if( record.html.contains( QStringLiteral( "<!--shadow-sticker-->" ) ) ||
+          shadowStoredSticker( QUrl( target ).toLocalFile(), Settings::instance().dataFolder() ) )
+        stickerMedia.insert( target );
   QList<int> recordOrder;
   for(int index=0;index<m_records.size();++index)recordOrder.append(index);
   std::stable_sort(recordOrder.begin(),recordOrder.end(),[this](int left,int right) {
@@ -844,7 +879,7 @@ void GuiSavedChat::rebuildHistoryResults( bool resetReadingState )
     if(!keyword.isEmpty() && !searchable.contains(keyword,Qt::CaseInsensitive)) continue;
     if(category==2) {
       QStringList uniqueTargets;
-      foreach(const QString& target,targets)if(!shownMedia.contains(target)){uniqueTargets<<target;shownMedia.insert(target);}
+      foreach(const QString& target,targets)if(!stickerMedia.contains(target)&&!shownMedia.contains(target)){uniqueTargets<<target;shownMedia.insert(target);}
       targets=uniqueTargets;if(targets.isEmpty())continue;
     }
     if(!r.timestamp.isValid()) ++unknown;
@@ -864,7 +899,7 @@ void GuiSavedChat::rebuildHistoryResults( bool resetReadingState )
         }
         QListWidgetItem* tile=new QListWidgetItem(mp_results);
         tile->setData(MediaRole,true);
-        const bool video=QStringList({"mp4","mov","avi","mkv","wmv"}).contains(file.suffix().toLower());
+        const bool video=ShadowVideoPreview::canPreview(QUrl(target));
         tile->setData(VideoRole,video);
         tile->setData(Qt::UserRole,i);tile->setData(Qt::UserRole+1,target);
         tile->setData(ResultKeyRole,m_recordKeys.at(i)+QLatin1Char('\n')+target);
@@ -892,7 +927,7 @@ void GuiSavedChat::rebuildHistoryResults( bool resetReadingState )
       detail=descriptions.join("\n");
     }
     if(category==3 && !r.text.isEmpty())detail=r.text+"\n"+detail;
-    if(detail.isEmpty() && !r.media.isEmpty()) detail=QString::fromUtf8("[图片和视频] %1").arg(QFileInfo(QUrl(r.media.first()).toLocalFile()).fileName());
+    if(detail.isEmpty() && !r.media.isEmpty()) detail=QStringLiteral("[图片和视频]");
     if(detail.size()>650) detail=detail.left(650)+QString::fromUtf8("…");
     const QString caption=heading+"\n"+detail;
     QListWidgetItem* item=new QListWidgetItem(caption,mp_results);
@@ -907,18 +942,7 @@ void GuiSavedChat::rebuildHistoryResults( bool resetReadingState )
         : r.timestamp.date()==QDate::currentDate().addDays(-1) ? QStringLiteral("昨天")
         : r.timestamp.toString("MM-dd");
       item->setData(TimeRole,time);
-      QString preview = detail;
-      if(category==0)
-      {
-        preview.remove(QRegularExpression("^\\s*\\d{4}-\\d{2}-\\d{2}\\s*"));
-        preview.remove(QRegularExpression("^\\s*\\[?\\d{1,2}:\\d{2}(?::\\d{2})?\\]?\\s*"));
-        if(!r.sender.isEmpty()&&preview.startsWith(r.sender))
-          preview=preview.mid(r.sender.size()).trimmed();
-        preview.remove(QRegularExpression("^\\s*\\(?\\d{4}-\\d{2}-\\d{2}[ T]\\d{1,2}:\\d{2}(?::\\d{2})?\\)?\\s*"));
-        if(preview.startsWith(":")||preview.startsWith(QStringLiteral("：")))preview=preview.mid(1).trimmed();
-        preview.remove(QChar::ObjectReplacementCharacter);
-        if(!r.media.isEmpty())preview=QStringLiteral("[图片和视频] ")+preview;
-      }
+      const QString preview = category==0 ? shadowHistoryMessagePreview(r) : detail;
       item->setData(PreviewRole,preview);
       for(const User& user : UserManager::instance().userList().toList())
         if(Bee::userNameToShow(user,true)==r.sender)
@@ -928,10 +952,16 @@ void GuiSavedChat::rebuildHistoryResults( bool resetReadingState )
         }
       if(category==0&&!r.media.isEmpty())
       {
-        QImageReader reader(QUrl(r.media.first()).toLocalFile());
-        const QSize sourceSize=reader.size();
-        if(sourceSize.isValid())reader.setScaledSize(sourceSize.scaled(128,128,Qt::KeepAspectRatioByExpanding));
-        item->setData(ThumbnailRole,QPixmap::fromImage(reader.read()));
+        item->setData( Qt::UserRole + 1, r.media.first() );
+        if( ShadowVideoPreview::canPreview( QUrl( r.media.first() ) ) )
+          item->setData( ThumbnailRole, shadowVideoCardPixmap( QSize( 128, 128 ) ) );
+        else
+        {
+          QImageReader reader(QUrl(r.media.first()).toLocalFile());
+          const QSize sourceSize=reader.size();
+          if(sourceSize.isValid())reader.setScaledSize(sourceSize.scaled(128,128,Qt::KeepAspectRatioByExpanding));
+          item->setData(ThumbnailRole,QPixmap::fromImage(reader.read()));
+        }
       }
     }
   }

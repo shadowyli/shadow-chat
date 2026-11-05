@@ -70,6 +70,10 @@ int main( int argc, char** argv )
   CHECK( dialog.findChild<QLabel*>( "profileCardEmail" )->text() == "inline@example.test" );
   CHECK( !dialog.findChild<QPushButton*>( "mp_pbRegenerateHash" )->isVisible() );
   CHECK( !dialog.findChild<QWidget*>( "profileEditor" )->isVisible() );
+  QToolButton* avatar = dialog.findChild<QToolButton*>( "profileCardAvatar" );
+  CHECK( avatar && !avatar->icon().isNull() && avatar->focusPolicy() != Qt::NoFocus );
+  CHECK( avatar->accessibleName() == QStringLiteral( "更换头像" ) && avatar->cursor().shape() == Qt::PointingHandCursor );
+  CHECK( !dialog.findChild<QToolButton*>( "profileEditPhoto" ) );
   const QString proof = qEnvironmentVariable( "SHADOWCHAT_UI_PROOF_DIR", QDir::currentPath() );
   QDir().mkpath( proof );
   CHECK( dialog.grab().save( QDir( proof ).filePath( "inline-profile-card.png" ) ) );
@@ -163,6 +167,96 @@ int main( int argc, char** argv )
   noDate.findChild<QPushButton*>( "closeMyProfile" )->click();
   CHECK( !noDate.vCard().birthday().isValid() && noDate.vCard().phoneNumber() == "7777" );
   std::puts( "PASS field validation stays inline, workgroup errors keep original data, missing birthday stays missing" );
+  const QString replacementPath = folder.filePath( "replacement.png" );
+  QPixmap replacement( 96, 96 );
+  replacement.fill( QColor( "#32B891" ) );
+  CHECK( replacement.save( replacementPath ) );
+  const bool nativeDisabled = QApplication::testAttribute( Qt::AA_DontUseNativeDialogs );
+  const bool nativeDialogs = settings.useNativeDialogs();
+  settings.setUseNativeDialogs( false );
+  QApplication::setAttribute( Qt::AA_DontUseNativeDialogs, true );
+  for( const QString& operation : QStringList{ "picker-cancel", "draft-cancel", "save" } )
+  {
+    GuiEditVCard changing( &host );
+    changing.setUser( user );
+    changing.show();
+    changing.raise();
+    changing.activateWindow();
+    QTest::qWait( 80 );
+    QToolButton* target = changing.findChild<QToolButton*>( "profileCardAvatar" );
+    CHECK( target );
+    CHECK( target->isVisible() && target->isEnabled() );
+    QSignalSpy clicks( target, &QToolButton::clicked );
+    const QImage previousIcon = target->icon().pixmap( QSize( 60, 60 ) ).toImage();
+    bool handled = false;
+    QPointer<QFileDialog> openedPicker;
+    QTimer driver;
+    QObject::connect( &driver, &QTimer::timeout, &changing, [&]() {
+      QFileDialog* picker = changing.findChild<QFileDialog*>();
+      if( !picker )
+        for( QWidget* widget : QApplication::topLevelWidgets() )
+          if( QFileDialog* candidate = qobject_cast<QFileDialog*>( widget ) )
+            if( candidate->isVisible() ) picker = candidate;
+      if( !picker ) return;
+      openedPicker = picker;
+      if( operation == "picker-cancel" )
+      {
+        driver.stop();
+        picker->reject();
+        handled = true;
+      }
+      else
+      {
+        QLineEdit* filename = picker->findChild<QLineEdit*>( "fileNameEdit" );
+        if( !filename ) return;
+        driver.stop();
+        filename->setText( QDir::toNativeSeparators( replacementPath ) );
+        handled = QMetaObject::invokeMethod( picker, "accept", Qt::DirectConnection ) &&
+          picker->result() == QDialog::Accepted;
+      }
+    } );
+    QTimer guard;
+    guard.setSingleShot( true );
+    QObject::connect( &guard, &QTimer::timeout, &changing, [&]() {
+      QWidget* modal = QApplication::activeModalWidget();
+      std::fprintf( stderr, "FAIL avatar picker timed out operation=%s clicks=%d handled=%d picker=%d modal=%s\n",
+        qPrintable( operation ), clicks.count(), handled, !openedPicker.isNull(), modal ? modal->metaObject()->className() : "(none)" );
+      std::exit( 1 );
+    } );
+    driver.start( 25 );
+    guard.start( 5000 );
+    if( operation == "save" ) QTest::keyClick( target, Qt::Key_Space );
+    else if( operation == "draft-cancel" ) target->click();
+    else QTest::mouseClick( target, Qt::LeftButton );
+    driver.stop();
+    guard.stop();
+    CHECK( handled && changing.isVisible() && changing.vCard().photo().toImage() == card.photo().toImage() );
+    CHECK( changing.findChild<QStackedWidget*>( "ShadowProfilePages" )->currentIndex() == 0 );
+    if( operation == "picker-cancel" )
+    {
+      CHECK( target->icon().pixmap( QSize( 60, 60 ) ).toImage() == previousIcon );
+      CHECK( changing.findChild<QPushButton*>( "closeMyProfile" )->text() == QStringLiteral( "完成" ) );
+      changing.reject();
+    }
+    else if( operation == "draft-cancel" )
+    {
+      CHECK( target->icon().pixmap( QSize( 60, 60 ) ).toImage() != previousIcon );
+      CHECK( changing.findChild<QPushButton*>( "closeMyProfile" )->text() == QStringLiteral( "保存" ) );
+      CHECK( changing.grab().save( QDir( proof ).filePath( "clickable-avatar-draft.png" ) ) );
+      changing.findChild<QPushButton*>( "cancelInlineProfile" )->click();
+      CHECK( changing.vCard().photo().toImage() == card.photo().toImage() );
+    }
+    else
+    {
+      changing.findChild<QPushButton*>( "closeMyProfile" )->click();
+      CHECK( changing.result() == QDialog::Accepted && changing.vCard().photo().toImage() == replacement.toImage() );
+      CHECK( changing.vCard().info() == card.info() && changing.vCard().birthday() == card.birthday() );
+    }
+    CHECK( settings.localUser().vCard().photo().toImage() == card.photo().toImage() );
+  }
+  QApplication::setAttribute( Qt::AA_DontUseNativeDialogs, nativeDisabled );
+  settings.setUseNativeDialogs( nativeDialogs );
+  std::puts( "PASS avatar click/Space opens picker without a pencil; picker cancel, draft cancel and save preserve profile boundaries" );
   std::puts( "ALL INLINE PROFILE CHECKS PASSED" );
   return 0;
 }

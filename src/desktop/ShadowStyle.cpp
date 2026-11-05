@@ -15,7 +15,7 @@ namespace
 {
   const QColor kTextSecondary( "#5F6B7A" );
   const QColor kBrand( "#2563EB" );
-  const QColor kNavIcon( "#E93D34" );
+  const QColor kNavIcon( "#5F6B7A" );
   const QColor kNavIconActive( "#DB6E67" );
 
   QString iconResourcePath( const QString& name )
@@ -57,6 +57,7 @@ QPixmap ShadowStyle::tintedPixmap( const QString& resource_path, const QSize& si
     return source;
 
   QPixmap tinted( source.size() );
+  tinted.setDevicePixelRatio( source.devicePixelRatio() );
   tinted.fill( Qt::transparent );
   QPainter painter( &tinted );
   painter.drawPixmap( 0, 0, source );
@@ -149,8 +150,8 @@ QString ShadowStyle::applicationStyleSheet()
     "QLabel#ShadowBrandName { color: #526174; font-size: 14px; font-weight: 600; padding-bottom: 4px; }"
     "QToolButton#ShadowNavButton { color: #5F6B7A; background: transparent; border: 1px solid transparent; border-radius: 10px; padding: 8px 4px; min-height: 48px; }"
     "QToolButton#ShadowNavButton:hover { background: #F4F8FA; }"
-    "QToolButton#ShadowNavButton:checked { background: #FFF3F0; color: #B83730; font-weight: 600; }"
-    "QToolButton#ShadowNavButton:checked:hover { background: #FCEBE7; }"
+    "QToolButton#ShadowNavButton:checked { background: #F8FBFC; color: #B83730; font-weight: 600; }"
+    "QToolButton#ShadowNavButton:checked:hover { background: #FFFFFF; }"
     "QToolButton#ShadowNavButton:focus { border: 1px solid #E93D34; }"
     "QToolButton#ShadowNavButton::menu-indicator { image: none; }"
     "QWidget#ShadowListPanel { background: #F2F7FA; border-right: 1px solid #E3E8F0; }"
