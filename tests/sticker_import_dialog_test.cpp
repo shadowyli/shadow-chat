@@ -100,6 +100,7 @@ private slots:
         return QDialog::Accepted;
       };
       picker.chooseArchive();
+      QTRY_VERIFY(!picker.m_importing);
       QVERIFY(picker.findChild<QLabel*>("StickerStatus")->text().contains(QStringLiteral("ZIP")));
       QVERIFY(!QFileInfo::exists(workspace.filePath("stickers")));
     }
@@ -155,6 +156,9 @@ private slots:
     QToolButton anchor(&owner);
     anchor.setGeometry(350,440,30,30);
     owner.show();
+    owner.raise();
+    owner.activateWindow();
+    QTest::qWait(80);
     QCoreApplication::processEvents();
     GuiStickerPicker picker(workspace.path(),&owner);
     picker.showAbove(&anchor);
@@ -171,7 +175,10 @@ private slots:
       initialScreen.x(),initialScreen.y(),initialScreen.width(),initialScreen.height(),picker.devicePixelRatioF());
     const QString proofDirectory=qEnvironmentVariable("SHADOWCHAT_UI_PROOF_DIR");
     if(!proofDirectory.isEmpty())
+    {
+      QVERIFY(QDir().mkpath(proofDirectory));
       QVERIFY(picker.grab().save(proofDirectory+"/anchored-popup.png"));
+    }
     QCOMPARE(picker.x()+picker.width()/2,initialAnchor.center().x());
     QCOMPARE(picker.y()+picker.height()+6,anchor.mapToGlobal(QPoint()).y());
     QVERIFY(initialScreen.contains(initialFrame));
@@ -249,7 +256,12 @@ private slots:
       if(!dialog.selectedFiles().contains(archive))return QDialog::Rejected;
       return QDialog::Accepted;
     };
+    QSignalSpy imported(&picker,&GuiStickerPicker::importFinished);
     picker.chooseArchive();
+    QVERIFY(picker.m_importing);
+    picker.chooseArchive();
+    QTRY_COMPARE(imported.count(),1);
+    QVERIFY(imported.first().first().toBool());
     QListWidget* grid=picker.findChild<QListWidget*>("StickerGrid");
     QVERIFY2(grid->count()==2,qPrintable(picker.findChild<QLabel*>("StickerStatus")->text()));
     QVERIFY(grid->item(1)->text().isEmpty());
@@ -289,6 +301,9 @@ private slots:
     QToolButton anchor(&owner);
     anchor.setGeometry(350,440,30,30);
     owner.show();
+    owner.raise();
+    owner.activateWindow();
+    QTest::qWait(80);
     QCoreApplication::processEvents();
     GuiStickerPicker picker(workspace.path(),&owner);
     QListWidget* grid=picker.findChild<QListWidget*>("StickerGrid");

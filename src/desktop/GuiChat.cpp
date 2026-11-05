@@ -66,13 +66,23 @@ bool deliveryStatusNotice( const QString& html, int type )
 {
   if( type != ChatMessage::Other && type != ChatMessage::UserInfo && type != ChatMessage::System )
     return false;
+  QTextDocument document;
+  document.setHtml( html );
+  const QString plain = document.toPlainText().simplified();
+  if( QRegularExpression( QStringLiteral(
+      "^消息[“\"].*[”\"]\\s*[：:]\\s*已送达\\s*\\d+\\s*/\\s*\\d+\\s*人[。.!]?$" ) ).match( plain ).hasMatch() )
+    return true;
+  if( QRegularExpression( QStringLiteral(
+      "失败|无法|未能|错误|未送达|未收到|无人收到|不能|拒绝|取消|"
+      "\\b(?:fail(?:ed|ure)?|unable|cannot|error|incorrect|refused|rejected|cancelled|canceled)\\b|"
+      "\\b(?:could not|will not be sent|not (?:been )?(?:sent|delivered|received)|nobody has received)\\b" ),
+      QRegularExpression::CaseInsensitiveOption ).match( plain ).hasMatch() )
+    return false;
   if( html.contains( QStringLiteral( "<!--shadow-delivery-notice-->" ) ) )
     return true;
   if( html.contains( QStringLiteral( "unsent-message.png" ), Qt::CaseInsensitive ) ||
       html.contains( QStringLiteral( "unsent-message.svg" ), Qt::CaseInsensitive ) )
     return true;
-  QTextDocument document;
-  document.setHtml( html );
   return html.contains( IconManager::instance().iconPath( "unsent-message.png" ) ) &&
     document.toPlainText().contains( QRegularExpression( QStringLiteral(
       "The (?:voice )?message will be delivered to |Offline messages? (?:will be )?sent to |"
@@ -829,7 +839,7 @@ bool GuiChat::messageCanBeShowed( const ChatMessage& cm )
 {
   if( m_modernMode && cm.isHeader() )
     return false;
-  if( m_modernMode && deliveryStatusNotice( cm.message(), cm.type() ) )
+  if( m_modernMode && cm.isFromSystem() && deliveryStatusNotice( cm.message(), cm.type() ) )
     return false;
   if( m_chatId == ID_DEFAULT_CHAT && Settings::instance().showOnlyMessagesInDefaultChat() )
     return cm.isChatActivity() && !Settings::instance().chatMessageFilter().testBit( static_cast<int>( cm.type() ) );

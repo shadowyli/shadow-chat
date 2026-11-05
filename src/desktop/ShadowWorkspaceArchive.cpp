@@ -9,6 +9,10 @@
 
 #include <QCryptographicHash>
 #include <QSaveFile>
+#include <QBuffer>
+#include <QLockFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 
 namespace
@@ -74,6 +78,151 @@ bool ShadowWorkspaceArchive::exportWithAttachments( const QString& data_folder, 
   const QString core = QDir( temporary.path() ).filePath( QStringLiteral( "core.workspace" ) );
   return exportWorkspace( data_folder, core, error_message ) &&
          ShadowAttachmentBundle::write( core, attachment_folder, archive_path, error_message );
+}
+
+QString ShadowWorkspaceArchive::seatMoveFileName( const QString& account, const QDateTime& timestamp )
+{
+  const QString normalized = account.trimmed().toLower();
+  const QRegularExpression address( QStringLiteral( "^[a-z0-9][a-z0-9._+-]*@[a-z0-9][a-z0-9.-]*\\.[a-z]{2,}$" ) );
+  if( normalized.size() > 180 || !address.match( normalized ).hasMatch() || !timestamp.isValid() )
+    return QString();
+  return QStringLiteral( "影聊_换座位历史记录_%1_%2.zip" )
+    .arg( normalized, timestamp.toString( QStringLiteral( "yyyyMMdd_HHmmss" ) ) );
+}
+
+bool ShadowWorkspaceArchive::exportSeatMoveZip( const QString& data_folder, const QString& archive_path, QString* error_message )
+{
+  if( error_message ) error_message->clear();
+  auto fail = [&]( const QString& message ) { setError( error_message, message ); return false; };
+  const QString profile = QFileInfo( data_folder ).canonicalFilePath();
+  const QFileInfo target( archive_path );
+  if( target.suffix().compare( QStringLiteral( "zip" ), Qt::CaseInsensitive ) != 0 )
+    return fail( QStringLiteral( "换座位备份需使用 .zip 文件名。" ) );
+  const QString parent = QFileInfo( target.absolutePath() ).canonicalFilePath();
+  const Qt::CaseSensitivity sensitivity =
+#ifdef Q_OS_WIN
+    Qt::CaseInsensitive;
+#else
+    Qt::CaseSensitive;
+#endif
+  if( profile.isEmpty() || parent.isEmpty() || archive_path.isEmpty() ||
+      parent.compare( profile, sensitivity ) == 0 ||
+      parent.startsWith( profile + QLatin1Char( '/' ), sensitivity ) )
+    return fail( QStringLiteral( "请将换座位备份保存到账号目录之外的已有文件夹。" ) );
+  QLockFile lock( target.absoluteFilePath() + QStringLiteral( ".seat-export.lock" ) );
+  if( !lock.tryLock() ) return fail( QStringLiteral( "这个备份位置正在写入，请选择其他名称。" ) );
+  if( target.exists() || target.isSymLink() )
+    return fail( QStringLiteral( "备份文件已存在，不会覆盖，请选择其他名称。" ) );
+  const QString metadataPath = QDir( profile ).filePath( QStringLiteral( ".shadow-account.ini" ) );
+  if( !QFileInfo::exists( metadataPath ) ) return fail( QStringLiteral( "无法识别当前账号，尚未导出。" ) );
+  QSettings account( metadataPath, QSettings::IniFormat );
+  const QString email = account.value( "email" ).toString().trimmed().toLower();
+  const QDateTime now = QDateTime::currentDateTime();
+  if( seatMoveFileName( email, now ).isEmpty() )
+    return fail( QStringLiteral( "当前账号名无效，尚未导出。" ) );
+  QTemporaryDir temporary;
+  if( !temporary.isValid() ) return fail( QStringLiteral( "无法创建备份临时目录。" ) );
+  const QString corePath = temporary.filePath( QStringLiteral( "workspace.beebeep-workspace" ) );
+  if( !exportWorkspace( profile, corePath, error_message ) ) return false;
+  QString archivedEmail;
+  if( !archiveEmail( corePath, &archivedEmail, error_message ) || archivedEmail != email )
+    return fail( QStringLiteral( "备份账号校验失败，原账号与登录状态未改变。" ) );
+  struct ZipInput
+  {
+    QByteArray name;
+    QString path;
+    QByteArray bytes;
+    quint32 crc = 0, size = 0, offset = 0;
+  };
+  QJsonObject metadata;
+  metadata.insert( "formatVersion", 1 );
+  metadata.insert( "purpose", "seat-move-history" );
+  metadata.insert( "account", email );
+  metadata.insert( "createdAt", now.toString( Qt::ISODate ) );
+  metadata.insert( "workspace", "workspace.beebeep-workspace" );
+  metadata.insert( "attachmentsIncluded", false );
+  metadata.insert( "encrypted", false );
+  QList<ZipInput> inputs;
+  ZipInput workspace;
+  workspace.name = "workspace.beebeep-workspace"; workspace.path = corePath; inputs.append( workspace );
+  ZipInput manifest;
+  manifest.name = "manifest.json"; manifest.bytes = QJsonDocument( metadata ).toJson(); inputs.append( manifest );
+  ZipInput instructions;
+  instructions.name = "README.txt";
+  instructions.bytes = QStringLiteral(
+    "影聊换座位历史备份\n账号：%1\n\n"
+    "解压后，在新电脑影聊中选择“工作区与换机 → 导入工作区”，导入 workspace.beebeep-workspace。\n"
+    "包含账号验证资料、聊天记录和设置，不包含收到的图片/文件附件；没有包含明文密码。\n"
+    "备份未加密，请妥善保管。导出本身不退出账号、不修改密码、不删除原记录。\n" ).arg( email ).toUtf8();
+  inputs.append( instructions );
+  auto updateCrc = []( quint32 checksum, const QByteArray& bytes ) {
+    quint32 table[256];
+    for( quint32 index = 0; index < 256; ++index )
+    {
+      quint32 value = index;
+      for( int bit = 0; bit < 8; ++bit ) value = (value >> 1) ^ ((value & 1) ? 0xedb88320U : 0U);
+      table[index] = value;
+    }
+    for( unsigned char byte : bytes ) checksum = table[(checksum ^ byte) & 255] ^ (checksum >> 8);
+    return checksum;
+  };
+  QSaveFile output( target.absoluteFilePath() );
+  output.setDirectWriteFallback( false );
+  if( !output.open( QIODevice::WriteOnly ) ) return fail( QStringLiteral( "无法创建备份文件，请检查保存权限。" ) );
+  QDataStream stream( &output );
+  stream.setByteOrder( QDataStream::LittleEndian );
+  const quint16 time = quint16( (now.time().hour() << 11) | (now.time().minute() << 5) | (now.time().second()/2) );
+  const quint16 date = quint16( ((qBound( 1980, now.date().year(), 2107 )-1980) << 9) |
+    (now.date().month() << 5) | now.date().day() );
+  for( ZipInput& entry : inputs )
+  {
+    QFile file( entry.path );
+    QBuffer buffer( &entry.bytes );
+    QIODevice* input = entry.path.isEmpty() ? static_cast<QIODevice*>( &buffer ) : static_cast<QIODevice*>( &file );
+    if( !input->open( QIODevice::ReadOnly ) || input->size() < 0 ||
+        quint64( input->size() ) > ShadowWorkspaceMaxArchiveSize )
+      return fail( QStringLiteral( "备份条目无法读取或超过大小限制。" ) );
+    entry.size = quint32( input->size() );
+    quint32 crc = 0xffffffffU;
+    qint64 read = 0;
+    while( !input->atEnd() )
+    {
+      const QByteArray bytes = input->read( 1024*1024 );
+      if( bytes.isEmpty() ) return fail( QStringLiteral( "读取备份失败，原记录未改变。" ) );
+      read += bytes.size(); crc = updateCrc( crc, bytes );
+    }
+    if( read != entry.size || !input->seek( 0 ) ) return fail( QStringLiteral( "备份读取不完整。" ) );
+    entry.crc = crc ^ 0xffffffffU;
+    entry.offset = quint32( output.pos() );
+    stream << quint32( 0x04034b50 ) << quint16( 20 ) << quint16( 0x0800 ) << quint16( 0 )
+           << time << date << entry.crc << entry.size << entry.size << quint16( entry.name.size() ) << quint16( 0 );
+    if( output.write( entry.name ) != entry.name.size() ) return fail( QStringLiteral( "ZIP写入失败。" ) );
+    quint32 copiedCrc = 0xffffffffU;
+    qint64 copied = 0;
+    while( !input->atEnd() )
+    {
+      const QByteArray bytes = input->read( 1024*1024 );
+      if( bytes.isEmpty() || output.write( bytes ) != bytes.size() ) return fail( QStringLiteral( "ZIP写入失败，请检查磁盘空间。" ) );
+      copied += bytes.size(); copiedCrc = updateCrc( copiedCrc, bytes );
+    }
+    if( copied != entry.size || (copiedCrc ^ 0xffffffffU) != entry.crc )
+      return fail( QStringLiteral( "备份内容在写入中改变，请重试。" ) );
+  }
+  const quint32 directoryOffset = quint32( output.pos() );
+  for( const ZipInput& entry : inputs )
+  {
+    stream << quint32( 0x02014b50 ) << quint16( 20 ) << quint16( 20 ) << quint16( 0x0800 )
+           << quint16( 0 ) << time << date << entry.crc << entry.size << entry.size
+           << quint16( entry.name.size() ) << quint16( 0 ) << quint16( 0 ) << quint16( 0 )
+           << quint16( 0 ) << quint32( 0 ) << entry.offset;
+    if( output.write( entry.name ) != entry.name.size() ) return fail( QStringLiteral( "ZIP目录写入失败。" ) );
+  }
+  const quint32 directorySize = quint32( output.pos() ) - directoryOffset;
+  stream << quint32( 0x06054b50 ) << quint16( 0 ) << quint16( 0 ) << quint16( inputs.size() )
+         << quint16( inputs.size() ) << directorySize << directoryOffset << quint16( 0 );
+  if( stream.status() != QDataStream::Ok || !output.commit() )
+    return fail( QStringLiteral( "备份提交失败，原记录与登录状态未改变。" ) );
+  return true;
 }
 
 bool ShadowWorkspaceArchive::exportWorkspace( const QString& data_folder, const QString& archive_path, QString* error_message )

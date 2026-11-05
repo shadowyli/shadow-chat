@@ -49,6 +49,91 @@ int main( int argc, char** argv )
   check( !b.importZip( invalid, &error ) && b.list().isEmpty(), "invalid image rolls back entire batch" );
   const QString huge = root.filePath( "huge.zip" ); zip( huge, { qMakePair( QString( "big.png" ), QByteArray( 17 * 1024 * 1024, 'x' ) ) } );
   check( !a.importZip( huge, &error ), "oversized image entry is rejected before decoding" );
+  check( error.contains( "16MiB" ), "single-entry error distinguishes image limit from archive limit" );
+  const QString largeArchive = root.filePath( "large-archive.zip" );
+  {
+    QByteArray padded = bytes;
+    padded.append( QByteArray( 16 * 1024 * 1024 - bytes.size(), '\0' ) );
+    QZipWriter writer( largeArchive );
+    writer.setCompressionPolicy( QZipWriter::NeverCompress );
+    for( int index = 0; index < 17; ++index ) writer.addFile( QString( "image-%1.png" ).arg( index ), padded );
+    writer.close();
+  }
+  ShadowStickerStore largeStore( root.filePath( "account-large" ) );
+  check( QFileInfo( largeArchive ).size() > 256 * 1024 * 1024 &&
+      largeStore.importZip( largeArchive, &error, &added, &duplicates ) && added == 1 && duplicates == 16,
+      "actual archive above256MiB imports16MiB image entries incrementally and deduplicates" );
+  const QString exactArchive = root.filePath( "exact-archive.zip" );
+  {
+    {
+      QZipWriter writer( exactArchive );
+      writer.setCompressionPolicy( QZipWriter::NeverCompress );
+      for( int index = 0; index < 64; ++index ) writer.addFile( QString( "padding-%1.txt" ).arg( index ), QByteArray() );
+      writer.addFile( "image.png", bytes );
+      writer.close();
+    }
+    const qint64 overhead = QFileInfo( exactArchive ).size();
+    QZipWriter writer( exactArchive );
+    writer.setCompressionPolicy( QZipWriter::NeverCompress );
+    const QByteArray padding( 16 * 1024 * 1024, '\0' );
+    for( int index = 0; index < 63; ++index ) writer.addFile( QString( "padding-%1.txt" ).arg( index ), padding );
+    writer.addFile( "padding-63.txt", QByteArray( int( Q_INT64_C(1073741824) - overhead - qint64( padding.size() ) * 63 ), '\0' ) );
+    writer.addFile( "image.png", bytes );
+    writer.close();
+  }
+  check( QFileInfo( exactArchive ).size() == Q_INT64_C(1073741824) &&
+      largeStore.importZip( exactArchive, &error, &added, &duplicates ) && added == 1,
+      "exactly1GiB valid archive is accepted" );
+  const QString largeTotal = root.filePath( "large-total.zip" );
+  {
+    QZipWriter writer( largeTotal );
+    writer.setCompressionPolicy( QZipWriter::AlwaysCompress );
+    for( int index = 0; index < 20; ++index )
+      writer.addFile( QString( "metadata-%1.txt" ).arg( index ), QByteArray( 14 * 1024 * 1024, 'x' ) );
+    writer.addFile( "image.png", bytes );
+    writer.close();
+  }
+  int progressEvents = 0;
+  check( b.importZip( largeTotal, &error, &added, &duplicates,
+      [&]( int processed, int total ) { if( processed > 0 && processed <= total ) ++progressEvents; } ) &&
+      added == 1 && progressEvents == 21, "expanded total over256MiB imports with per-entry progress" );
+  const QString totalBoundary = root.filePath( "total-boundary.zip" );
+  {
+    QZipWriter writer( totalBoundary );
+    writer.setCompressionPolicy( QZipWriter::AlwaysCompress );
+    for( int index = 0; index < 64; ++index )
+      writer.addFile( QString( "metadata-%1.txt" ).arg( index ), QByteArray( 16 * 1024 * 1024, 'x' ) );
+    writer.close();
+  }
+  check( !a.importZip( totalBoundary, &error ) && error.contains( QStringLiteral( "没有PNG" ) ),
+      "exactly1GiB expanded total passes budget validation" );
+  const QString totalExceeded = root.filePath( "total-exceeded.zip" );
+  {
+    QZipWriter writer( totalExceeded );
+    writer.setCompressionPolicy( QZipWriter::AlwaysCompress );
+    for( int index = 0; index < 64; ++index )
+      writer.addFile( QString( "metadata-%1.txt" ).arg( index ), QByteArray( 16 * 1024 * 1024, 'x' ) );
+    writer.addFile( "extra.txt", "x" );
+    writer.close();
+  }
+  check( !a.importZip( totalExceeded, &error ) && error.contains( QStringLiteral( "解压总量" ) ) &&
+      a.list().size() == before, "expanded total1GiB plus one byte is rejected without library changes" );
+  const QString archiveExceeded = root.filePath( "archive-exceeded.zip" );
+  {
+    QFile oversized( archiveExceeded );
+    check( oversized.open( QIODevice::WriteOnly ) && oversized.resize( Q_INT64_C(1073741825) ),
+      "create oversized archive fixture" );
+  }
+  check( !a.importZip( archiveExceeded, &error ) && error.contains( QStringLiteral( "压缩包不能超过1GiB" ) ),
+      "archive1GiB plus one byte is rejected before reading" );
+  const QString commitFolder = root.filePath( "account-commit-failure" );
+  ShadowStickerStore commitStore( commitFolder );
+  check( !commitStore.importZip( archive, &error, &added, &duplicates,
+      [&]( int processed, int total ) {
+        if( processed == total ) QDir().mkpath( QDir( commitFolder ).filePath( "stickers/index.json" ) );
+      } ) && added == 0 && duplicates == 0 &&
+      !QFile::exists( QDir( commitFolder ).filePath( "stickers/" + item.id + ".png" ) ),
+      "manifest commit failure rolls back installed originals and does not report success" );
   const QString many = root.filePath( "many.zip" ); { QZipWriter writer( many ); for( int i = 0; i < 5001; ++i ) writer.addDirectory( QString::number( i ) ); writer.close(); }
   check( !a.importZip( many, &error ), "archive entry count is bounded" );
   const QString manifest = root.filePath( "account-b/stickers/index.json" ); QDir().mkpath( QFileInfo( manifest ).absolutePath() ); write( manifest, "broken-json" );

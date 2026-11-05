@@ -52,11 +52,8 @@ void Core::checkMessageDeliveryAck( const User& user, VNumber message_id )
   if( !shadowMessageDelivery.open( Settings::instance().dataFolder() ) ) return;
   const ShadowMessageDelivery::Result result = shadowMessageDelivery.acknowledge( QString::number( message_id ), deliveryRecipient( user ) );
   if( !result.changed ) return;
-  const Chat chat = ChatManager::instance().findChatByPrivateId( result.chat, true, ID_INVALID );
-  if( !chat.isValid() ) return;
-  dispatchSystemMessage( chat.id(), ID_LOCAL_USER,
-    tr( "消息“%1”：已送达 %2/%3 人" ).arg( result.preview.toHtmlEscaped() ).arg( result.delivered ).arg( result.total ),
-    DispatchToChat, ChatMessage::Other, true );
+  qDebug() << "ShadowChatNetwork: delivery-ack" << user.networkAddress().hostAddress()
+           << user.networkAddress().hostPort() << message_id << result.delivered << result.total;
 }
 
 void Core::cancelMessageDelivery( VNumber user_id, VNumber chat_id )
@@ -602,10 +599,7 @@ int Core::sendMessageToChat( const Chat& c, const Message& m )
     foreach( const User& recipient, user_list.toList() )
       if( !recipient.isLocal() ) recipients << deliveryRecipient( recipient );
     const QString preview = Bee::removeHtmlTags( m.text() ).simplified().left( 40 );
-    if( shadowMessageDelivery.begin( QString::number( m.id() ), c.privateId(), recipients, preview ) )
-      dispatchSystemMessage( c.id(), ID_LOCAL_USER,
-        tr( "消息“%1”：已送达 0/%2 人" ).arg( preview.toHtmlEscaped() ).arg( recipients.size() ),
-        DispatchToChat, ChatMessage::Other, true );
+    shadowMessageDelivery.begin( QString::number( m.id() ), c.privateId(), recipients, preview );
   }
   foreach( User u, user_list.toList() )
   {
@@ -726,15 +720,30 @@ void Core::sendRefuseMessageToGroupChat( const Chat& group_chat )
 
 bool Core::sendMessageToLocalNetwork( const User& to_user, const Message& m )
 {
+  if( !Protocol::instance().isShadowChatUser( to_user ) )
+  {
+    qWarning() << "ShadowChatNetwork: send-identity-rejected" << to_user.networkAddress().hostAddress()
+               << to_user.networkAddress().hostPort();
+    qWarning() << "Blocked message delivery to a user without a verified ShadowChat identity:"
+               << to_user.id() << qPrintable( to_user.name() );
+    return false;
+  }
+
   Connection* c = connection( to_user.id() );
   if( !c )
   {
+    qWarning() << "ShadowChatNetwork: send-no-connection" << to_user.networkAddress().hostAddress()
+               << to_user.networkAddress().hostPort();
     if( to_user.isStatusConnected() )
       qWarning() << "Unable to find connection socket for user" << to_user.id() << qPrintable( to_user.name() );
     return false;
   }
 
-  return c->sendMessage( m );
+  const bool sent = c->sendMessage( m );
+  if( !sent )
+    qWarning() << "ShadowChatNetwork: send-failed" << to_user.networkAddress().hostAddress()
+               << to_user.networkAddress().hostPort() << m.id();
+  return sent;
 }
 
 void Core::buildSavedChatList()

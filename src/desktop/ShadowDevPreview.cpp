@@ -772,7 +772,9 @@ void ShadowDevPreview::seedFixtures( Core* core )
     user.setColor( colors.at( index % colors.size() ) );
     user.setWorkgroups( QStringList() << (index % 2
       ? QString::fromUtf8( "项目策划组（合成）" ) : QString::fromUtf8( "视觉设计组（合成）" )) );
-    user.setNetworkAddress( NetworkAddress( QHostAddress::LocalHost, 49000 + index ) );
+    NetworkAddress preview_address( QHostAddress::LocalHost, 49000 + index );
+    preview_address.setInfo( Protocol::instance().shadowChatIdentityMarker() );
+    user.setNetworkAddress( preview_address );
     VCard card;
     card.setNickName( user.name() );
     card.setEmail( user.accountName() );
