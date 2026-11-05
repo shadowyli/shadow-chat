@@ -36,3 +36,4 @@ __pycache__/
 /plugins/*/moc_*.cpp
 /plugins/*/moc_predefs.h
 /plugins/*/qrc_*.cpp
+/.release-tools/

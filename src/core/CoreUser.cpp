@@ -37,10 +37,12 @@ void Core::setLocalUserWorkgroups( const QStringList& wkgs )
 {
   if( Settings::instance().localUser().workgroups() == wkgs )
     return;
-   User u = Settings::instance().localUser();
-   u.setWorkgroups( wkgs );
-   Settings::instance().setLocalUser( u );
-   emit userChanged( u );
+  User u = Settings::instance().localUser();
+  u.setWorkgroups( wkgs );
+  Settings::instance().setLocalUser( u );
+  Settings::instance().save();
+  sendVCardToAllConnectedUsers();
+  emit userChanged( u );
 }
 
 void Core::setLocalUserStatus( int new_status )

@@ -2323,6 +2323,7 @@ void GuiMain::createModernShell()
   } );
   connect( mp_modernDirectoryPage, SIGNAL( userDetailsRequested( VNumber ) ), this, SLOT( showVCard( VNumber ) ) );
   connect( mp_modernDirectoryPage, SIGNAL( createGroupRequested() ), this, SLOT( createGroupChat() ) );
+  connect( mp_modernDirectoryPage, &ShadowDirectoryPage::editWorkgroupsRequested, this, &GuiMain::editOwnWorkgroups );
   connect( mp_modernDirectoryPage, &ShadowDirectoryPage::sectionChanged, this, [this]( int section ) {
     m_modernPrimaryPage = section == ShadowDirectoryPage::Groups ? 2
       : section == ShadowDirectoryPage::Organization ? 5 : 1;
@@ -4764,6 +4765,16 @@ void GuiMain::showChat( VNumber chat_id )
 
 void GuiMain::changeVCard()
 {
+  showOwnProfileCard( false );
+}
+
+void GuiMain::editOwnWorkgroups()
+{
+  showOwnProfileCard( true );
+}
+
+void GuiMain::showOwnProfileCard( bool editWorkgroups )
+{
   GuiEditVCard* gvc = new GuiEditVCard( this );
   gvc->setAttribute( Qt::WA_DeleteOnClose );
   connect( gvc, &GuiEditVCard::userStatusSelected, this, [this, gvc]( int status ) {
@@ -4772,6 +4783,7 @@ void GuiMain::changeVCard()
   } );
   connect( gvc, &QDialog::accepted, this, [this, gvc]() {
     beeCore->setLocalUserVCard( gvc->userColor(), gvc->vCard() );
+    beeCore->setLocalUserWorkgroups( gvc->workgroups() );
     if( gvc->regenerateUserHash() )
     {
       beeCore->regenerateLocalUserHash();
@@ -4781,9 +4793,10 @@ void GuiMain::changeVCard()
   gvc->setUser( Settings::instance().localUser() );
   gvc->setSizeGripEnabled( true );
   QWidget* anchor = qobject_cast<QWidget*>( sender() );
-  if( !anchor || !anchor->isVisible() )
+  if( editWorkgroups || !anchor || !anchor->isVisible() )
     anchor = findChild<QWidget*>( QStringLiteral( "ShadowTitleProfile" ) );
   gvc->showAt( anchor ? anchor : this );
+  if( editWorkgroups ) gvc->editWorkgroupsInline();
 }
 
 void GuiMain::showLocalUserVCard()

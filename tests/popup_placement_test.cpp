@@ -560,7 +560,7 @@ int main( int argc, char** argv )
   const QImage railPixels = rail->grab().toImage();
   const qreal railRatio = railPixels.devicePixelRatio();
   CHECK( railPixels.pixelColor( qRound( 2*railRatio ), qRound( (rail->height()-3)*railRatio ) ).rgb() ==
-    QColor( "#030a0a" ).rgb() );
+    QColor( "#E8F0F4" ).rgb() );
   bool checkedNavigation = false;
   for( QToolButton* button : rail->findChildren<QToolButton*>( "ShadowNavButton" ) )
     if( button->isChecked() )
@@ -568,7 +568,7 @@ int main( int argc, char** argv )
       const QImage pixels = button->grab().toImage();
       const qreal ratio = pixels.devicePixelRatio();
       CHECK( pixels.pixelColor( qRound( button->width()/2*ratio ), qRound( (button->height()-4)*ratio ) ).rgb() ==
-        QColor( "#e93d34" ).rgb() );
+        QColor( "#FFF3F0" ).rgb() );
       checkedNavigation = true;
     }
   CHECK( checkedNavigation );
@@ -611,12 +611,15 @@ int main( int argc, char** argv )
   CHECK( self_card->geometry() == self_geometry() );
   CHECK( saveProof( self_card, "self-avatar-card.png" ) );
   self_card->findChild<QPushButton*>( "editMyProfile" )->click(); QTest::qWait( 20 );
-  QPushButton* self_save = self_card->findChild<QPushButton*>( "mp_pbOk" );
+  QPushButton* self_save = self_card->findChild<QPushButton*>( "closeMyProfile" );
   CHECK( self_save->isVisible() && self_card->rect().contains(
     QRect( self_save->mapTo( self_card, QPoint() ), self_save->size() ) ) );
+  CHECK( self_card->findChild<QStackedWidget*>( "ShadowProfilePages" )->currentIndex() == 0 &&
+    self_card->findChild<QLineEdit*>( "mp_leNickname" )->isVisible() &&
+    !self_card->findChild<QWidget*>( "profileEditor" )->isVisible() );
   const QPoint editor_before = self_card->pos();
   window.move( window.pos() + QPoint( 12, 8 ) ); QTest::qWait( 20 );
-  CHECK( self_card->pos() == editor_before );
+  CHECK( self_card->pos() - editor_before == QPoint( 12, 8 ) );
   self_card->reject(); flushEvents();
   CHECK( !self_card );
   self_avatar->click(); QTest::qWait( 20 );

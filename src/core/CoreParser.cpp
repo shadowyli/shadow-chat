@@ -130,7 +130,8 @@ void Core::parseUserMessage( const User& u, const Message& m )
     {
       bool color_changed = user_with_new_vcard.color() != u.color();
       bool vcard_changed = !(user_with_new_vcard.vCard() == u.vCard() );
-      if( vcard_changed || color_changed )
+      bool workgroups_changed = user_with_new_vcard.workgroups() != u.workgroups();
+      if( vcard_changed || color_changed || workgroups_changed )
       {
         UserManager::instance().setUser( user_with_new_vcard );
         if( user_with_new_vcard.name() != u.name() )

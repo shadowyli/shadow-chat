@@ -29,6 +29,7 @@
 #include "EmoticonManager.h"
 #include "PluginManager.h"
 #include "Protocol.h"
+#include "ShadowWorkgroups.h"
 #include "Random.h"
 #include "Rijndael.h"
 #include "Settings.h"
@@ -522,6 +523,9 @@ Message Protocol::localVCardMessage( int proto_version ) const
     data_list << (Settings::instance().enableReceivingHelpMessages() ? QLatin1String( "H" ) : QLatin1String( "N" ) );
   }
   data_list << vc.info();
+  QJsonArray workgroups;
+  for( const QString& name : Settings::instance().localUser().workgroups() ) workgroups.append( name );
+  data_list << ShadowWorkgroups::marker() << QString::fromUtf8( QJsonDocument( workgroups ).toJson( QJsonDocument::Compact ) );
   m.setData( data_list.join( DATA_FIELD_SEPARATOR ) );
   return m;
 }
@@ -531,6 +535,21 @@ bool Protocol::changeVCardFromMessage( User* u, const Message& m ) const
   QStringList sl = m.data().split( DATA_FIELD_SEPARATOR );
   if( sl.size() < 5 )
     return false;
+  const int extensionIndex = u->protocolVersion() >= VCARD_ROOM_LOCATION_PROTO_VERSION ? 10 : 8;
+  const bool hasWorkgroups = sl.size() > extensionIndex && sl.at( extensionIndex ) == ShadowWorkgroups::marker();
+  QStringList workgroups;
+  if( hasWorkgroups && (sl.size() != extensionIndex + 2 ||
+      !ShadowWorkgroups::fromJson( sl.at( extensionIndex + 1 ), &workgroups )) )
+    return false;
+  if( hasWorkgroups && Settings::instance().acceptConnectionsOnlyFromWorkgroups() &&
+      !Settings::instance().localUser().workgroups().isEmpty() )
+  {
+    QStringList visibleGroups;
+    for( const QString& name : workgroups )
+      if( Settings::instance().localUser().workgroups().contains( name, Qt::CaseInsensitive ) )
+        visibleGroups.append( name );
+    workgroups = visibleGroups;
+  }
 
   VCard vc;
   vc.setNickName( sl.takeFirst() );
@@ -565,6 +584,7 @@ bool Protocol::changeVCardFromMessage( User* u, const Message& m ) const
     vc.setInfo( sl.takeFirst() );
 
   u->setVCard( vc );
+  if( hasWorkgroups ) u->setWorkgroups( workgroups );
 
   return true;
 }

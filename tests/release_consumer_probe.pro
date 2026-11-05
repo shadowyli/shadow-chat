@@ -1,0 +1,10 @@
+QT += core network
+CONFIG += console c++11 release
+CONFIG -= app_bundle debug_and_release
+TEMPLATE = app
+TARGET = release_consumer_probe
+DEFINES += SHADOWCHAT_BUILD_LOCAL
+isEmpty(SHADOWCHAT_LEGACY_SOURCE_ROOT): SHADOWCHAT_LEGACY_SOURCE_ROOT = $$PWD/..
+INCLUDEPATH += $$SHADOWCHAT_LEGACY_SOURCE_ROOT/src/utils $$SHADOWCHAT_LEGACY_SOURCE_ROOT/src/core
+SOURCES += release_consumer_probe.cpp
+win32-msvc*: QMAKE_CXXFLAGS += /utf-8
