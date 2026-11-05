@@ -1,0 +1,9 @@
+QT += core gui gui-private widgets network xml multimedia printsupport
+CONFIG += console c++11 release
+CONFIG -= app_bundle debug_and_release
+TEMPLATE = app
+TARGET = seat_move_export_test
+INCLUDEPATH += ../src ../src/core ../src/desktop
+SOURCES += seat_move_export_test.cpp ../src/desktop/ShadowWorkspaceArchive.cpp
+HEADERS += ../src/desktop/ShadowWorkspaceArchive.h
+win32-msvc*: QMAKE_CXXFLAGS += /utf-8
