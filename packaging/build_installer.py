@@ -133,6 +133,10 @@ shutil.copy2(shortcut_icon, payload/shortcut_icon_name)
 for name in tls_files:
     shutil.copy2(args.tls_dir/name, payload/name)
 shutil.copy2(seed, payload/seed.name)
+diagnostics = payload/'diagnostics'
+diagnostics.mkdir()
+for source in (root/'scripts/qa-1.2.2').glob('Collect-ShadowChatDiagnostics.*'):
+    shutil.copy2(source, diagnostics/source.name)
 video_runtime = stage_video_runtime(args.video_cache, payload)
 inventory = {}
 for source in sorted(payload.rglob('*')):

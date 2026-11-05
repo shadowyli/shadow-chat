@@ -537,6 +537,22 @@ void Core::sendBroadcastMessage()
   mp_broadcaster->sendBroadcast();
 }
 
+QVariantMap Core::networkDiagnostics() const
+{
+  QVariantMap result;
+  result.insert( "tcpListening", mp_listener->isListening() );
+  result.insert( "tcpPort", mp_listener->serverPort() );
+  result.insert( "tcpError", mp_listener->isListening() ? QString() : mp_listener->errorString() );
+  result.insert( "udpListening", mp_broadcaster->isListening() );
+  result.insert( "udpPort", Settings::instance().defaultBroadcastPort() );
+  result.insert( "udpError", mp_broadcaster->isListening() ? QString() : mp_broadcaster->listenerError() );
+  int verified = 0;
+  foreach( const User& user, UserManager::instance().userList().toList() )
+    if( !user.isLocal() && user.isStatusConnected() && Protocol::instance().isShadowChatUser( user ) ) ++verified;
+  result.insert( "verifiedPeers", verified );
+  return result;
+}
+
 bool Core::isConnected() const
 {
   return mp_listener->isListening();

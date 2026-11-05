@@ -314,7 +314,7 @@ void Broadcaster::readBroadcastDatagram()
 
     if( datagram.size() <= Protocol::instance().messageMinimumSize() )
     {
-      qWarning() << "Broadcaster has received an invalid data size:" << datagram;
+      qWarning() << "ShadowChatNetwork: discovery-invalid-size" << sender_ip << datagram.size();
       continue;
     }
 
@@ -327,6 +327,7 @@ void Broadcaster::readBroadcastDatagram()
     Message m = Protocol::instance().toMessage( datagram, 1 );
     if( !Protocol::instance().isShadowChatBroadcastMessage( m ) )
     {
+      qDebug() << "ShadowChatNetwork: discovery-identity-rejected" << sender_ip << sender_port;
       qDebug() << "Broadcaster ignored a non-ShadowChat discovery datagram from" << qPrintable( sender_ip.toString() );
       continue;
     }
@@ -360,6 +361,7 @@ void Broadcaster::readBroadcastDatagram()
       qDebug() << "Broadcaster has found new peer" << qPrintable( sender_ip.toString() ) << sender_listener_port;
     else
       qDebug() << "Broadcaster has found new peer" << qPrintable( sender_ip.toString() ) << sender_listener_port << "with datagram from" << qPrintable( host_address_from_datagram.toString() );
+    qDebug() << "ShadowChatNetwork: discovery-accepted" << sender_ip << sender_listener_port;
     emit newPeerFound( sender_ip, sender_listener_port );
   }
 

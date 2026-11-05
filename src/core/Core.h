@@ -57,6 +57,7 @@ public:
   bool devPreviewIsolated() const { return m_devPreviewIsolated; }
 
   bool isConnected() const;
+  QVariantMap networkDiagnostics() const;
   bool start();
   void stop();
   void restart();
