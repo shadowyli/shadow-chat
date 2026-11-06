@@ -297,8 +297,7 @@ int main( int argc, char** argv )
     aboutVerified = about->isVisible() && about->property( "shadowDialogChrome" ).toBool() &&
       about->windowFlags().testFlag( Qt::FramelessWindowHint ) && description && close &&
       description->text().contains( "shadowyli" ) && description->text().contains( settings.version( true, true, true ) ) &&
-      attribution && attribution->text().contains( "Marco Mastroddi" ) &&
-      attribution->text().contains( "GPL" ) &&
+      !attribution &&
       !about->findChild<QPushButton*>( "ShadowAboutLicense" ) &&
       !about->findChild<QPushButton*>( "ShadowAboutClose" ) &&
       about->findChildren<QToolButton*>( "shadowDialogClose" ).size() == 1;
@@ -321,6 +320,6 @@ int main( int argc, char** argv )
   CHECK( QMetaObject::invokeMethod( &main, "showAbout", Qt::DirectConnection ) );
   guard.stop();
   CHECK( aboutVerified );
-  std::puts( "PASS borderless welcome keeps navigation; about retains attribution and has one close control without license popup" );
+  std::puts( "PASS borderless welcome keeps navigation; compact about has one close control without attribution block" );
   return 0;
 }

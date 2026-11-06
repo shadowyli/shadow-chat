@@ -599,7 +599,7 @@ void Broadcaster::contactNetworkAddresses()
 
 bool Broadcaster::isNetworkAddressForBroadcast( const NetworkAddress& na ) const
 {
-  return (na.isIPv4Address() && na.hostAddress().toString().contains( "255" )) || na.hostPort() == Settings::instance().defaultBroadcastPort();
+  return !na.isHostPortValid() || na.hostPort() == Settings::instance().defaultBroadcastPort();
 }
 
 bool Broadcaster::sortNetworkAddresses()

@@ -1102,15 +1102,6 @@ void GuiMain::showAbout()
                       );
   content->addWidget( description, 1 );
   layout->addLayout( content );
-  QLabel* attribution = new QLabel( QStringLiteral(
-    "基于 BeeBEEP · Copyright © 2010–2021 Marco Mastroddi<br>"
-    "GNU GPL v3 或更新版本：可复制、修改及分发，无任何担保。<br>"
-    "完整许可证及第三方许可保留在安装目录。" ), &dialog );
-  attribution->setObjectName( QStringLiteral( "ShadowAboutAttribution" ) );
-  attribution->setProperty( "role", "hint" );
-  attribution->setWordWrap( true );
-  attribution->setTextInteractionFlags( Qt::TextSelectableByMouse );
-  layout->addWidget( attribution );
   ShadowDialogChrome::decorate( &dialog );
   dialog.adjustSize();
   if( QToolButton* close = dialog.findChild<QToolButton*>( QStringLiteral( "shadowDialogClose" ) ) )
@@ -2526,19 +2517,25 @@ void GuiMain::showModernListPanel()
 void GuiMain::showShadowSettings()
 {
   QDialog dialog( this );
+  dialog.setObjectName( QStringLiteral( "ShadowSettingsDialog" ) );
+  dialog.setProperty( "shadowDialogChromeSkip", true );
   dialog.setWindowTitle( QStringLiteral( "影聊设置" ) );
   dialog.setModal( true );
-  dialog.setMinimumWidth( 620 );
   const QRect settings_available = screen() ? screen()->availableGeometry() :
     QApplication::desktop()->availableGeometry();
-  dialog.setMinimumHeight( qMin( 620, qMax( 160, settings_available.height() - 120 ) ) );
-  ShadowDialogStyle::apply(&dialog);
-  dialog.setStyleSheet(ShadowStyle::applicationStyleSheet()+dialog.styleSheet());
+  dialog.setMinimumWidth( qMin( 440, qMax( 240, settings_available.width() - 64 ) ) );
+  dialog.setMinimumHeight( qMin( 260, qMax( 160, settings_available.height() - 120 ) ) );
+  ShadowDialogStyle::apply( &dialog );
+  dialog.setStyleSheet( ShadowStyle::applicationStyleSheet() + dialog.styleSheet() + QStringLiteral(
+    "QScrollArea#ShadowSettingsScroll, QWidget#ShadowSettingsViewport,"
+    " QWidget#ShadowSettingsContent, QWidget#ShadowSettingsFooter { background: transparent; border: 0; }" ) );
   Bee::removeContextHelpButton( &dialog );
 
   QWidget* settings_content = new QWidget( &dialog );
+  settings_content->setObjectName( QStringLiteral( "ShadowSettingsContent" ) );
+  settings_content->setAttribute( Qt::WA_StyledBackground );
   QVBoxLayout* root_layout = new QVBoxLayout( settings_content );
-  root_layout->setContentsMargins( 28, 24, 28, 22 );
+  root_layout->setContentsMargins( 24, 20, 24, 12 );
   root_layout->setSpacing( 14 );
   QFrame* message_card = new QFrame( &dialog );
   message_card->setObjectName( "ShadowOnboardingCard" );
@@ -2553,7 +2550,7 @@ void GuiMain::showShadowSettings()
   QCheckBox* preview_check = new QCheckBox( QStringLiteral( "系统通知中显示消息内容" ), message_card );
   preview_check->setChecked( Settings::instance().showChatMessageOnTray() );
   preview_check->setToolTip( QStringLiteral( "关闭后，锁屏或共享屏幕时不会在系统通知里显示正文。" ) );
-  QCheckBox* enter_check = new QCheckBox( QStringLiteral( "按 Enter 发送消息（关闭时使用 Ctrl+Enter 发送）" ), message_card );
+  QCheckBox* enter_check = new QCheckBox( QStringLiteral( "按 Enter 发送消息（否则 Ctrl+Enter）" ), message_card );
   enter_check->setChecked( Settings::instance().useReturnToSendMessage() );
   message_layout->addWidget( message_title );
   message_layout->addWidget( sound_check );
@@ -2576,7 +2573,6 @@ void GuiMain::showShadowSettings()
 
   QFrame* file_card = new QFrame( &dialog );
   file_card->setObjectName( "ShadowOnboardingCard" );
-  file_card->setMinimumHeight( 144 );
   QGridLayout* file_layout = new QGridLayout( file_card );
   file_layout->setContentsMargins( 18, 14, 18, 14 );
   file_layout->setHorizontalSpacing( 8 );
@@ -2587,14 +2583,23 @@ void GuiMain::showShadowSettings()
   QCheckBox* confirm_download_check = new QCheckBox( QStringLiteral( "接收前先询问保存位置" ), file_card );
   confirm_download_check->setChecked( Settings::instance().confirmOnDownloadFile() );
   file_layout->addWidget( confirm_download_check, 1, 0, 1, 2 );
-  QLineEdit* download_folder = new QLineEdit( Settings::instance().downloadDirectory(), file_card );
+  QLineEdit* download_folder = new QLineEdit( QDir::toNativeSeparators( Settings::instance().downloadDirectory() ), file_card );
+  download_folder->setObjectName( QStringLiteral( "ShadowSettingsDownloadFolder" ) );
   download_folder->setReadOnly( true );
+  download_folder->setMinimumWidth( 0 );
+  download_folder->setSizePolicy( QSizePolicy::Ignored, QSizePolicy::Fixed );
+  download_folder->setCursorPosition( 0 );
+  download_folder->setToolTip( download_folder->text() );
   download_folder->setAccessibleName( QStringLiteral( "默认接收文件夹" ) );
   QPushButton* choose_folder = new QPushButton( QStringLiteral( "更改…" ), file_card );
   connect( choose_folder, &QPushButton::clicked, &dialog, [&dialog, download_folder]() {
     const QString selected = QFileDialog::getExistingDirectory( &dialog, QStringLiteral( "选择默认接收文件夹" ), download_folder->text() );
     if( !selected.isEmpty() )
+    {
       download_folder->setText( QDir::toNativeSeparators( selected ) );
+      download_folder->setCursorPosition( 0 );
+      download_folder->setToolTip( download_folder->text() );
+    }
   } );
   file_layout->addWidget( download_folder, 2, 0 );
   file_layout->addWidget( choose_folder, 2, 1 );
@@ -2602,7 +2607,6 @@ void GuiMain::showShadowSettings()
 
   QFrame* security_card = new QFrame( &dialog );
   security_card->setObjectName( "ShadowOnboardingTrust" );
-  security_card->setMinimumHeight( 180 );
   QVBoxLayout* security_layout = new QVBoxLayout( security_card );
   security_layout->setContentsMargins( 18, 14, 18, 14 );
   security_layout->setSpacing( 7 );
@@ -2688,9 +2692,11 @@ void GuiMain::showShadowSettings()
   security_layout->addWidget( update_status );
   security_layout->addWidget( update_notes );
   root_layout->addWidget( security_card );
+  root_layout->addStretch();
 
   QDialogButtonBox* buttons = new QDialogButtonBox( QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog );
-  buttons->setLayoutDirection(Qt::RightToLeft);
+  buttons->setObjectName( QStringLiteral( "ShadowSettingsButtons" ) );
+  buttons->setLayoutDirection( Qt::LeftToRight );
   buttons->button( QDialogButtonBox::Save )->setText( QStringLiteral( "保存" ) );
   buttons->button( QDialogButtonBox::Save )->setObjectName( "ShadowPrimaryButton" );
   buttons->button( QDialogButtonBox::Save )->setProperty("role","primary");
@@ -2699,15 +2705,30 @@ void GuiMain::showShadowSettings()
   buttons->button( QDialogButtonBox::Cancel )->setText( QStringLiteral( "取消" ) );
   connect( buttons, SIGNAL( accepted() ), &dialog, SLOT( accept() ) );
   connect( buttons, SIGNAL( rejected() ), &dialog, SLOT( reject() ) );
-  root_layout->addWidget( buttons, 0, Qt::AlignRight );
   QScrollArea* settings_scroll = new QScrollArea( &dialog );
+  settings_scroll->setObjectName( QStringLiteral( "ShadowSettingsScroll" ) );
+  settings_scroll->viewport()->setObjectName( QStringLiteral( "ShadowSettingsViewport" ) );
+  settings_scroll->viewport()->setAutoFillBackground( false );
   settings_scroll->setFrameShape( QFrame::NoFrame );
   settings_scroll->setWidgetResizable( true );
   settings_scroll->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
   settings_scroll->setWidget( settings_content );
+  settings_content->setAutoFillBackground( false );
   QVBoxLayout* dialog_layout = new QVBoxLayout( &dialog );
   dialog_layout->setContentsMargins( 0, 0, 0, 0 );
-  dialog_layout->addWidget( settings_scroll );
+  dialog_layout->setSpacing( 0 );
+  dialog_layout->addWidget( settings_scroll, 1 );
+  QWidget* footer = new QWidget( &dialog );
+  footer->setObjectName( QStringLiteral( "ShadowSettingsFooter" ) );
+  QHBoxLayout* footer_layout = new QHBoxLayout( footer );
+  footer_layout->setContentsMargins( 24, 12, 24, 20 );
+  footer_layout->addStretch();
+  footer_layout->addWidget( buttons );
+  dialog_layout->addWidget( footer );
+  dialog.setProperty( "shadowDialogChromeSkip", false );
+  ShadowDialogChrome::decorate( &dialog );
+  dialog.resize( qMin( 650, settings_available.width() - 32 ),
+    qMin( 670, settings_available.height() - 32 ) );
 
   if( dialog.exec() != QDialog::Accepted )
     return;

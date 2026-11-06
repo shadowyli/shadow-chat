@@ -16,7 +16,7 @@ if defined SHADOWCHAT_TEST_SELECTION (
   for %%T in (%SHADOWCHAT_TEST_SELECTION%) do call :run_test %%T
 ) else (
   for %%F in (update_*_test.pro) do call :run_update_project %%~nF
-  for %%T in (workspace_archive local_accounts transfer_queue transfer_failure group_policy message_delivery history_records history_retention avatar_refresh profile_editor dialog_consistency conversation_preferences sticker_store history_ui sticker_ui loopback_chat group_loopback) do call :run_test %%T
+  for %%T in (workspace_archive local_accounts transfer_queue transfer_failure group_policy message_delivery history_records history_retention avatar_refresh profile_editor dialog_consistency conversation_preferences sticker_store history_ui sticker_ui broadcaster_routing loopback_chat group_loopback) do call :run_test %%T
 )
 exit /b %FAILED%
 
