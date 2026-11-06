@@ -51,6 +51,7 @@ int main( int argc, char** argv )
   Random::init();
   QTemporaryDir temporary;
   CHECK( temporary.isValid() );
+  app.setProperty( "shadowAccountRoot", temporary.path() );
   Settings& settings = Settings::instance();
   settings.setDefaultFolders();
   settings.createLocalUser( "ui-feedback-125" );
