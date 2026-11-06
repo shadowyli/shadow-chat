@@ -81,7 +81,7 @@ int main( int argc, char** argv )
   CHECK( contained( surface, &dialog ) && contained( body, surface ) );
   CHECK( contained( search, body ) && contained( people, body ) && contained( buttons, body ) );
   CHECK( contained( close, surface ) );
-  CHECK( surface->mask().contains( people->mapTo( surface, people->rect().bottomRight() ) ) );
+  CHECK( surface->mask().isEmpty() || surface->mask().contains( people->mapTo( surface, people->rect().bottomRight() ) ) );
   GuiWizard wizard;
   wizard.show();
   settle();

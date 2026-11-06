@@ -151,7 +151,8 @@ bool ShadowWorkspaceArchive::exportSeatMoveZip( const QString& data_folder, cons
   instructions.name = "README.txt";
   instructions.bytes = QStringLiteral(
     "影聊换座位历史备份\n账号：%1\n\n"
-    "解压后，在新电脑影聊中选择“工作区与换机 → 导入工作区”，导入 workspace.beebeep-workspace。\n"
+    "解压后，在新电脑影聊登录页填写此账号及新密码，选择恢复工作区，导入 workspace.beebeep-workspace。\n"
+    "不要先创建同名账号；若已创建，请登录后使用“工作区与换机 → 导入工作区”。\n"
     "包含账号验证资料、聊天记录和设置，不包含收到的图片/文件附件；没有包含明文密码。\n"
     "备份未加密，请妥善保管。导出本身不退出账号、不修改密码、不删除原记录。\n" ).arg( email ).toUtf8();
   inputs.append( instructions );

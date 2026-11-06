@@ -2,6 +2,7 @@
 #include "BeeUtils.h"
 #include "ChatManager.h"
 #include "HistoryRecord.h"
+#include "ShadowHistoryPresentation.h"
 #include "Protocol.h"
 #include "Settings.h"
 #include "ShadowStyle.h"
@@ -104,6 +105,7 @@ namespace
     const int start = qMax( 0, position - 25 );
     return (start > 0 ? QStringLiteral( "…" ) : QString()) + plain.mid( start, 180 );
   }
+
 }
 
 ShadowSearchPanel::ShadowSearchPanel( QWidget* parent )
@@ -128,6 +130,7 @@ ShadowSearchPanel::ShadowSearchPanel( QWidget* parent )
     "QWidget#ShadowSearchFooter{background:#F7F9FB;border:0;border-top:1px solid #EDF0F4;}"
     "QLabel#ShadowSearchKeys,QLabel#ShadowSearchScope{font-size:11px;color:#8A95A2;border:0;background:transparent;}"
     "QPushButton[searchMore=true]{background:transparent;color:#697684;border:0;padding:7px 12px;}"
+    "QWidget#ShadowSearchSectionActions{background:transparent;border:0;}"
     "QPushButton[searchMore=true]:hover{color:#2878F0;}" ) );
   QVBoxLayout* layout = new QVBoxLayout( this );
   layout->setContentsMargins( 1, 1, 1, 1 );
@@ -337,8 +340,10 @@ void ShadowSearchPanel::refresh()
     {
       const HistoryRecord& record = records.at( index );
       if( !record.text.contains( query, Qt::CaseInsensitive ) ) continue;
-      messages.append( SearchResult{ ID_INVALID, 3, snippet( record.text, query ),
-        iterator.key() + QStringLiteral( " · 聊天记录    " ) + record.timestamp.toString( QStringLiteral( "yyyy/MM/dd HH:mm" ) ),
+      const QString sender = record.sender.isEmpty() || record.sender == iterator.key() ? QString()
+        : QStringLiteral( " · " ) + record.sender;
+      messages.append( SearchResult{ ID_INVALID, 3, snippet( shadowHistoryMessagePreview( record ), query ),
+        iterator.key() + sender + QStringLiteral( " · 聊天记录    " ) + record.timestamp.toString( QStringLiteral( "yyyy/MM/dd HH:mm" ) ),
         ShadowStyle::actionIcon( QStringLiteral( "archive" ) ), iterator.key(), true } );
     }
   }
@@ -356,9 +361,9 @@ void ShadowSearchPanel::refresh()
     if( mp_tabs->currentIndex() == 0 && results.size() > 5 )
     {
       QWidget* headerWidget = new QWidget( mp_results );
+      headerWidget->setObjectName( QStringLiteral( "ShadowSearchSectionActions" ) );
       QHBoxLayout* headerLayout = new QHBoxLayout( headerWidget );
       headerLayout->setContentsMargins( 20, 0, 16, 0 );
-      headerLayout->addWidget( new QLabel( header->text( 0 ), headerWidget ) );
       headerLayout->addStretch();
       QPushButton* more = new QPushButton( QStringLiteral( "更多 ›" ), headerWidget );
       more->setProperty( "searchMore", true );

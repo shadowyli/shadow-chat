@@ -30,6 +30,7 @@ signals:
   void groupActivated( VNumber );
   void userDetailsRequested( VNumber );
   void createGroupRequested();
+  void editWorkgroupsRequested();
   void sectionChanged( int );
 
 protected:
@@ -49,6 +50,7 @@ private:
   QComboBox* mp_sort;
   QWidget* mp_alphabet;
   QPushButton* mp_createGroup;
+  QPushButton* mp_editWorkgroups;
   QPushButton* mp_categories[3];
   QVector<QToolButton*> m_indexButtons;
   QMap<QString, QTreeWidgetItem*> m_headers;

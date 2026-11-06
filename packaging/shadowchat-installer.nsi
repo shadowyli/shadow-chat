@@ -12,6 +12,9 @@ Var SC_DESKTOP
 Var SC_PROGRAMS
 Var SC_ORIGINAL_INSTDIR
 Var SC_APP_ARGUMENTS
+Var SC_QUIT_ATTEMPTED
+Var SC_QUIT_REGISTERED
+Var SC_QUIT_WAIT
 
 !define APP_NAME "影聊"
 !define APP_EXE "ShadowChat.exe"
@@ -164,6 +167,54 @@ Function RunInstalledApplication
   launch_complete:
 FunctionEnd
 
+Function RequestApplicationShutdown
+  StrCpy $SC_QUIT_REGISTERED 0
+  System::Call 'rstrtmgr::RmStartSession(*i .r1, i 0, w .r2) i.r0'
+  StrCmp $0 0 0 shutdown_complete
+  System::Call 'kernel32::CreateToolhelp32Snapshot(i 2, i 0) p.r3'
+  StrCmp $3 -1 end_shutdown_session
+  System::Alloc 556
+  Pop $4
+  System::Call '*$4(i 556)'
+  System::Call 'kernel32::Process32FirstW(p r3, p r4) i.r0'
+  enumerate_shutdown_process:
+    StrCmp $0 0 close_shutdown_snapshot
+    System::Call '*$4(i, i, i.r5)'
+    System::Call 'kernel32::OpenProcess(i 0x1000, i 0, i r5) p.r6'
+    StrCmp $6 0 next_shutdown_process
+    StrCpy $8 ${NSIS_MAX_STRLEN}
+    System::Call 'kernel32::QueryFullProcessImageNameW(p r6, i 0, w .r7, *i r8) i.r0'
+    StrCmp $0 0 close_shutdown_process
+    System::Call 'kernel32::lstrcmpiW(w r7, w "$INSTDIR\${APP_EXE}") i.r0'
+    StrCmp $0 0 0 close_shutdown_process
+    System::Call '*(i r5, l 0) p.r9'
+    IntOp $7 $9 + 4
+    System::Alloc 8
+    Pop $8
+    System::Call 'kernel32::GetProcessTimes(p r6, p r7, p r8, p r8, p r8) i.r0'
+    System::Free $8
+    StrCmp $0 0 free_shutdown_identity
+    System::Call 'rstrtmgr::RmRegisterResources(i r1, i 0, p 0, i 1, p r9, i 0, p 0) i.r0'
+    StrCmp $0 0 0 free_shutdown_identity
+    StrCpy $SC_QUIT_REGISTERED 1
+  free_shutdown_identity:
+    System::Free $9
+  close_shutdown_process:
+    System::Call 'kernel32::CloseHandle(p r6)'
+  next_shutdown_process:
+    System::Call 'kernel32::Process32NextW(p r3, p r4) i.r0'
+    Goto enumerate_shutdown_process
+  close_shutdown_snapshot:
+    System::Free $4
+    System::Call 'kernel32::CloseHandle(p r3)'
+    StrCmp $SC_QUIT_REGISTERED 1 0 end_shutdown_session
+    DetailPrint "正在请求影聊正常保存并退出…"
+    System::Call 'rstrtmgr::RmShutdown(i r1, i 0, p 0) i.r0'
+  end_shutdown_session:
+    System::Call 'rstrtmgr::RmEndSession(i r1)'
+  shutdown_complete:
+FunctionEnd
+
 Section "影聊" SEC_MAIN
   SectionIn RO
   SetShellVarContext current
@@ -175,8 +226,27 @@ Section "影聊" SEC_MAIN
     FileClose $0
     Goto ready_to_install
   app_is_running:
+    StrCmp $SC_QUIT_ATTEMPTED 1 show_running_prompt
+    StrCpy $SC_QUIT_ATTEMPTED 1
+    Call RequestApplicationShutdown
+    StrCpy $SC_QUIT_WAIT 30
+  wait_for_shutdown:
+    Sleep 200
+    ClearErrors
+    FileOpen $0 "$INSTDIR\${APP_EXE}" a
+    IfErrors shutdown_still_pending
+    FileClose $0
+    Goto ready_to_install
+  shutdown_still_pending:
+    IntOp $SC_QUIT_WAIT $SC_QUIT_WAIT - 1
+    IntCmp $SC_QUIT_WAIT 0 show_running_prompt wait_for_shutdown wait_for_shutdown
+  show_running_prompt:
     IfSilent cancel_install
-    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "请先从托盘退出影聊，再点击重试。账号、聊天记录和接收文件会保留。" IDRETRY check_running
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "影聊尚未正常退出，或安装文件正被其他程序占用。请等待传输完成或正常退出后重试。安装不会强制结束进程；账号、聊天记录和接收文件会保留。" IDRETRY retry_shutdown
+    Goto cancel_install
+  retry_shutdown:
+    StrCpy $SC_QUIT_ATTEMPTED 0
+    Goto check_running
   cancel_install:
     SetErrorLevel 2
     Abort

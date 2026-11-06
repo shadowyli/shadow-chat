@@ -53,6 +53,8 @@ static int runPeer( int argc, char** argv )
   local.setName( QString( "peer-%1" ).arg( role ) );
   local.setAccountName( QString( "peer-%1@example.test" ).arg( role ) );
   local.setHash( settings.simpleHash( local.accountName() ) );
+  local.setWorkgroups( QStringList{ QString( "initial-workgroup-%1" ).arg( role ) } );
+  settings.setAcceptConnectionsOnlyFromWorkgroups( false );
   settings.setLocalUser( local );
   NetworkManager::instance().searchLocalHostAddress();
   Protocol::instance();
@@ -70,6 +72,7 @@ static int runPeer( int argc, char** argv )
   QSet<VNumber> sent;
   bool groupSent = false;
   bool noticeSeen = false;
+  bool workgroupsSent = false;
   QElapsedTimer elapsed;
   elapsed.start();
   QObject::connect( &core, &Core::newChatMessage, &app, [&]( const Chat&, const ChatMessage& message ) {
@@ -86,6 +89,16 @@ static int runPeer( int argc, char** argv )
       if( remote != role && (role == 0 || remote == 0 || elapsed.elapsed() >= 1500) )
         core.newPeerFound( QHostAddress::LocalHost, 47650 + remote );
     if( core.connectedUsers() != 2 ) return;
+    if( !workgroupsSent )
+    {
+      core.setLocalUserWorkgroups( QStringList{ QString( "updated-workgroup-%1" ).arg( role ) } );
+      workgroupsSent = true;
+    }
+    bool workgroupsReceived = true;
+    for( const User& remoteUser : UserManager::instance().userList().toList() )
+      if( !remoteUser.isLocal() && remoteUser.isStatusConnected() )
+        workgroupsReceived = workgroupsReceived && remoteUser.workgroups().size() == 1 &&
+          remoteUser.workgroups().first().startsWith( "updated-workgroup-" );
     for( const User& user : UserManager::instance().userList().toList() )
       if( !user.isLocal() && user.isStatusConnected() && !sent.contains( user.id() ) )
       {
@@ -109,7 +122,7 @@ static int runPeer( int argc, char** argv )
     }
     if( groupChat.isValid() && groupChat.usersId().size() == 3 && !groupSent )
       groupSent = core.sendChatMessage( groupChat.id(), QString( "group-from-%1" ).arg( role ), false, false, false ) == 2;
-    if( sent.size() == 2 && groupSent && received.size() == 4 )
+    if( sent.size() == 2 && groupSent && received.size() == 4 && workgroupsReceived )
     {
       const QString readyRoot = QFileInfo( folder ).absolutePath();
       QFile ready( QDir( readyRoot ).filePath( QString( "round-%1-ready-%2" ).arg( round ).arg( role ) ) );

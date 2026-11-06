@@ -197,6 +197,13 @@ ShadowDirectoryPage::ShadowDirectoryPage( QWidget* parent )
   connect( mp_createGroup, &QPushButton::clicked, this, &ShadowDirectoryPage::createGroupRequested );
   toolbar->addWidget( mp_createGroup );
   mp_createGroup->hide();
+  mp_editWorkgroups = new QPushButton( QStringLiteral( "编辑我的工作组" ), header );
+  mp_editWorkgroups->setObjectName( QStringLiteral( "ShadowEditOwnWorkgroups" ) );
+  mp_editWorkgroups->setAccessibleName( QStringLiteral( "编辑自己的工作组，组织架构按同事填写的工作组分类" ) );
+  mp_editWorkgroups->setToolTip( QStringLiteral( "每个人在资料卡填写自己的工作组，联网后自动分类。" ) );
+  connect( mp_editWorkgroups, &QPushButton::clicked, this, &ShadowDirectoryPage::editWorkgroupsRequested );
+  toolbar->addWidget( mp_editWorkgroups );
+  mp_editWorkgroups->hide();
   mp_sort = new QComboBox( header );
   mp_sort->setObjectName( QStringLiteral( "ShadowDirectorySort" ) );
   mp_sort->setAccessibleName( QStringLiteral( "姓名排序" ) );
@@ -318,6 +325,7 @@ void ShadowDirectoryPage::setSection( Section section )
   mp_title->setText( section == Contacts ? QStringLiteral( "联系人" )
     : section == Groups ? QStringLiteral( "群组" ) : QStringLiteral( "组织架构" ) );
   mp_createGroup->setVisible( section == Groups );
+  mp_editWorkgroups->setVisible( section == Organization );
   mp_alphabet->setVisible( section != Organization );
   m_resetScroll = true;
   refresh();

@@ -7,6 +7,7 @@
 #include "ChatManager.h"
 #include "UserManager.h"
 #include "Message.h"
+#include "Protocol.h"
 #include "Random.h"
 #include <QTemporaryDir>
 #include <QProcess>
@@ -37,6 +38,11 @@ static int worker(int argc,char** argv)
   Settings& settings=Settings::instance();settings.setDefaultFolders();settings.createLocalUser("preferences-fixture");settings.setAccountDataFolder(root);settings.load();settings.setHideEmptyChatsInList(false);Random::init();MessageManager::instance().loadSavedMessagesAuthCode();
   const VNumber base=restart?2000:1000;
   User alpha(base+1),beta(base+2);alpha.setName("alpha");alpha.setAccountName("alpha@example.test");alpha.setHash("stable-alpha-hash");alpha.setStatus(User::Online);beta.setName("beta");beta.setAccountName("beta@example.test");beta.setHash("stable-beta-hash");beta.setStatus(User::Online);UserManager::instance().setUser(alpha);UserManager::instance().setUser(beta);
+  NetworkAddress alphaAddress(QHostAddress::LocalHost,45011),betaAddress(QHostAddress::LocalHost,45012);
+  alphaAddress.setInfo(Protocol::instance().shadowChatIdentityMarker());betaAddress.setInfo(Protocol::instance().shadowChatIdentityMarker());
+  alpha.setNetworkAddress(alphaAddress);beta.setNetworkAddress(betaAddress);
+  alpha.setProtocolVersion(settings.protocolVersion());beta.setProtocolVersion(settings.protocolVersion());
+  UserManager::instance().setUser(alpha);UserManager::instance().setUser(beta);
   Chat a=createChat(base+11,"alpha",alpha.id()),b=createChat(base+12,"beta",beta.id()),group=createChat(base+13,"project",alpha.id(),true);
   a.setLastMessageTimestamp(QDateTime::currentDateTime().addDays(-1));b.setLastMessageTimestamp(QDateTime::currentDateTime());b.addUnreadMessage();
   ChatManager::instance().setChat(a);ChatManager::instance().setChat(b);ChatManager::instance().setChat(group);

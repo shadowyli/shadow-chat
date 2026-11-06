@@ -18,7 +18,7 @@ struct RoutingCase
 
 int main( int argc, char** argv )
 {
-  QCoreApplication app( argc, argv );
+  QApplication app( argc, argv );
   BroadcasterProbe broadcaster;
   const quint16 discovery_port = static_cast<quint16>( Settings::instance().defaultBroadcastPort() );
   const quint16 chat_port = static_cast<quint16>( Settings::instance().defaultListenerPort() );

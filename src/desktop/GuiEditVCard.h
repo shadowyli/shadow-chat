@@ -40,6 +40,8 @@ public:
   void setProfileStatus( int );
   void reject() override;
   void showAt( QWidget* anchor );
+  void editWorkgroupsInline();
+  const QStringList& workgroups() const { return m_workgroups; }
 
   inline const VCard& vCard() const;
   inline const QString& userColor() const;
@@ -59,6 +61,11 @@ protected:
   QString currentAvatarName() const;
   void resizeProfilePage();
   void showProfileEditor( QWidget* );
+  void beginInlineEdit( QWidget* );
+  void finishInlineEdit( QWidget* );
+  void updateInlineLabels();
+  void refreshCardPhoto();
+  bool validateInlineData();
   void updateCardClock();
   void placeCard();
 
@@ -78,7 +85,7 @@ private:
   QStackedWidget* m_profilePages;
   bool m_resizingProfile = false;
   QLabel* m_cardNickname;
-  QLabel* m_cardPhoto;
+  QToolButton* m_cardPhoto;
   QLabel* m_cardInfo;
   QLabel* m_cardEmail;
   QLabel* m_cardPhone;
@@ -87,6 +94,15 @@ private:
   QPushButton* m_cardStatus;
   QPointer<QWidget> m_cardAnchor;
   bool m_cardAnchored = false;
+  QStringList m_workgroups;
+  QStringList m_savedWorkgroups;
+  QLineEdit* m_workgroupsEdit;
+  QLabel* m_nicknameError;
+  QLabel* m_workgroupsError;
+  QPushButton* m_cardSave;
+  QPushButton* m_cardCancel;
+  bool m_inlineDirty = false;
+  bool m_workgroupsEdited = false;
 
 };
 

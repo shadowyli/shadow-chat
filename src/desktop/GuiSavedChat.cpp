@@ -36,6 +36,10 @@
 #include <QDesktopServices>
 #include "ShadowImageViewer.h"
 #include "ShadowStyle.h"
+#include "ShadowHistoryPresentation.h"
+#include "ShadowStickerMedia.h"
+#include "ShadowVideoPreview.h"
+#include "ShadowVideoCard.h"
 #include "ShadowDialogStyle.h"
 #include "UserManager.h"
 #include <QStyledItemDelegate>
@@ -84,6 +88,10 @@ enum HistoryRole
   VideoRole
 };
 
+const int HistoryThumbnailSize = 56;
+const int HistoryContentLeft = 49;
+const int HistoryContentTop = 28;
+
 class HistoryResults final : public QListWidget
 {
 public:
@@ -98,7 +106,7 @@ public:
     {
       const int width=viewport()->width();
       const int cell=width/2;
-      const int cellHeight=(cell-12)*3/4+12;
+      const int cellHeight=cell;
       int top=0;
       int column=0;
       for(int row=0;row<count();++row)
@@ -230,11 +238,29 @@ public:
       const int width = list ? list->viewport()->width() : 280;
       if( index.data( DateHeaderRole ).toBool() ) return QSize( width, 32 );
       const int cell = width / 2;
-      return QSize( cell, (cell - 12) * 3 / 4 + 12 );
+      return QSize( cell, cell );
     }
     if( !index.data( SenderRole ).isValid() )
       return QStyledItemDelegate::sizeHint( option, index );
-    return QSize( 260, index.data( ThumbnailRole ).value<QPixmap>().isNull() ? 94 : 128 );
+    const QListWidget* list = qobject_cast<QListWidget*>( parent() );
+    const int width = list ? list->viewport()->width() : 280;
+    const bool thumbnail = !index.data( ThumbnailRole ).value<QPixmap>().isNull();
+    const int contentWidth = qMax( 20, width - 8 - HistoryContentLeft - 10 -
+      (thumbnail ? HistoryThumbnailSize + 10 : 0) );
+    QTextLayout text( index.data( PreviewRole ).toString(), option.font );
+    QTextOption wrapping;
+    wrapping.setWrapMode( QTextOption::WrapAtWordBoundaryOrAnywhere );
+    text.setTextOption( wrapping );
+    text.beginLayout();
+    int textHeight = 0;
+    for( QTextLine line = text.createLine(); line.isValid(); line = text.createLine() )
+    {
+      line.setLineWidth( contentWidth );
+      textHeight += qCeil( line.height() );
+    }
+    text.endLayout();
+    const int contentHeight = qMax( textHeight, thumbnail ? HistoryThumbnailSize : 0 );
+    return QSize( width, qMax( 52, HistoryContentTop + contentHeight + 12 ) );
   }
 
   void paint( QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index ) const override
@@ -306,7 +332,7 @@ public:
       painter->drawRoundedRect( area, 8, 8 );
     }
     const QString sender = index.data( SenderRole ).toString();
-    const QRect avatar( area.left() + 8, area.top() + 12, 32, 32 );
+    const QRect avatar( area.left() + 8, area.top() + 8, 32, 32 );
     const QPixmap portrait = index.data( AvatarRole ).value<QPixmap>();
     if( portrait.isNull() )
     {
@@ -318,7 +344,7 @@ public:
     }
     else
       painter->drawPixmap( avatar, portrait );
-    const int contentLeft = avatar.right() + 10;
+    const int contentLeft = area.left() + HistoryContentLeft;
     const int contentWidth = qMax( 40, area.right() - contentLeft - 10 );
     QFont smallFont = option.font;
     smallFont.setPixelSize( 11 );
@@ -326,15 +352,15 @@ public:
     const QString time = index.data( TimeRole ).toString();
     const int timeWidth = QFontMetrics( smallFont ).horizontalAdvance( time );
     painter->setPen( QColor( "#8693A5" ) );
-    painter->drawText( QRect( area.right() - timeWidth - 10, area.top() + 10, timeWidth, 20 ), Qt::AlignRight | Qt::AlignVCenter, time );
+    painter->drawText( QRect( area.right() - timeWidth - 10, area.top() + 6, timeWidth, 18 ), Qt::AlignRight | Qt::AlignVCenter, time );
     painter->setPen( QColor( "#61728A" ) );
-    painter->drawText( QRect( contentLeft, area.top() + 10, qMax( 20, contentWidth - timeWidth - 8 ), 20 ),
+    painter->drawText( QRect( contentLeft, area.top() + 6, qMax( 20, contentWidth - timeWidth - 8 ), 18 ),
       Qt::AlignVCenter, QFontMetrics( smallFont ).elidedText( sender, Qt::ElideRight, qMax( 20, contentWidth - timeWidth - 8 ) ) );
-    QRect detail( contentLeft, area.top() + 36, contentWidth, area.height() - 46 );
+    QRect detail( contentLeft, area.top() + HistoryContentTop, contentWidth, area.height() - HistoryContentTop - 8 );
     const QPixmap thumbnail = index.data( ThumbnailRole ).value<QPixmap>();
     if( !thumbnail.isNull() )
     {
-      const QRect imageRect( contentLeft, detail.top(), 64, 64 );
+      const QRect imageRect( contentLeft, detail.top(), HistoryThumbnailSize, HistoryThumbnailSize );
       painter->save();
       QPainterPath clip;
       clip.addRoundedRect( imageRect, 6, 6 );
@@ -352,7 +378,7 @@ public:
     text.setTextOption( textOption );
     text.beginLayout();
     int lineTop = detail.top();
-    while( lineTop < detail.bottom() - QFontMetrics( option.font ).height() )
+    while( lineTop <= detail.bottom() )
     {
       QTextLine line = text.createLine();
       if( !line.isValid() ) break;
@@ -498,8 +524,16 @@ GuiSavedChat::GuiSavedChat( QWidget* parent, bool embedded )
   mp_results->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
   mp_results->setToolTip(QString::fromUtf8("选择结果，在下方定位原始聊天；点击原文中的文件或链接打开。"));
   mp_results->setObjectName(QStringLiteral("ShadowHistoryResults"));
+  if( m_embedded )
+  {
+    mp_results->setFrameShape( QFrame::NoFrame );
+    mp_results->setStyleSheet( QStringLiteral(
+      "QListWidget#ShadowHistoryResults{background:white;border:0;border-radius:0;padding:0;outline:0;}"
+      "QListWidget#ShadowHistoryResults::item{border:0;padding:3px;}" ) );
+  }
   mp_results->setItemDelegate(new HistoryResultDelegate(mp_results));
   mp_results->installEventFilter(this);
+  mp_results->viewport()->installEventFilter(this);
   split->addWidget(mp_results);split->addWidget(mp_teSavedChat);split->setHandleWidth(12);
   if( m_embedded )
   {
@@ -697,6 +731,24 @@ int GuiSavedChat::historyRecordIndex( const QListWidgetItem* item ) const
 
 bool GuiSavedChat::eventFilter( QObject* watched, QEvent* event )
 {
+  if( watched == mp_results->viewport() && event->type() == QEvent::MouseButtonRelease &&
+      mp_categories->currentIndex() == 0 )
+  {
+    QMouseEvent* mouse = static_cast<QMouseEvent*>( event );
+    QListWidgetItem* item = mp_results->itemAt( mouse->pos() );
+    if( mouse->button() == Qt::LeftButton && historyRecordIndex( item ) >= 0 &&
+        !item->data( ThumbnailRole ).value<QPixmap>().isNull() )
+    {
+      const QRect area = mp_results->visualItemRect( item ).adjusted( 4, 2, -4, -2 );
+      const QRect thumbnail( area.left() + HistoryContentLeft, area.top() + HistoryContentTop,
+        HistoryThumbnailSize, HistoryThumbnailSize );
+      if( thumbnail.contains( mouse->pos() ) )
+      {
+        const QUrl target( item->data( Qt::UserRole + 1 ).toString() );
+        QTimer::singleShot( 0, this, [this, target]() { checkAnchorClicked( target ); } );
+      }
+    }
+  }
   if( watched == mp_results && event->type() == QEvent::KeyPress && mp_categories->currentIndex() == 2 )
   {
     QKeyEvent* key = static_cast<QKeyEvent*>(event);
@@ -824,6 +876,12 @@ void GuiSavedChat::rebuildHistoryResults( bool resetReadingState )
   int resultCount=0;
   QString previousDay;
   QSet<QString> shownMedia;
+  QSet<QString> stickerMedia;
+  for( const HistoryRecord& record : m_records )
+    for( const QString& target : record.media )
+      if( record.html.contains( QStringLiteral( "<!--shadow-sticker-->" ) ) ||
+          shadowStoredSticker( QUrl( target ).toLocalFile(), Settings::instance().dataFolder() ) )
+        stickerMedia.insert( target );
   QList<int> recordOrder;
   for(int index=0;index<m_records.size();++index)recordOrder.append(index);
   std::stable_sort(recordOrder.begin(),recordOrder.end(),[this](int left,int right) {
@@ -844,7 +902,7 @@ void GuiSavedChat::rebuildHistoryResults( bool resetReadingState )
     if(!keyword.isEmpty() && !searchable.contains(keyword,Qt::CaseInsensitive)) continue;
     if(category==2) {
       QStringList uniqueTargets;
-      foreach(const QString& target,targets)if(!shownMedia.contains(target)){uniqueTargets<<target;shownMedia.insert(target);}
+      foreach(const QString& target,targets)if(!stickerMedia.contains(target)&&!shownMedia.contains(target)){uniqueTargets<<target;shownMedia.insert(target);}
       targets=uniqueTargets;if(targets.isEmpty())continue;
     }
     if(!r.timestamp.isValid()) ++unknown;
@@ -864,7 +922,7 @@ void GuiSavedChat::rebuildHistoryResults( bool resetReadingState )
         }
         QListWidgetItem* tile=new QListWidgetItem(mp_results);
         tile->setData(MediaRole,true);
-        const bool video=QStringList({"mp4","mov","avi","mkv","wmv"}).contains(file.suffix().toLower());
+        const bool video=ShadowVideoPreview::canPreview(QUrl(target));
         tile->setData(VideoRole,video);
         tile->setData(Qt::UserRole,i);tile->setData(Qt::UserRole+1,target);
         tile->setData(ResultKeyRole,m_recordKeys.at(i)+QLatin1Char('\n')+target);
@@ -892,7 +950,7 @@ void GuiSavedChat::rebuildHistoryResults( bool resetReadingState )
       detail=descriptions.join("\n");
     }
     if(category==3 && !r.text.isEmpty())detail=r.text+"\n"+detail;
-    if(detail.isEmpty() && !r.media.isEmpty()) detail=QString::fromUtf8("[图片和视频] %1").arg(QFileInfo(QUrl(r.media.first()).toLocalFile()).fileName());
+    if(detail.isEmpty() && !r.media.isEmpty()) detail=QStringLiteral("[图片和视频]");
     if(detail.size()>650) detail=detail.left(650)+QString::fromUtf8("…");
     const QString caption=heading+"\n"+detail;
     QListWidgetItem* item=new QListWidgetItem(caption,mp_results);
@@ -907,18 +965,7 @@ void GuiSavedChat::rebuildHistoryResults( bool resetReadingState )
         : r.timestamp.date()==QDate::currentDate().addDays(-1) ? QStringLiteral("昨天")
         : r.timestamp.toString("MM-dd");
       item->setData(TimeRole,time);
-      QString preview = detail;
-      if(category==0)
-      {
-        preview.remove(QRegularExpression("^\\s*\\d{4}-\\d{2}-\\d{2}\\s*"));
-        preview.remove(QRegularExpression("^\\s*\\[?\\d{1,2}:\\d{2}(?::\\d{2})?\\]?\\s*"));
-        if(!r.sender.isEmpty()&&preview.startsWith(r.sender))
-          preview=preview.mid(r.sender.size()).trimmed();
-        preview.remove(QRegularExpression("^\\s*\\(?\\d{4}-\\d{2}-\\d{2}[ T]\\d{1,2}:\\d{2}(?::\\d{2})?\\)?\\s*"));
-        if(preview.startsWith(":")||preview.startsWith(QStringLiteral("：")))preview=preview.mid(1).trimmed();
-        preview.remove(QChar::ObjectReplacementCharacter);
-        if(!r.media.isEmpty())preview=QStringLiteral("[图片和视频] ")+preview;
-      }
+      const QString preview = category==0 ? shadowHistoryMessagePreview(r) : detail;
       item->setData(PreviewRole,preview);
       for(const User& user : UserManager::instance().userList().toList())
         if(Bee::userNameToShow(user,true)==r.sender)
@@ -928,10 +975,16 @@ void GuiSavedChat::rebuildHistoryResults( bool resetReadingState )
         }
       if(category==0&&!r.media.isEmpty())
       {
-        QImageReader reader(QUrl(r.media.first()).toLocalFile());
-        const QSize sourceSize=reader.size();
-        if(sourceSize.isValid())reader.setScaledSize(sourceSize.scaled(128,128,Qt::KeepAspectRatioByExpanding));
-        item->setData(ThumbnailRole,QPixmap::fromImage(reader.read()));
+        item->setData( Qt::UserRole + 1, r.media.first() );
+        if( ShadowVideoPreview::canPreview( QUrl( r.media.first() ) ) )
+          item->setData( ThumbnailRole, shadowVideoCardPixmap( QSize( 128, 128 ) ) );
+        else
+        {
+          QImageReader reader(QUrl(r.media.first()).toLocalFile());
+          const QSize sourceSize=reader.size();
+          if(sourceSize.isValid())reader.setScaledSize(sourceSize.scaled(128,128,Qt::KeepAspectRatioByExpanding));
+          item->setData(ThumbnailRole,QPixmap::fromImage(reader.read()));
+        }
       }
     }
   }

@@ -91,7 +91,7 @@ void ChatMessage::createFromMessage( const Message& m )
     if(!rich.isEmpty())
     {
       const QString safe=ShadowRichText::sanitize(rich);
-      if(!safe.isEmpty()&&ShadowRichText::plainText(safe)==ShadowRichText::plainText(m_message))m_message=safe;
+      if(!safe.isEmpty()&&ShadowRichText::messageText(safe)==ShadowRichText::messageText(m_message))m_message=safe;
     }
   }
   if( !m.isSourceCode() )

@@ -2,7 +2,7 @@
 
 ## Phosphor Icons
 
-The icons under `src/images/shadowchat/icons/` are selected unmodified glyphs from [Phosphor Icons Core](https://github.com/phosphor-icons/core), regular weight.
+The icons under `src/images/shadowchat/icons/` are selected unmodified glyphs from [Phosphor Icons Core](https://github.com/phosphor-icons/core), regular and fill weights.
 
 MIT License
 

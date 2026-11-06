@@ -256,6 +256,8 @@ private slots:
   void showShadowSettings();
   void exportShadowWorkspace();
   void importShadowWorkspace();
+  void moveShadowSeat();
+  void editOwnWorkgroups();
   void onModernSearchChanged( const QString& );
   void showModernListPanel();
 
@@ -292,6 +294,7 @@ private:
   void updateModernWindowCorners();
   void applyStartupWindowSize();
   void updateModernNavigation();
+  void showOwnProfileCard( bool editWorkgroups );
   void updateModernNetworkState();
   void updateModernListState();
   void updateModernChatHeader( const Chat& );

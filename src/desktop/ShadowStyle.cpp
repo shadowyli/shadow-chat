@@ -15,8 +15,8 @@ namespace
 {
   const QColor kTextSecondary( "#5F6B7A" );
   const QColor kBrand( "#2563EB" );
-  const QColor kNavIcon( "#AEB8C6" );
-  const QColor kNavIconActive( "#FFFFFF" );
+  const QColor kNavIcon( "#5F6B7A" );
+  const QColor kNavIconActive( "#DB6E67" );
 
   QString iconResourcePath( const QString& name )
   {
@@ -57,6 +57,7 @@ QPixmap ShadowStyle::tintedPixmap( const QString& resource_path, const QSize& si
     return source;
 
   QPixmap tinted( source.size() );
+  tinted.setDevicePixelRatio( source.devicePixelRatio() );
   tinted.fill( Qt::transparent );
   QPainter painter( &tinted );
   painter.drawPixmap( 0, 0, source );
@@ -68,7 +69,11 @@ QPixmap ShadowStyle::tintedPixmap( const QString& resource_path, const QSize& si
 
 QIcon ShadowStyle::navigationIcon( const QString& name )
 {
-  return iconWithStates( iconResourcePath( name ), kNavIcon, kNavIconActive );
+  const QString path = iconResourcePath( name );
+  QIcon icon = iconWithStates( path, kNavIcon, kNavIconActive );
+  icon.addPixmap( tintedPixmap( path, QSize( 64, 64 ), kNavIcon ), QIcon::Active, QIcon::Off );
+  icon.addPixmap( tintedPixmap( path, QSize( 64, 64 ), kNavIconActive ), QIcon::Active, QIcon::On );
+  return icon;
 }
 
 QIcon ShadowStyle::actionIcon( const QString& name )
@@ -141,12 +146,13 @@ QString ShadowStyle::applicationStyleSheet()
     "QToolButton#ShadowCloseButton:hover { background: #D83B3E; color: #FFFFFF; }"
     "QToolButton#ShadowTitleProfile { background: transparent; border: 0; padding: 4px; min-width: 32px; min-height: 32px; border-radius: 16px; }"
     "QToolButton#ShadowTitleProfile:hover { background: #DCE7EF; }"
-    "QWidget#ShadowNavRail { background: #030a0a; border: 0; }"
-    "QLabel#ShadowBrandName { color: #FFFFFF; font-size: 14px; font-weight: 600; padding-bottom: 4px; }"
-    "QToolButton#ShadowNavButton { color: #AEB8C6; background: transparent; border: 1px solid transparent; border-radius: 10px; padding: 8px 4px; min-height: 48px; }"
-    "QToolButton#ShadowNavButton:hover { background: #222D43; color: #FFFFFF; }"
-    "QToolButton#ShadowNavButton:focus { border: 1px solid #8CB4FF; }"
-    "QToolButton#ShadowNavButton:checked { background: #e93d34; color: #FFFFFF; }"
+    "QWidget#ShadowNavRail { background: #E8F0F4; border: 0; }"
+    "QLabel#ShadowBrandName { color: #526174; font-size: 14px; font-weight: 600; padding-bottom: 4px; }"
+    "QToolButton#ShadowNavButton { color: #5F6B7A; background: transparent; border: 1px solid transparent; border-radius: 10px; padding: 8px 4px; min-height: 48px; }"
+    "QToolButton#ShadowNavButton:hover { background: #F4F8FA; }"
+    "QToolButton#ShadowNavButton:checked { background: #F8FBFC; color: #B83730; font-weight: 600; }"
+    "QToolButton#ShadowNavButton:checked:hover { background: #FFFFFF; }"
+    "QToolButton#ShadowNavButton:focus { border: 1px solid #B4C1CA; }"
     "QToolButton#ShadowNavButton::menu-indicator { image: none; }"
     "QWidget#ShadowListPanel { background: #F2F7FA; border-right: 1px solid #E3E8F0; }"
     "QLabel#ShadowEyebrow { color: #2563EB; font-size: 11px; font-weight: 600; }"
@@ -180,7 +186,7 @@ QString ShadowStyle::applicationStyleSheet()
     "QToolButton#ShadowBackButton:hover { background: #EEF3FA; }"
     "QToolButton#ShadowBackButton:focus { border-color: #2563EB; }"
     "QWidget#ShadowChatPlaceholder { background: #F5F7FB; }"
-    "QFrame#ShadowWelcomeCard { background: #FFFFFF; border: 1px solid #E3E8F0; border-radius: 16px; }"
+    "QFrame#ShadowWelcomeCard { background: transparent; border: 0; border-radius: 0; }"
     "QLabel#ShadowPlaceholderTitle { color: #172033; font-size: 18px; font-weight: 600; }"
     "QLabel#ShadowPlaceholderHint { color: #6B7686; font-size: 13px; padding-top: 2px; }"
     "QLabel#ShadowPrivacyPill { color: #2457B8; background: #EAF1FF; border: 1px solid #D4E2FF; border-radius: 9px; padding: 7px 11px; font-size: 12px; }"

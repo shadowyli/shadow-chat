@@ -7,313 +7,256 @@
 #include "ShadowBirthdayEdit.h"
 #include "ShadowDialogChrome.h"
 #include "ShadowStyle.h"
-#include <QHBoxLayout>
-#include <QGridLayout>
 #include <QtTest>
 #include <cstdio>
+
+#define CHECK(value) do { if( !(value) ) { std::fprintf( stderr, "FAIL line %d: %s\n", __LINE__, #value ); return 1; } } while( false )
+
+static QRect geometryIn( QWidget* widget, QWidget* target )
+{
+  return QRect( widget->mapTo( target, QPoint() ), widget->size() );
+}
 
 int main( int argc, char** argv )
 {
   QApplication::setAttribute( Qt::AA_EnableHighDpiScaling );
   QApplication::setAttribute( Qt::AA_UseHighDpiPixmaps );
-  BeeApplication app( argc, argv ); QTemporaryDir folder; Random::init();
-  std::printf( "profile scale=%s platform=%s dpr=%.2f\n",
-    qPrintable( qEnvironmentVariable( "QT_SCALE_FACTOR" ) ),
-    qPrintable( QGuiApplication::platformName() ), app.devicePixelRatio() );
+  BeeApplication app( argc, argv );
+  QTemporaryDir folder;
+  CHECK( folder.isValid() );
+  app.setProperty( "shadowAccountRoot", folder.path() );
   app.setFont( ShadowStyle::applicationFont() );
   ShadowDialogChrome::install( &app );
-  std::setvbuf( stdout, Q_NULLPTR, _IONBF, 0 ); std::puts( "Fixture QApplication ready" );
-  Settings& settings = Settings::instance(); settings.setDefaultFolders(); settings.createLocalUser( "Lin" ); settings.setAccountDataFolder( folder.path() ); settings.load();
-  IconManager::instance(); UserManager::instance();
-  std::puts( "Fixture settings ready" );
-  User user = settings.localUser(); user.setAccountName( "lin@example.test" ); user.setName( QStringLiteral( "林言" ) );
-  VCard vcard; vcard.setNickName( QStringLiteral( "林言" ) ); vcard.setEmail( "lin@example.test" );
-  vcard.setInfo( QStringLiteral( "角色与场景设计 · 让好想法变成看得见的作品" ) );
-  vcard.setFirstName( "Yan" ); vcard.setLastName( "Lin" ); vcard.setBirthday( QDate( 1998, 6, 17 ) );
-  vcard.setPhoneNumber( "020-12345678" ); vcard.setRoomLocation( QStringLiteral( "内容制作中心 · A12" ) );
-  QPixmap photo( 96, 96 ); photo.fill( QColor( "#609bea" ) );
-  QPainter avatarPainter( &photo ); avatarPainter.setPen( Qt::white ); avatarPainter.setFont( QFont( "Microsoft YaHei UI", 32 ) ); avatarPainter.drawText( photo.rect(), Qt::AlignCenter, QStringLiteral( "林" ) ); avatarPainter.end();
-  vcard.setPhoto( photo ); user.setVCard( vcard ); settings.setLocalUser( user );
-  user.setWorkgroups( QStringList() << QStringLiteral( "内容制作中心" ) << QStringLiteral( "美术组" ) );
+  Random::init();
+  Settings& settings = Settings::instance();
+  settings.setDefaultFolders();
+  settings.createLocalUser( "synthetic-inline-profile" );
+  settings.setAccountDataFolder( folder.path() );
+  settings.load();
+  IconManager::instance();
+  UserManager::instance();
+  User user = settings.localUser();
+  user.setAccountName( "inline@example.test" );
+  user.setName( QStringLiteral( "林言" ) );
+  VCard card;
+  card.setNickName( QStringLiteral( "林言" ) );
+  card.setEmail( "inline@example.test" );
+  card.setInfo( QStringLiteral( "角色与场景设计" ) );
+  card.setPhoneNumber( "020-12345678" );
+  card.setFirstName( "Yan" );
+  card.setLastName( "Lin" );
+  card.setRoomLocation( QStringLiteral( "A12" ) );
+  card.setBirthday( QDate( 1998, 6, 17 ) );
+  QPixmap photo( 96, 96 );
+  photo.fill( QColor( "#609BEA" ) );
+  card.setPhoto( photo );
+  user.setVCard( card );
+  user.setWorkgroups( QStringList{ QStringLiteral( "美术组" ) } );
   settings.setLocalUser( user );
-  int failures = 0;
-  auto check = [&]( bool value, const char* text ) { std::printf( "%s %s\n", value ? "PASS" : "FAIL", text ); if( !value ) ++failures; };
-  std::puts( "Fixture user ready" );
-  QWidget host; host.resize( 800, 600 ); host.show();
-  GuiEditVCard dialog( &host ); dialog.setModal( true ); std::puts( "Fixture dialog constructed" ); dialog.setUser( user ); dialog.setSizeGripEnabled( true ); std::puts( "Fixture user populated" ); dialog.show(); app.processEvents();
-  foreach( const QString& family, QFontDatabase().families() )
-    if( family.contains( "YaHei", Qt::CaseInsensitive ) || family.contains( "Segoe", Qt::CaseInsensitive ) || family.contains( "SimSun", Qt::CaseInsensitive ) )
-      std::printf( "Installed font: %s\n", qPrintable( family ) );
-  foreach( QLabel* label, dialog.findChildren<QLabel*>() )
-    if( label->objectName() == "profileCardInfo" || label->objectName() == "profileCardNickname" )
-      std::printf( "Font %s requested=%s resolved=%s point=%g pixel=%d style=%d\n", qPrintable( label->objectName() ), qPrintable( label->font().family() ), qPrintable( QFontInfo( label->font() ).family() ), label->font().pointSizeF(), label->font().pixelSize(), int( label->font().styleHint() ) );
-  QLabel* bodyFontProbe = dialog.findChild<QLabel*>( "profileCardInfo" );
-  check( QFontInfo( bodyFontProbe->font() ).family() == "Microsoft YaHei UI" && bodyFontProbe->font().pixelSize() == 13,
-    "profile body resolves to installed sans YaHei UI at13px" );
-  QPushButton* editFontProbe = dialog.findChild<QPushButton*>( "editMyProfile" );
-  check( QFontInfo( editFontProbe->font() ).family() == "Microsoft YaHei UI" && editFontProbe->font().pixelSize() == 13,
-    "profile edit action resolves to installed sans YaHei UI at13px" );
-  QStackedWidget* pages = dialog.findChild<QStackedWidget*>();
-  check( pages && pages->currentIndex() == 0 && dialog.findChild<QPushButton*>( "editMyProfile" )->isVisible(), "own profile opens as card with explicit edit entrance" );
-  check( dialog.findChild<QLabel*>( "profileCardEmail" )->text() == "lin@example.test" &&
-    !dialog.findChild<QLabel*>( "profileCardAccount" ), "account appears once in the email row" );
-  check( dialog.width() <= 430 && dialog.findChild<QLabel*>( "profileCardAvatar" )->width() == 64,
-    "profile opens as a compact portrait card with a 64px avatar" );
+  UserManager::instance().setUser( user );
+  QWidget host;
+  host.resize( 800, 600 );
+  host.show();
+  GuiEditVCard dialog( &host );
+  dialog.setUser( user );
+  dialog.show();
+  QTest::qWait( 40 );
+  QStackedWidget* pages = dialog.findChild<QStackedWidget*>( "ShadowProfilePages" );
   QLabel* nickname = dialog.findChild<QLabel*>( "profileCardNickname" );
-  QLabel* avatar = dialog.findChild<QLabel*>( "profileCardAvatar" );
-  check( nickname->mapTo( &dialog, QPoint() ).y() >=
-    avatar->mapTo( &dialog, QPoint( 0, avatar->height() ) ).y(),
-    "nickname sits below avatar like the reference card" );
-  check( dialog.findChild<QLabel*>( "profileCardClock" )->text().contains( "UTC" ) &&
-    dialog.findChild<QLabel*>( "profileCardGroups" )->text().contains( QStringLiteral( "美术组" ) ),
-    "time zone and workgroups show real local data" );
-  check( !dialog.findChild<QToolButton*>( "profileEditInfo" )->icon().pixmap( 16, 16 ).isNull() &&
-    !dialog.findChild<QToolButton*>( "profileCopyEmail" )->icon().pixmap( 16, 16 ).isNull() &&
-    !ShadowStyle::tintedPixmap( ":/images/shadowchat/icons/clock.svg", QSize( 18, 18 ), Qt::gray ).isNull(),
-    "profile action and information icons render from the deployed SVG plugin" );
-  dialog.findChild<QToolButton*>( "profileCopyEmail" )->click();
-  check( QApplication::clipboard()->text() == "lin@example.test", "email copy action writes the current account email" );
-  int selectedStatus = -1;
-  QObject::connect( &dialog, &GuiEditVCard::userStatusSelected, &dialog, [&]( int status ) {
-    selectedStatus = status;
-    dialog.setProfileStatus( status );
-  } );
-  QPushButton* statusButton = dialog.findChild<QPushButton*>( "profileCardStatus" );
-  for( QAction* action : statusButton->menu()->actions() )
-    if( action->data().toInt() == User::Busy ) action->trigger();
-  check( selectedStatus == User::Busy &&
-    statusButton->menu()->actions().at( 1 )->isChecked(),
-    "work status menu emits the selected status and reflects the resulting state" );
-  check( !dialog.findChild<QPushButton*>( "mp_pbRegenerateHash" )->isVisible(), "device identity reset absent from initial profile card" );
-  check( dialog.findChild<QLabel*>( "shadowDialogTitle" ) &&
-    dialog.findChild<QLabel*>( "shadowDialogTitle" )->text().isEmpty() &&
-    !dialog.findChild<QLabel*>( "shadowDialogTitle" )->isVisible(), "profile chrome duplicate title removed" );
-  QPushButton* cardClose = dialog.findChild<QPushButton*>( "closeMyProfile" );
-  check( dialog.rect().contains( QRect( cardClose->mapTo( &dialog, QPoint() ), cardClose->size() ) ),
-    "card footer fully inside initial window without manual resize" );
-  check( dialog.screen()->availableGeometry().contains( dialog.frameGeometry() ),
-    "profile first-open geometry stays inside the owning screen" );
-  QWidget* surface = dialog.findChild<QWidget*>( "shadowDialogSurface" );
-  QWidget* shadow = dialog.findChild<QWidget*>( "shadowDialogShadow" );
-  const QMargins shadowMargins = dialog.layout()->contentsMargins();
-  check( surface && shadow && dialog.testAttribute( Qt::WA_TranslucentBackground ) &&
-    shadow->isVisible() && shadow->testAttribute( Qt::WA_TransparentForMouseEvents ),
-    "profile has a translucent outer shadow that does not intercept mouse input" );
-  check( surface && !surface->mask().contains( QPoint() ) && dialog.mask().isEmpty() &&
-    shadowMargins == QMargins( 14, 14, 14, 14 ) &&
-    surface->geometry().left() >= shadowMargins.left() && surface->geometry().top() >= shadowMargins.top() &&
-    shadow->geometry() == dialog.rect(), "rounded content leaves room for all sides of the shadow" );
-  if( surface && shadow )
-  {
-    const QImage pixels = dialog.grab().toImage();
-    const qreal scale = pixels.devicePixelRatio();
-    auto pixel = [&]( int horizontal, int vertical ) {
-      return pixels.pixelColor( qRound( horizontal * scale ), qRound( vertical * scale ) );
-    };
-    const QRect bounds = surface->geometry();
-    const QColor leftShadow = pixel( bounds.left() - 8, bounds.center().y() );
-    const QColor topShadow = pixel( bounds.center().x(), bounds.top() - 8 );
-    const QColor rightShadow = pixel( bounds.right() + 8, bounds.center().y() );
-    const QColor bottomShadow = pixel( bounds.center().x(), bounds.bottom() + 8 );
-    check( leftShadow.alpha() > 0 && topShadow.alpha() > 0 &&
-      rightShadow.alpha() > 0 && bottomShadow.alpha() > 0 &&
-      leftShadow.alpha() < 180 && bottomShadow.alpha() < 180,
-      "native raster contains soft translucent shadow pixels on all four edges" );
-    check( pixel( 0, 0 ).alpha() == 0 &&
-      pixel( bounds.center().x(), bounds.top() - 8 ).alpha() <
-        pixel( bounds.center().x(), bounds.top() - 2 ).alpha(),
-      "shadow fades outward and outer corners remain transparent" );
-    QImage whiteBackground( pixels.size(), QImage::Format_ARGB32_Premultiplied );
-    whiteBackground.fill( Qt::white );
-    QPainter compositing( &whiteBackground );
-    compositing.drawImage( QPoint(), pixels );
-    compositing.end();
-    whiteBackground.save( QDir::currentPath() + "/profile-shadow-on-white.png" );
-    for( QSizeGrip* grip : dialog.findChildren<QSizeGrip*>( QString(), Qt::FindDirectChildrenOnly ) )
-      check( bounds.contains( grip->geometry() ), "resize grip stays inside content surface instead of shadow" );
-  }
-  dialog.grab().save( QDir::currentPath() + "/profile-card-proof.png" );
-  dialog.findChild<QPushButton*>( "editMyProfile" )->click(); app.processEvents();
-  QTest::qWait( 30 ); app.processEvents();
-  check( pages->currentIndex() == 1 && dialog.findChild<QLineEdit*>( "mp_lePhone" )->isVisible() &&
-    dialog.findChild<QDateEdit*>( "mp_deBirthday" )->isVisible(),
-    "editor shows birthday and phone directly in one form" );
-  check( !dialog.findChild<QWidget*>( "mp_advanced" ) && !dialog.findChild<QPushButton*>( "mp_pbAdvanced" ) &&
-    !dialog.findChild<QPushButton*>( "mp_pbRemovePhoto" ) && !dialog.findChild<QLabel*>( "mp_lEmailHint" ),
-    "legacy advanced toggle remove-avatar button and email hint are gone" );
-  check( !dialog.findChild<QLineEdit*>( "mp_leFirstName" ) && !dialog.findChild<QLineEdit*>( "mp_leLastName" ) &&
-    !dialog.findChild<QLineEdit*>( "mp_leRoom" ), "first name surname and location fields removed" );
-  QList<QLabel*> alignedLabels = QList<QLabel*>() << dialog.findChild<QLabel*>( "mp_lNickname" ) <<
-    dialog.findChild<QLabel*>( "mp_lEmail" ) << dialog.findChild<QLabel*>( "mp_lInfo" ) <<
-    dialog.findChild<QLabel*>( "mp_lBirthday" ) << dialog.findChild<QLabel*>( "mp_lPhone" ) <<
-    dialog.findChild<QLabel*>( "mp_lColor" );
-  bool labels_aligned = true;
-  foreach( QLabel* label, alignedLabels )
-    labels_aligned = labels_aligned && label->alignment().testFlag( Qt::AlignRight ) &&
-      label->width() >= 64 && label->mapTo( &dialog, QPoint() ).x() ==
-        alignedLabels.first()->mapTo( &dialog, QPoint() ).x();
-  QLineEdit* alignedNickname = dialog.findChild<QLineEdit*>( "mp_leNickname" );
-  QLineEdit* alignedPhone = dialog.findChild<QLineEdit*>( "mp_lePhone" );
-  QDateEdit* alignedBirthday = dialog.findChild<QDateEdit*>( "mp_deBirthday" );
-  check( labels_aligned && alignedNickname->width() == alignedPhone->width() &&
-    alignedNickname->width() == alignedBirthday->width() && alignedNickname->height() == alignedPhone->height(),
-    "all field labels share one right-aligned column and controls share width and height" );
-  QPushButton* saveAction = dialog.findChild<QPushButton*>( "mp_pbOk" );
-  check( saveAction->isVisible() && dialog.rect().contains( QRect( saveAction->mapTo( &dialog, QPoint() ), saveAction->size() ) ),
-    "save button fully visible immediately after entering editor" );
-  QScrollArea* editorScroll = dialog.findChild<QScrollArea*>( "profileEditorScroll" );
-  check( editorScroll && editorScroll->horizontalScrollBar()->maximum() == 0, "editor never clips horizontally" );
-  dialog.grab().save( QDir::currentPath() + "/profile-editor-first-open.png" );
-  dialog.resize( 580, 360 ); QTest::qWait( 30 ); app.processEvents();
-  check( dialog.rect().contains( QRect( saveAction->mapTo( &dialog, QPoint() ), saveAction->size() ) ) &&
-    editorScroll->verticalScrollBar()->maximum() > 0, "small window scrolls form while keeping save footer visible" );
-  check( shadow && shadow->geometry() == dialog.rect() && surface &&
-    surface->geometry().left() >= shadowMargins.left() && surface->mask().contains( surface->rect().center() ),
-    "shadow and rounded surface follow small-window resizing" );
-  editorScroll->ensureWidgetVisible( dialog.findChild<QLineEdit*>( "mp_lePhone" ) ); app.processEvents();
-  QLineEdit* phoneAction = dialog.findChild<QLineEdit*>( "mp_lePhone" );
-  check( editorScroll->viewport()->rect().contains( phoneAction->mapTo( editorScroll->viewport(), phoneAction->rect().center() ) ),
-    "small-window optional fields reachable without stretching dialog" );
-  dialog.grab().save( QDir::currentPath() + "/profile-editor-small-window.png" );
-  check( dialog.findChild<QLineEdit*>( "mp_leEmail" )->isReadOnly(), "account email cannot be renamed through profile editor" );
-  dialog.findChild<QLineEdit*>( "mp_leNickname" )->setText( QStringLiteral( "林言 · 美术" ) );
-  dialog.findChild<QPlainTextEdit*>( "mp_teInfo" )->setPlainText( QStringLiteral( "角色美术与场景设计" ) );
-  dialog.grab().save( QDir::currentPath() + "/profile-editor-proof.png" );
+  QPushButton* edit = dialog.findChild<QPushButton*>( "editMyProfile" );
+  CHECK( pages && pages->currentIndex() == 0 && edit && edit->isVisible() );
+  CHECK( qAbs( geometryIn( nickname, &dialog ).center().y() - geometryIn( edit, &dialog ).center().y() ) <= 2 );
+  CHECK( dialog.findChild<QLabel*>( "profileCardGroups" )->text() == QStringLiteral( "美术组" ) );
+  CHECK( dialog.findChild<QLabel*>( "profileCardEmail" )->text() == "inline@example.test" );
+  CHECK( !dialog.findChild<QPushButton*>( "mp_pbRegenerateHash" )->isVisible() );
+  CHECK( !dialog.findChild<QWidget*>( "profileEditor" )->isVisible() );
+  QToolButton* avatar = dialog.findChild<QToolButton*>( "profileCardAvatar" );
+  CHECK( avatar && !avatar->icon().isNull() && avatar->focusPolicy() != Qt::NoFocus );
+  CHECK( avatar->accessibleName() == QStringLiteral( "更换头像" ) && avatar->cursor().shape() == Qt::PointingHandCursor );
+  CHECK( !dialog.findChild<QToolButton*>( "profileEditPhoto" ) );
+  const QString proof = qEnvironmentVariable( "SHADOWCHAT_UI_PROOF_DIR", QDir::currentPath() );
+  QDir().mkpath( proof );
+  CHECK( dialog.grab().save( QDir( proof ).filePath( "inline-profile-card.png" ) ) );
+  const int cardWidth = dialog.width();
+  edit->click();
+  QTest::qWait( 30 );
+  QLineEdit* nickEdit = dialog.findChild<QLineEdit*>( "mp_leNickname" );
+  CHECK( nickEdit->isVisible() && pages->currentIndex() == 0 && dialog.width() == cardWidth );
+  CHECK( !dialog.findChild<QWidget*>( "profileEditor" )->isVisible() );
+  nickEdit->setText( QStringLiteral( "林言 · 美术" ) );
+  QTest::keyClick( nickEdit, Qt::Key_Return );
+  QTest::qWait( 20 );
+  CHECK( !nickEdit->isVisible() && nickname->text() == QStringLiteral( "林言 · 美术" ) );
+  CHECK( dialog.vCard().nickName() == user.vCard().nickName() );
+  dialog.findChild<QToolButton*>( "profileEditInfo" )->click();
+  QPlainTextEdit* info = dialog.findChild<QPlainTextEdit*>( "mp_teInfo" );
+  CHECK( info->isVisible() && pages->currentIndex() == 0 );
+  info->setPlainText( QStringLiteral( "角色设计\n不跳转编辑" ) );
+  dialog.findChild<QToolButton*>( "profileEditPhone" )->click();
+  QLineEdit* phone = dialog.findChild<QLineEdit*>( "mp_lePhone" );
+  CHECK( phone->isVisible() && pages->currentIndex() == 0 );
+  phone->setText( "8888" );
+  dialog.findChild<QToolButton*>( "profileEditWorkgroups" )->click();
+  QTest::qWait( 30 );
+  QLineEdit* groups = dialog.findChild<QLineEdit*>( "profileWorkgroupsEdit" );
+  std::printf( "group editor visible=%d focus=%d page=%d active=%d focus-object=%s\n",
+    groups->isVisible(), groups->hasFocus(), pages->currentIndex(), dialog.isActiveWindow(),
+    QApplication::focusWidget() ? qPrintable( QApplication::focusWidget()->objectName() ) : "(none)" );
+  dialog.grab().save( QDir( proof ).filePath( "inline-profile-before-group-save.png" ) );
+  CHECK( groups->isVisible() && groups->hasFocus() && pages->currentIndex() == 0 );
+  groups->setText( QStringLiteral( " 美术组、程序组, 美术组 " ) );
+  CHECK( dialog.grab().save( QDir( proof ).filePath( "inline-profile-editing.png" ) ) );
+  QPushButton* save = dialog.findChild<QPushButton*>( "closeMyProfile" );
+  CHECK( save->text() == QStringLiteral( "保存" ) && dialog.rect().contains( geometryIn( save, &dialog ) ) );
+  CHECK( !dialog.findChild<QPushButton*>( "mp_pbOk" )->isVisible() );
   dialog.findChild<QLineEdit*>( "mp_leEmail" )->setText( "tampered@example.test" );
-  dialog.findChild<QPushButton*>( "mp_pbOk" )->click();
-  check( dialog.result() == QDialog::Accepted && dialog.vCard().nickName() == QStringLiteral( "林言 · 美术" ), "save accepts edited nickname" );
-  check( dialog.vCard().email() == "lin@example.test", "save preserves account email despite programmatic field change" );
-  check( dialog.vCard().firstName() == "Yan" && dialog.vCard().lastName() == "Lin" && dialog.vCard().birthday() == QDate( 1998, 6, 17 ) && dialog.vCard().phoneNumber() == "020-12345678" && dialog.vCard().roomLocation() == QStringLiteral( "内容制作中心 · A12" ) && !dialog.vCard().photo().isNull(), "removed fields and avatar preserve existing data when saving other edits" );
-  GuiEditVCard optional; optional.setUser( user ); optional.show(); optional.findChild<QPushButton*>( "editMyProfile" )->click(); app.processEvents();
-  ShadowBirthdayEdit* optionalBirthday = optional.findChild<ShadowBirthdayEdit*>( "mp_deBirthday" );
-  check( optional.findChild<QDateEdit*>( "mp_deBirthday" )->isVisible() &&
-    optional.findChild<QLineEdit*>( "mp_lePhone" )->isVisible() &&
-    optional.findChild<QPushButton*>( "mp_pbRegenerateHash" )->isVisible(),
-    "birthday phone and identity action reachable without an advanced toggle" );
-  check( optionalBirthday && optionalBirthday->hasBirthday() && optionalBirthday->birthday() == QDate( 1998, 6, 17 ),
-    "existing birthday is loaded unchanged" );
-  optional.findChild<QLineEdit*>( "mp_lePhone" )->setText( "8888" );
-  optional.findChild<QPushButton*>( "mp_pbOk" )->click();
-  check( optional.vCard().phoneNumber() == "8888" && optional.vCard().birthday() == QDate( 1998, 6, 17 ) &&
-    !optional.regenerateUserHash(), "untouched existing birthday is preserved when saving other fields" );
-
-  User noBirthdayUser = user; VCard noBirthdayCard = noBirthdayUser.vCard(); noBirthdayCard.setBirthday( QDate() );
-  noBirthdayUser.setVCard( noBirthdayCard );
-  GuiEditVCard noBirthday; noBirthday.setUser( noBirthdayUser ); noBirthday.show();
-  noBirthday.findChild<QPushButton*>( "editMyProfile" )->click(); app.processEvents();
-  ShadowBirthdayEdit* emptyBirthdayEdit = noBirthday.findChild<ShadowBirthdayEdit*>( "mp_deBirthday" );
-  check( emptyBirthdayEdit->text() == QStringLiteral( "未填写" ) && emptyBirthdayEdit->isEmpty() &&
-    emptyBirthdayEdit->date() != QDate() && emptyBirthdayEdit->property( "empty" ).toBool(),
-    "missing birthday shows an explicit empty state instead of 1900-01-01" );
-  noBirthday.findChild<QPushButton*>( "mp_pbOk" )->click();
-  check( !noBirthday.vCard().birthday().isValid(),
-    "saving without choosing a birthday writes no date and never fabricates 1900" );
-
-  User legacyUser = user; VCard legacyCard = legacyUser.vCard(); legacyCard.setBirthday( QDate( 1900, 1, 1 ) );
-  legacyUser.setVCard( legacyCard );
-  GuiEditVCard legacy; legacy.setUser( legacyUser ); legacy.show();
-  legacy.findChild<QPushButton*>( "editMyProfile" )->click(); app.processEvents();
-  ShadowBirthdayEdit* legacyBirthdayEdit = legacy.findChild<ShadowBirthdayEdit*>( "mp_deBirthday" );
-  check( legacyBirthdayEdit->hasBirthday() && legacyBirthdayEdit->birthday() == QDate( 1900, 1, 1 ),
-    "legacy 1900-01-01 is treated as stored data rather than an empty marker" );
-  legacy.findChild<QPushButton*>( "mp_pbOk" )->click();
-  check( legacy.vCard().birthday() == QDate( 1900, 1, 1 ),
-    "existing 1900-01-01 birthday is preserved without silent rewriting" );
-  const QList<QDate> storedDates = { QDate( 1900, 7, 19 ), QDate( 1200, 2, 3 ),
-    QDate( 1, 1, 1 ), QDate::currentDate().addYears( 20 ) };
-  for( const QDate& storedDate : storedDates )
+  QSignalSpy accepted( &dialog, &QDialog::accepted );
+  save->click();
+  CHECK( accepted.count() == 1 && dialog.result() == QDialog::Accepted );
+  CHECK( dialog.vCard().nickName() == QStringLiteral( "林言 · 美术" ) &&
+    dialog.vCard().info() == QStringLiteral( "角色设计\n不跳转编辑" ) && dialog.vCard().phoneNumber() == "8888" );
+  CHECK( dialog.workgroups() == QStringList( { QStringLiteral( "美术组" ), QStringLiteral( "程序组" ) } ) );
+  CHECK( dialog.vCard().email() == card.email() && dialog.vCard().birthday() == card.birthday() &&
+    dialog.vCard().firstName() == card.firstName() && dialog.vCard().lastName() == card.lastName() &&
+    dialog.vCard().roomLocation() == card.roomLocation() && dialog.vCard().photo().toImage() == card.photo().toImage() );
+  CHECK( !dialog.regenerateUserHash() && settings.localUser().vCard().nickName() == card.nickName() );
+  std::puts( "PASS inline nickname/signature/phone/workgroups save as one draft without switching to the large form" );
+  for( const QString& closing : QStringList{ "cancel", "escape", "chrome" } )
   {
-    User storedUser = user;
-    VCard storedCard = storedUser.vCard();
-    storedCard.setBirthday( storedDate ); storedUser.setVCard( storedCard );
-    GuiEditVCard stored; stored.setUser( storedUser ); stored.show();
-    stored.findChild<QPushButton*>( "editMyProfile" )->click(); app.processEvents();
-    ShadowBirthdayEdit* storedEdit = stored.findChild<ShadowBirthdayEdit*>( "mp_deBirthday" );
-    check( storedEdit->birthday() == storedDate && storedEdit->hasBirthday() &&
-      storedEdit->text() != QStringLiteral( "未填写" ),
-      "stored 1900 early or future birthday remains an explicit valid value" );
-    stored.findChild<QLineEdit*>( "mp_lePhone" )->setText( "changed-other-field" );
-    stored.findChild<QPushButton*>( "mp_pbOk" )->click();
-    check( stored.vCard().birthday() == storedDate && stored.vCard().phoneNumber() == "changed-other-field",
-      "saving another field leaves stored 1900 early or future birthday unchanged" );
+    GuiEditVCard canceled( &host );
+    canceled.setUser( user );
+    canceled.show();
+    QTest::qWait( 20 );
+    canceled.findChild<QToolButton*>( "profileEditWorkgroups" )->click();
+    canceled.findChild<QLineEdit*>( "profileWorkgroupsEdit" )->setText( "discard-groups" );
+    canceled.findChild<QToolButton*>( "profileEditPhone" )->click();
+    canceled.findChild<QLineEdit*>( "mp_lePhone" )->setText( "discard-phone" );
+    QSignalSpy noSave( &canceled, &QDialog::accepted );
+    if( closing == "cancel" ) canceled.findChild<QPushButton*>( "cancelInlineProfile" )->click();
+    else if( closing == "escape" ) QTest::keyClick( &canceled, Qt::Key_Escape );
+    else canceled.findChild<QToolButton*>( "shadowDialogClose" )->click();
+    CHECK( canceled.result() == QDialog::Rejected && noSave.isEmpty() );
+    CHECK( canceled.workgroups() == user.workgroups() && canceled.vCard() == card );
   }
-
-  GuiEditVCard picked; picked.setUser( noBirthdayUser ); picked.show();
-  picked.findChild<QPushButton*>( "editMyProfile" )->click(); app.processEvents();
-  ShadowBirthdayEdit* pickedBirthday = picked.findChild<ShadowBirthdayEdit*>( "mp_deBirthday" );
-  pickedBirthday->setBirthday( QDate( 2001, 2, 3 ) );
-  picked.findChild<QPushButton*>( "mp_pbOk" )->click();
-  check( picked.vCard().birthday() == QDate( 2001, 2, 3 ), "explicit birthday selection is written on save" );
-  GuiEditVCard cleared; cleared.setUser( user ); cleared.show();
-  cleared.findChild<QPushButton*>( "editMyProfile" )->click(); app.processEvents();
-  cleared.findChild<ShadowBirthdayEdit*>( "mp_deBirthday" )->clearBirthday();
-  cleared.findChild<QPushButton*>( "mp_pbOk" )->click();
-  check( !cleared.vCard().birthday().isValid(), "explicit clear removes the birthday on save" );
-
-  GuiEditVCard canceled; canceled.setUser( user ); canceled.show(); canceled.findChild<QPushButton*>( "editMyProfile" )->click();
-  canceled.findChild<QLineEdit*>( "mp_leNickname" )->setText( "discard" );
-  canceled.findChild<QPlainTextEdit*>( "mp_teInfo" )->setPlainText( "discard info" );
-  canceled.findChild<ShadowBirthdayEdit*>( "mp_deBirthday" )->setBirthday( QDate( 2003, 4, 5 ) );
-  canceled.findChild<QPushButton*>( "mp_pbCancel" )->click();
-  check( canceled.result() == QDialog::Rejected && user.vCard().nickName() == QStringLiteral( "林言" ) &&
-    user.vCard().info() == QStringLiteral( "角色与场景设计 · 让好想法变成看得见的作品" ) &&
-    user.vCard().birthday() == QDate( 1998, 6, 17 ) && !user.vCard().photo().isNull() &&
-    canceled.vCard().birthday() == QDate( 1998, 6, 17 ),
-    "cancel writes nothing including a newly selected birthday and keeps nickname info and avatar" );
-  check( !canceled.findChild<QPushButton*>( "mp_pbRemovePhoto" ),
-    "no remove-avatar control exists on the cancel path" );
-  GuiEditVCard closed; closed.setUser( user ); closed.findChild<QPushButton*>( "closeMyProfile" )->click();
-  check( closed.result() == QDialog::Rejected && !closed.regenerateUserHash(), "closing default card never applies profile changes" );
-  GuiEditVCard chromeClosed; chromeClosed.setUser( user ); chromeClosed.show(); app.processEvents();
-  chromeClosed.findChild<QPushButton*>( "editMyProfile" )->click(); app.processEvents();
-  chromeClosed.findChild<QLineEdit*>( "mp_leNickname" )->setText( "discard-from-close" );
-  chromeClosed.findChild<QToolButton*>( "shadowDialogClose" )->click();
-  check( chromeClosed.result() == QDialog::Rejected && chromeClosed.vCard().nickName() == user.name(),
-    "titlebar close rejects editor changes" );
-  GuiEditVCard signature; signature.setUser( user ); signature.show(); app.processEvents();
-  signature.findChild<QToolButton*>( "profileEditInfo" )->click(); app.processEvents();
-  check( signature.findChild<QStackedWidget*>()->currentIndex() == 1 &&
-    signature.findChild<QPlainTextEdit*>( "mp_teInfo" )->hasFocus(),
-    "signature row opens the real editor with signature focused" );
-  signature.reject();
-  GuiEditVCard phone; phone.setUser( user ); phone.show(); app.processEvents();
-  phone.findChild<QToolButton*>( "profileEditPhone" )->click(); app.processEvents();
-  check( phone.findChild<QStackedWidget*>()->currentIndex() == 1 &&
-    phone.findChild<QLineEdit*>( "mp_lePhone" )->hasFocus(),
-    "phone row opens the real editor with phone focused" );
-  phone.reject();
-  User emptyDetails = user; VCard emptyCard = emptyDetails.vCard();
-  emptyCard.setInfo( QString() ); emptyCard.setPhoneNumber( QString() );
-  emptyDetails.setVCard( emptyCard ); emptyDetails.setWorkgroups( QStringList() );
-  GuiEditVCard empty; empty.setUser( emptyDetails ); empty.show(); app.processEvents();
-  check( empty.findChild<QLabel*>( "profileCardInfo" )->text() == QStringLiteral( "输入个性签名" ) &&
-    empty.findChild<QLabel*>( "profileCardPhone" )->text() == QStringLiteral( "添加电话号码" ) &&
-    empty.findChild<QLabel*>( "profileCardGroups" )->text() == QStringLiteral( "未设置工作组" ),
-    "missing optional details show honest prompts without reference data" );
-  empty.reject();
-  User legacyAccount = user;
-  legacyAccount.setAccountName( QString() );
-  GuiEditVCard account; account.setUser( legacyAccount ); account.show();
-  account.findChild<QPushButton*>( "editMyProfile" )->click(); app.processEvents();
-  QLineEdit* accountField = account.findChild<QLineEdit*>( "mp_leEmail" );
-  check( accountField->isReadOnly() && accountField->focusPolicy() == Qt::StrongFocus,
-    "legacy account is keyboard focusable for copying and remains read only" );
-  accountField->setText( "must-not-save@example.test" );
-  account.findChild<QPushButton*>( "mp_pbOk" )->click();
-  check( account.vCard().email() == user.vCard().email(),
-    "read-only account cannot rewrite stored email even without accountName" );
-  GuiEditVCard escape; escape.setUser( user ); escape.show();
-  escape.findChild<QPushButton*>( "editMyProfile" )->click(); app.processEvents();
-  escape.findChild<QLineEdit*>( "mp_lePhone" )->setText( "discard phone" );
-  escape.findChild<ShadowBirthdayEdit*>( "mp_deBirthday" )->clearBirthday();
-  QTest::keyClick( &escape, Qt::Key_Escape ); app.processEvents();
-  check( escape.result() == QDialog::Rejected && escape.vCard().phoneNumber() == user.vCard().phoneNumber() &&
-    escape.vCard().birthday() == user.vCard().birthday() && escape.vCard().email() == user.vCard().email() &&
-    escape.vCard().firstName() == user.vCard().firstName() &&
-    escape.vCard().lastName() == user.vCard().lastName() &&
-    escape.vCard().roomLocation() == user.vCard().roomLocation() &&
-    escape.vCard().photo().toImage() == user.vCard().photo().toImage(),
-    "Escape discards edits and preserves every stored profile field" );
-  std::printf( "PROFILE RESULT failures=%d\n", failures );
-  return failures ? 1 : 0;
+  std::puts( "PASS cancel, Escape and title close discard all inline drafts and preserve stored profile data" );
+  GuiEditVCard invalid( &host );
+  invalid.setUser( user );
+  invalid.show();
+  QTest::qWait( 20 );
+  invalid.findChild<QPushButton*>( "editMyProfile" )->click();
+  invalid.findChild<QLineEdit*>( "mp_leNickname" )->clear();
+  invalid.findChild<QPushButton*>( "closeMyProfile" )->click();
+  CHECK( invalid.isVisible() && invalid.findChild<QLabel*>( "profileNicknameError" )->isVisible() &&
+    !QApplication::activeModalWidget() && invalid.vCard() == card );
+  invalid.findChild<QLineEdit*>( "mp_leNickname" )->setText( card.nickName() );
+  invalid.findChild<QToolButton*>( "profileEditWorkgroups" )->click();
+  invalid.findChild<QLineEdit*>( "profileWorkgroupsEdit" )->setText( QString( 129, QLatin1Char( 'A' ) ) );
+  invalid.findChild<QPushButton*>( "closeMyProfile" )->click();
+  CHECK( invalid.isVisible() && invalid.findChild<QLabel*>( "profileGroupsRowError" )->isVisible() &&
+    !QApplication::activeModalWidget() && invalid.workgroups() == user.workgroups() );
+  invalid.reject();
+  GuiEditVCard noDate( &host );
+  User missingDate = user;
+  VCard noDateCard = card;
+  noDateCard.setBirthday( QDate() );
+  missingDate.setVCard( noDateCard );
+  noDate.setUser( missingDate );
+  noDate.show();
+  noDate.findChild<QToolButton*>( "profileEditPhone" )->click();
+  noDate.findChild<QLineEdit*>( "mp_lePhone" )->setText( "7777" );
+  noDate.findChild<QPushButton*>( "closeMyProfile" )->click();
+  CHECK( !noDate.vCard().birthday().isValid() && noDate.vCard().phoneNumber() == "7777" );
+  std::puts( "PASS field validation stays inline, workgroup errors keep original data, missing birthday stays missing" );
+  const QString replacementPath = folder.filePath( "replacement.png" );
+  QPixmap replacement( 96, 96 );
+  replacement.fill( QColor( "#32B891" ) );
+  CHECK( replacement.save( replacementPath ) );
+  const bool nativeDisabled = QApplication::testAttribute( Qt::AA_DontUseNativeDialogs );
+  const bool nativeDialogs = settings.useNativeDialogs();
+  settings.setUseNativeDialogs( false );
+  QApplication::setAttribute( Qt::AA_DontUseNativeDialogs, true );
+  for( const QString& operation : QStringList{ "picker-cancel", "draft-cancel", "save" } )
+  {
+    GuiEditVCard changing( &host );
+    changing.setUser( user );
+    changing.show();
+    changing.raise();
+    changing.activateWindow();
+    QTest::qWait( 80 );
+    QToolButton* target = changing.findChild<QToolButton*>( "profileCardAvatar" );
+    CHECK( target );
+    CHECK( target->isVisible() && target->isEnabled() );
+    QSignalSpy clicks( target, &QToolButton::clicked );
+    const QImage previousIcon = target->icon().pixmap( QSize( 60, 60 ) ).toImage();
+    bool handled = false;
+    QPointer<QFileDialog> openedPicker;
+    QTimer driver;
+    QObject::connect( &driver, &QTimer::timeout, &changing, [&]() {
+      QFileDialog* picker = changing.findChild<QFileDialog*>();
+      if( !picker )
+        for( QWidget* widget : QApplication::topLevelWidgets() )
+          if( QFileDialog* candidate = qobject_cast<QFileDialog*>( widget ) )
+            if( candidate->isVisible() ) picker = candidate;
+      if( !picker ) return;
+      openedPicker = picker;
+      if( operation == "picker-cancel" )
+      {
+        driver.stop();
+        picker->reject();
+        handled = true;
+      }
+      else
+      {
+        QLineEdit* filename = picker->findChild<QLineEdit*>( "fileNameEdit" );
+        if( !filename ) return;
+        driver.stop();
+        filename->setText( QDir::toNativeSeparators( replacementPath ) );
+        handled = QMetaObject::invokeMethod( picker, "accept", Qt::DirectConnection ) &&
+          picker->result() == QDialog::Accepted;
+      }
+    } );
+    QTimer guard;
+    guard.setSingleShot( true );
+    QObject::connect( &guard, &QTimer::timeout, &changing, [&]() {
+      QWidget* modal = QApplication::activeModalWidget();
+      std::fprintf( stderr, "FAIL avatar picker timed out operation=%s clicks=%d handled=%d picker=%d modal=%s\n",
+        qPrintable( operation ), clicks.count(), handled, !openedPicker.isNull(), modal ? modal->metaObject()->className() : "(none)" );
+      std::exit( 1 );
+    } );
+    driver.start( 25 );
+    guard.start( 5000 );
+    if( operation == "save" ) QTest::keyClick( target, Qt::Key_Space );
+    else if( operation == "draft-cancel" ) target->click();
+    else QTest::mouseClick( target, Qt::LeftButton );
+    driver.stop();
+    guard.stop();
+    CHECK( handled && changing.isVisible() && changing.vCard().photo().toImage() == card.photo().toImage() );
+    CHECK( changing.findChild<QStackedWidget*>( "ShadowProfilePages" )->currentIndex() == 0 );
+    if( operation == "picker-cancel" )
+    {
+      CHECK( target->icon().pixmap( QSize( 60, 60 ) ).toImage() == previousIcon );
+      CHECK( changing.findChild<QPushButton*>( "closeMyProfile" )->text() == QStringLiteral( "完成" ) );
+      changing.reject();
+    }
+    else if( operation == "draft-cancel" )
+    {
+      CHECK( target->icon().pixmap( QSize( 60, 60 ) ).toImage() != previousIcon );
+      CHECK( changing.findChild<QPushButton*>( "closeMyProfile" )->text() == QStringLiteral( "保存" ) );
+      CHECK( changing.grab().save( QDir( proof ).filePath( "clickable-avatar-draft.png" ) ) );
+      changing.findChild<QPushButton*>( "cancelInlineProfile" )->click();
+      CHECK( changing.vCard().photo().toImage() == card.photo().toImage() );
+    }
+    else
+    {
+      changing.findChild<QPushButton*>( "closeMyProfile" )->click();
+      CHECK( changing.result() == QDialog::Accepted && changing.vCard().photo().toImage() == replacement.toImage() );
+      CHECK( changing.vCard().info() == card.info() && changing.vCard().birthday() == card.birthday() );
+    }
+    CHECK( settings.localUser().vCard().photo().toImage() == card.photo().toImage() );
+  }
+  QApplication::setAttribute( Qt::AA_DontUseNativeDialogs, nativeDisabled );
+  settings.setUseNativeDialogs( nativeDialogs );
+  std::puts( "PASS avatar click/Space opens picker without a pencil; picker cancel, draft cancel and save preserve profile boundaries" );
+  std::puts( "ALL INLINE PROFILE CHECKS PASSED" );
+  return 0;
 }

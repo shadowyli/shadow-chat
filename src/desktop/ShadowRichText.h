@@ -14,6 +14,18 @@ inline QString plainText(const QString& html)
   return text.simplified();
 }
 
+inline QString messageText(const QString& html)
+{
+  QTextDocument document;
+  document.setHtml(html);
+  QString text=document.toPlainText();
+  text.remove(QChar::ObjectReplacementCharacter);
+  text.replace(QChar::Nbsp,QLatin1Char(' '));
+  QStringList lines=text.split(QLatin1Char('\n'));
+  for(QString& line:lines)line=line.trimmed();
+  return lines.join(QLatin1Char('\n'));
+}
+
 inline QString serialize(const QTextDocument* document,bool* formatted=Q_NULLPTR)
 {
   bool rich=false;

@@ -31,6 +31,7 @@
 #include "ShadowDialogStyle.h"
 #include "ShadowStyle.h"
 #include "ShadowColorPanel.h"
+#include "ShadowWorkgroups.h"
 #include <QActionGroup>
 #include <QClipboard>
 #include <QMenu>
@@ -43,6 +44,22 @@
 
 namespace
 {
+class ProfileInlineStack : public QStackedWidget
+{
+public:
+  explicit ProfileInlineStack( QWidget* parent = Q_NULLPTR ) : QStackedWidget( parent ) {}
+  QSize sizeHint() const override
+  {
+    return currentWidget() ? currentWidget()->sizeHint().expandedTo( currentWidget()->minimumSize() )
+      .boundedTo( currentWidget()->maximumSize() ) : QSize();
+  }
+  QSize minimumSizeHint() const override
+  {
+    return currentWidget() ? currentWidget()->minimumSizeHint().expandedTo( currentWidget()->minimumSize() )
+      .boundedTo( currentWidget()->maximumSize() ) : QSize();
+  }
+};
+
 QToolButton* profileAction( QWidget* parent, const QString& name, const QString& icon, const QString& label )
 {
   QToolButton* action = new QToolButton( parent );
@@ -123,7 +140,13 @@ GuiEditVCard::GuiEditVCard( QWidget *parent )
   QVBoxLayout* headerLayout = new QVBoxLayout( header );
   headerLayout->setContentsMargins( 18, 4, 18, 18 ); headerLayout->setSpacing( 14 );
   QHBoxLayout* avatarRow = new QHBoxLayout;
-  m_cardPhoto = new QLabel; m_cardPhoto->setObjectName( "profileCardAvatar" ); m_cardPhoto->setFixedSize( 64, 64 );
+  m_cardPhoto = new QToolButton( header );
+  m_cardPhoto->setObjectName( "profileCardAvatar" );
+  m_cardPhoto->setFixedSize( 64, 64 );
+  m_cardPhoto->setIconSize( QSize( 60, 60 ) );
+  m_cardPhoto->setCursor( Qt::PointingHandCursor );
+  m_cardPhoto->setAccessibleName( QStringLiteral( "更换头像" ) );
+  m_cardPhoto->setToolTip( QStringLiteral( "点击更换头像" ) );
   avatarRow->addWidget( m_cardPhoto );
   avatarRow->addStretch();
   m_cardStatus = new QPushButton;
@@ -147,13 +170,51 @@ GuiEditVCard::GuiEditVCard( QWidget *parent )
   identity->setSpacing( 4 );
   m_cardNickname = new QLabel; m_cardNickname->setObjectName( "profileCardNickname" ); m_cardNickname->setProperty( "role", "title" ); m_cardNickname->setWordWrap( true );
   m_cardNickname->setSizePolicy( QSizePolicy::Preferred, QSizePolicy::Preferred );
-  identity->addWidget( m_cardNickname );
+  auto makeInlineField = [this]( QLabel* value, QWidget* input, const QString& name, QLabel** errorLabel ) {
+    QWidget* field = new QWidget;
+    field->setObjectName( name + QStringLiteral( "Field" ) );
+    QVBoxLayout* fieldLayout = new QVBoxLayout( field );
+    fieldLayout->setContentsMargins( 0, 0, 0, 0 );
+    fieldLayout->setSpacing( 3 );
+    ProfileInlineStack* stack = new ProfileInlineStack( field );
+    stack->setObjectName( name + QStringLiteral( "Stack" ) );
+    stack->setMinimumWidth( 0 );
+    stack->layout()->setSizeConstraint( QLayout::SetNoConstraint );
+    stack->addWidget( value );
+    stack->addWidget( input );
+    input->setProperty( "profileInline", true );
+    input->setMinimumWidth( 0 );
+    input->setSizePolicy( QSizePolicy::Ignored, QSizePolicy::Preferred );
+    input->installEventFilter( this );
+    fieldLayout->addWidget( stack );
+    if( errorLabel )
+    {
+      *errorLabel = new QLabel( field );
+      (*errorLabel)->setObjectName( name + QStringLiteral( "Error" ) );
+      (*errorLabel)->setWordWrap( true );
+      (*errorLabel)->setStyleSheet( QStringLiteral( "color:#C33C32;font-size:12px;" ) );
+      (*errorLabel)->hide();
+      fieldLayout->addWidget( *errorLabel );
+    }
+    input->setProperty( "profileInlineStack", QVariant::fromValue<QObject*>( stack ) );
+    connect( stack, &QStackedWidget::currentChanged, this, [this, stack]() {
+      if( stack->objectName() == QStringLiteral( "profileNicknameStack" ) )
+        stack->parentWidget()->setMaximumWidth( stack->currentIndex() == 0 ?
+          qMin( 260, m_cardNickname->fontMetrics().horizontalAdvance( m_cardNickname->text() ) + 4 ) : 220 );
+      stack->updateGeometry();
+      QTimer::singleShot( 0, this, [this]() { resizeProfilePage(); } );
+    } );
+    return field;
+  };
+  mp_leNickname->setAccessibleName( QStringLiteral( "昵称" ) );
+  QWidget* nicknameField = makeInlineField( m_cardNickname, mp_leNickname, "profileNickname", &m_nicknameError );
+  identity->addWidget( nicknameField, 0, Qt::AlignVCenter );
   QPushButton* edit = new QPushButton;
   edit->setObjectName( "editMyProfile" ); edit->setAutoDefault( false );
   edit->setIcon( ShadowStyle::actionIcon( QStringLiteral( "pencil-simple" ) ) );
   edit->setIconSize( QSize( 16, 16 ) ); edit->setFixedSize( 30, 30 );
-  edit->setAccessibleName( QStringLiteral( "编辑资料" ) ); edit->setToolTip( QStringLiteral( "编辑资料" ) );
-  identity->addWidget( edit, 0, Qt::AlignTop );
+  edit->setAccessibleName( QStringLiteral( "编辑昵称" ) ); edit->setToolTip( QStringLiteral( "编辑昵称" ) );
+  identity->addWidget( edit, 0, Qt::AlignVCenter );
   identity->addStretch();
   headerLayout->addLayout( identity );
   cardLayout->addWidget( header );
@@ -161,7 +222,7 @@ GuiEditVCard::GuiEditVCard( QWidget *parent )
   details->setObjectName( QStringLiteral( "profileCardDetails" ) );
   QVBoxLayout* detailsLayout = new QVBoxLayout( details );
   detailsLayout->setContentsMargins( 16, 8, 12, 10 ); detailsLayout->setSpacing( 0 );
-  auto addRow = [&]( const QString& name, const QString& icon, QLabel* value, QToolButton* action, bool separator ) {
+  auto addRow = [&]( const QString& name, const QString& icon, QLabel* value, QWidget* input, QToolButton* action, bool separator, QLabel** errorLabel = Q_NULLPTR ) {
     QWidget* row = new QWidget( details );
     row->setObjectName( name );
     QHBoxLayout* line = new QHBoxLayout( row );
@@ -170,13 +231,13 @@ GuiEditVCard::GuiEditVCard( QWidget *parent )
     symbol->setFixedSize( 18, 18 );
     symbol->setPixmap( ShadowStyle::tintedPixmap( QStringLiteral( ":/images/shadowchat/icons/%1.svg" ).arg( icon ),
       QSize( 18, 18 ), QColor( "#8A96A8" ) ) );
-    line->addWidget( symbol, 0, Qt::AlignTop );
+    line->addWidget( symbol, 0, Qt::AlignVCenter );
     value->setMinimumWidth( 0 );
     value->setSizePolicy( QSizePolicy::Ignored, QSizePolicy::Preferred );
     value->setWordWrap( true );
     value->setTextFormat( Qt::PlainText );
-    line->addWidget( value, 1 );
-    if( action ) line->addWidget( action, 0, Qt::AlignTop );
+    line->addWidget( input ? makeInlineField( value, input, name, errorLabel ) : value, 1 );
+    if( action ) line->addWidget( action, 0, Qt::AlignVCenter );
     detailsLayout->addWidget( row );
     if( separator )
     {
@@ -188,18 +249,28 @@ GuiEditVCard::GuiEditVCard( QWidget *parent )
   };
   m_cardClock = new QLabel;
   m_cardClock->setObjectName( QStringLiteral( "profileCardClock" ) );
-  addRow( "profileClockRow", "clock", m_cardClock, Q_NULLPTR, true );
+  addRow( "profileClockRow", "clock", m_cardClock, Q_NULLPTR, Q_NULLPTR, true );
   m_cardInfo = new QLabel; m_cardInfo->setObjectName( "profileCardInfo" ); m_cardInfo->setTextInteractionFlags( Qt::TextSelectableByMouse );
   QToolButton* editInfo = profileAction( details, "profileEditInfo", "pencil-simple", QStringLiteral( "编辑个性签名" ) );
-  addRow( "profileInfoRow", "chats-circle", m_cardInfo, editInfo, true );
+  mp_teInfo->setAccessibleName( QStringLiteral( "个性签名" ) );
+  mp_teInfo->setMinimumHeight( 64 );
+  mp_teInfo->setMaximumHeight( 100 );
+  addRow( "profileInfoRow", "chats-circle", m_cardInfo, mp_teInfo, editInfo, true );
   m_cardEmail = new QLabel; m_cardEmail->setObjectName( "profileCardEmail" ); m_cardEmail->setTextInteractionFlags( Qt::TextSelectableByMouse );
   QToolButton* copyEmail = profileAction( details, "profileCopyEmail", "copy", QStringLiteral( "复制邮箱" ) );
-  addRow( "profileEmailRow", "envelope-simple", m_cardEmail, copyEmail, false );
+  addRow( "profileEmailRow", "envelope-simple", m_cardEmail, Q_NULLPTR, copyEmail, false );
   m_cardPhone = new QLabel; m_cardPhone->setObjectName( "profileCardPhone" );
   QToolButton* editPhone = profileAction( details, "profileEditPhone", "pencil-simple", QStringLiteral( "编辑电话号码" ) );
-  addRow( "profilePhoneRow", "phone", m_cardPhone, editPhone, true );
+  mp_lePhone->setAccessibleName( QStringLiteral( "电话号码" ) );
+  addRow( "profilePhoneRow", "phone", m_cardPhone, mp_lePhone, editPhone, true );
   m_cardGroups = new QLabel; m_cardGroups->setObjectName( "profileCardGroups" );
-  addRow( "profileGroupsRow", "users-three", m_cardGroups, Q_NULLPTR, false );
+  m_workgroupsEdit = new QLineEdit;
+  m_workgroupsEdit->setObjectName( "profileWorkgroupsEdit" );
+  m_workgroupsEdit->setAccessibleName( QStringLiteral( "工作组" ) );
+  m_workgroupsEdit->setPlaceholderText( QStringLiteral( "例如：设计组、程序组" ) );
+  m_workgroupsEdit->setToolTip( QStringLiteral( "多个工作组用逗号或顿号分隔，用于组织架构分类，不开启仅同组连接。" ) );
+  QToolButton* editGroups = profileAction( details, "profileEditWorkgroups", "pencil-simple", QStringLiteral( "编辑工作组" ) );
+  addRow( "profileGroupsRow", "users-three", m_cardGroups, m_workgroupsEdit, editGroups, false, &m_workgroupsError );
   cardLayout->addWidget( details );
   QScrollArea* cardScroll = new QScrollArea( cardPage );
   cardScroll->setObjectName( QStringLiteral( "profileCardScroll" ) );
@@ -211,9 +282,14 @@ GuiEditVCard::GuiEditVCard( QWidget *parent )
   QWidget* cardFooter = new QWidget( cardPage );
   cardFooter->setObjectName( QStringLiteral( "ShadowProfileCardFooter" ) );
   QPushButton* close = new QPushButton( QStringLiteral( "完成" ) ); close->setObjectName( "closeMyProfile" ); close->setAutoDefault( false );
+  m_cardSave = close;
+  m_cardCancel = new QPushButton( QStringLiteral( "取消" ), cardFooter );
+  m_cardCancel->setObjectName( "cancelInlineProfile" );
+  m_cardCancel->setAutoDefault( false );
+  m_cardCancel->hide();
   QHBoxLayout* footer = new QHBoxLayout( cardFooter );
   footer->setContentsMargins( 16, 4, 16, 14 );
-  footer->addStretch(); footer->addWidget( close );
+  footer->addStretch(); footer->addWidget( m_cardCancel ); footer->addWidget( close );
   cardPageLayout->addWidget( cardFooter );
   QWidget* editorPage = new QWidget( this );
   editorPage->setObjectName( QStringLiteral( "ShadowProfileEditorPage" ) );
@@ -238,12 +314,20 @@ GuiEditVCard::GuiEditVCard( QWidget *parent )
   connect( edit, &QPushButton::clicked, this, [this]() { showProfileEditor( mp_leNickname ); } );
   connect( editInfo, &QToolButton::clicked, this, [this]() { showProfileEditor( mp_teInfo ); } );
   connect( editPhone, &QToolButton::clicked, this, [this]() { showProfileEditor( mp_lePhone ); } );
+  connect( editGroups, &QToolButton::clicked, this, &GuiEditVCard::editWorkgroupsInline );
+  connect( m_cardPhoto, &QToolButton::clicked, this, &GuiEditVCard::changePhoto );
+  connect( mp_leNickname, &QLineEdit::returnPressed, this, [this]() { finishInlineEdit( mp_leNickname ); } );
+  connect( mp_lePhone, &QLineEdit::returnPressed, this, [this]() { finishInlineEdit( mp_lePhone ); } );
+  connect( m_workgroupsEdit, &QLineEdit::returnPressed, this, [this]() { finishInlineEdit( m_workgroupsEdit ); } );
   connect( copyEmail, &QToolButton::clicked, this, [this, copyEmail]() {
     QApplication::clipboard()->setText( m_cardEmail->text() );
     copyEmail->setToolTip( QStringLiteral( "邮箱已复制" ) );
     copyEmail->setAccessibleDescription( QStringLiteral( "邮箱已复制到剪贴板" ) );
   } );
-  connect( close, &QPushButton::clicked, this, &QDialog::reject );
+  connect( close, &QPushButton::clicked, this, [this]() {
+    if( m_inlineDirty ) onOkClicked(); else reject();
+  } );
+  connect( m_cardCancel, &QPushButton::clicked, this, &QDialog::reject );
   QTimer* clock = new QTimer( this );
   clock->setInterval( 60000 );
   connect( clock, &QTimer::timeout, this, &GuiEditVCard::updateCardClock );
@@ -266,7 +350,13 @@ GuiEditVCard::GuiEditVCard( QWidget *parent )
     "QPushButton#profileCardStatus:hover{background:#CEDFF8;}"
     "QPushButton#profileCardStatus:focus{border-color:#2463EB;}"
     "QPushButton#profileCardStatus::menu-indicator{image:none;}"
-    "QToolButton#profileEditInfo,QToolButton#profileEditPhone,QToolButton#profileCopyEmail{padding:0;}"
+    "QToolButton#profileCardAvatar{background:transparent;border:1px solid transparent;border-radius:32px;padding:0;}"
+    "QToolButton#profileCardAvatar:hover{background:#D7E6FC;}"
+    "QToolButton#profileCardAvatar:focus{border-color:#2463EB;}"
+    "QToolButton#profileEditInfo,QToolButton#profileEditPhone,QToolButton#profileEditWorkgroups,QToolButton#profileCopyEmail{padding:0;}"
+    "QLineEdit[profileInline=true]{background:#FFFFFF;padding:5px 8px;min-height:18px;border:1px solid #CFDAE8;border-radius:6px;}"
+    "QPlainTextEdit[profileInline=true]{background:#FFFFFF;padding:5px 8px;border:1px solid #CFDAE8;border-radius:6px;}"
+    "QLineEdit[profileInline=true]:focus,QPlainTextEdit[profileInline=true]:focus{border-color:#2463EB;}"
     "QScrollArea#profileEditorScroll,QScrollArea#profileCardScroll{background:#FFFFFF;border:0;}"
     "QWidget#qt_scrollarea_viewport{background:#FFFFFF;}"
     "QWidget#ShadowProfileEditorFooter,QWidget#ShadowProfileCardFooter{background:#FFFFFF;}" ) );
@@ -274,15 +364,93 @@ GuiEditVCard::GuiEditVCard( QWidget *parent )
 
 void GuiEditVCard::showProfileEditor( QWidget* target )
 {
-  m_cardAnchored = false;
-  m_profilePages->setCurrentIndex( 1 );
+  beginInlineEdit( target );
+}
+
+void GuiEditVCard::beginInlineEdit( QWidget* input )
+{
+  if( !input->isEnabled() ) return;
+  QStackedWidget* stack = qobject_cast<QStackedWidget*>( input->property( "profileInlineStack" ).value<QObject*>() );
+  if( !stack ) return;
+  if( stack->currentIndex() == 1 ) { finishInlineEdit( input ); return; }
+  m_inlineDirty = true;
+  if( input == m_workgroupsEdit ) m_workgroupsEdited = true;
+  m_cardSave->setText( QStringLiteral( "保存" ) );
+  m_cardCancel->show();
+  stack->setCurrentIndex( 1 );
   resizeProfilePage();
-  target->setFocus( Qt::OtherFocusReason );
-  QTimer::singleShot( 0, this, [this, target]() {
+  input->setFocus( Qt::OtherFocusReason );
+  if( QLineEdit* edit = qobject_cast<QLineEdit*>( input ) ) edit->selectAll();
+  if( QScrollArea* scroll = findChild<QScrollArea*>( "profileCardScroll" ) ) scroll->ensureWidgetVisible( input );
+}
+
+void GuiEditVCard::finishInlineEdit( QWidget* input )
+{
+  if( !validateInlineData() ) return;
+  QStackedWidget* stack = qobject_cast<QStackedWidget*>( input->property( "profileInlineStack" ).value<QObject*>() );
+  if( stack ) stack->setCurrentIndex( 0 );
+  updateInlineLabels();
+  resizeProfilePage();
+}
+
+void GuiEditVCard::editWorkgroupsInline()
+{
+  beginInlineEdit( m_workgroupsEdit );
+}
+
+void GuiEditVCard::updateInlineLabels()
+{
+  m_cardNickname->setText( mp_leNickname->text().simplified() );
+  m_cardNickname->ensurePolished();
+  if( findChild<QStackedWidget*>( "profileNicknameStack" )->currentIndex() == 0 )
+    findChild<QWidget*>( "profileNicknameField" )->setMaximumWidth(
+      qMin( 260, m_cardNickname->fontMetrics().horizontalAdvance( m_cardNickname->text() ) + 4 ) );
+  const QString info = mp_teInfo->toPlainText().trimmed();
+  m_cardInfo->setText( info.isEmpty() ? QStringLiteral( "输入个性签名" ) : info );
+  m_cardInfo->setProperty( "empty", info.isEmpty() );
+  const QString phone = mp_lePhone->text().simplified();
+  m_cardPhone->setText( phone.isEmpty() ? QStringLiteral( "添加电话号码" ) : phone );
+  m_cardPhone->setProperty( "empty", phone.isEmpty() );
+  m_cardGroups->setText( m_workgroups.isEmpty() ? QStringLiteral( "未设置工作组" ) : m_workgroups.join( QStringLiteral( " · " ) ) );
+  m_cardGroups->setProperty( "empty", m_workgroups.isEmpty() );
+  for( QLabel* label : QList<QLabel*>{ m_cardInfo, m_cardPhone, m_cardGroups } )
+  {
+    label->style()->unpolish( label );
+    label->style()->polish( label );
+  }
+}
+
+bool GuiEditVCard::validateInlineData()
+{
+  m_nicknameError->hide();
+  m_workgroupsError->hide();
+  const QString nickname = mp_leNickname->text().simplified();
+  const User existing = UserManager::instance().findUserByNickname( nickname );
+  if( nickname.isEmpty() || (existing.isValid() && !existing.isLocal()) )
+  {
+    m_nicknameError->setText( nickname.isEmpty() ? QStringLiteral( "请填写昵称。" ) : QStringLiteral( "此昵称已被联系人使用，请换一个。" ) );
+    m_nicknameError->show();
+    qobject_cast<QStackedWidget*>( mp_leNickname->property( "profileInlineStack" ).value<QObject*>() )->setCurrentIndex( 1 );
+    mp_leNickname->setAccessibleDescription( m_nicknameError->text() );
+    mp_leNickname->setFocus();
     resizeProfilePage();
-    QScrollArea* scroll = m_profilePages->currentWidget()->findChild<QScrollArea*>();
-    if( scroll ) scroll->ensureWidgetVisible( target );
-  } );
+    return false;
+  }
+  QStringList normalizedGroups;
+  if( m_workgroupsEdited && !ShadowWorkgroups::fromText( m_workgroupsEdit->text(), &normalizedGroups ) )
+  {
+    m_workgroupsError->setText( QStringLiteral( "最多 32 个工作组，每个最多 128 个字，不接受控制字符。" ) );
+    m_workgroupsError->show();
+    qobject_cast<QStackedWidget*>( m_workgroupsEdit->property( "profileInlineStack" ).value<QObject*>() )->setCurrentIndex( 1 );
+    m_workgroupsEdit->setAccessibleDescription( m_workgroupsError->text() );
+    m_workgroupsEdit->setFocus();
+    resizeProfilePage();
+    return false;
+  }
+  if( m_workgroupsEdited ) m_workgroups = normalizedGroups;
+  mp_leNickname->setAccessibleDescription( QString() );
+  m_workgroupsEdit->setAccessibleDescription( QString() );
+  return true;
 }
 
 void GuiEditVCard::setProfileStatus( int status )
@@ -435,10 +603,25 @@ void GuiEditVCard::setUser( const User& u )
   m_accountEmail = u.accountName().trimmed();
   setUserColor( u.color() );
   m_regenerateUserHash = false;
+  m_savedWorkgroups = u.workgroups();
+  m_workgroups = m_savedWorkgroups;
+  m_workgroupsEdit->setText( m_savedWorkgroups.join( QStringLiteral( ", " ) ) );
+  m_workgroupsEdited = false;
+  m_inlineDirty = false;
+  m_cardSave->setText( QStringLiteral( "完成" ) );
+  m_cardCancel->hide();
+  m_nicknameError->hide();
+  m_workgroupsError->hide();
+  for( QWidget* input : QList<QWidget*>{ mp_leNickname, mp_teInfo, mp_lePhone, m_workgroupsEdit } )
+    qobject_cast<QStackedWidget*>( input->property( "profileInlineStack" ).value<QObject*>() )->setCurrentIndex( 0 );
   loadVCard();
+  findChild<QPushButton*>( "editMyProfile" )->setEnabled( Settings::instance().allowEditNickname() );
   mp_lIdentity->setText( QStringLiteral( "正在编辑自己的资料，同事会看到你的昵称和头像。" ) );
   mp_leEmail->setReadOnly( true );
   m_cardNickname->setText( m_vCard.nickName().isEmpty() ? u.name() : m_vCard.nickName() );
+  m_cardNickname->ensurePolished();
+  findChild<QWidget*>( "profileNicknameField" )->setMaximumWidth(
+    qMin( 260, m_cardNickname->fontMetrics().horizontalAdvance( m_cardNickname->text() ) + 4 ) );
   m_cardEmail->setText( m_accountEmail.isEmpty() ? m_vCard.email() : m_accountEmail );
   m_cardInfo->setText( m_vCard.info().isEmpty() ? QStringLiteral( "输入个性签名" ) : m_vCard.info() );
   m_cardInfo->setProperty( "empty", m_vCard.info().isEmpty() );
@@ -450,17 +633,22 @@ void GuiEditVCard::setUser( const User& u )
   findChild<QToolButton*>( QStringLiteral( "profileCopyEmail" ) )->setEnabled( !m_cardEmail->text().isEmpty() );
   setProfileStatus( u.status() );
   m_cardStatus->setToolTip( u.statusDescription().isEmpty() ? QStringLiteral( "切换工作状态" ) : u.statusDescription() );
-  QPixmap source = m_vCard.photo().isNull() ? Avatar::create( currentAvatarName(), m_userColor, QSize( 64, 64 ) ) : m_vCard.photo();
+  refreshCardPhoto();
+  foreach( QLabel* label, QList<QLabel*>() << m_cardNickname << m_cardEmail << m_cardInfo << m_cardPhone )
+    label->setTextFormat( Qt::PlainText );
+  m_profilePages->setCurrentIndex( 0 );
+  resizeProfilePage();
+}
+
+void GuiEditVCard::refreshCardPhoto()
+{
+  QPixmap source = m_photo.isNull() ? Avatar::create( currentAvatarName(), m_userColor, QSize( 64, 64 ) ) : m_photo;
   QPixmap circle( 64, 64 ); circle.fill( Qt::transparent );
   QPainter painter( &circle ); painter.setRenderHint( QPainter::Antialiasing );
   QPainterPath clip; clip.addEllipse( 0, 0, 64, 64 ); painter.setClipPath( clip );
   QPixmap scaled = source.scaled( 64, 64, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation );
   painter.drawPixmap( (64 - scaled.width()) / 2, (64 - scaled.height()) / 2, scaled ); painter.end();
-  m_cardPhoto->setPixmap( circle );
-  foreach( QLabel* label, QList<QLabel*>() << m_cardNickname << m_cardEmail << m_cardInfo << m_cardPhone )
-    label->setTextFormat( Qt::PlainText );
-  m_profilePages->setCurrentIndex( 0 );
-  resizeProfilePage();
+  m_cardPhoto->setIcon( QIcon( circle ) );
 }
 
 void GuiEditVCard::loadVCard()
@@ -533,6 +721,10 @@ void GuiEditVCard::changePhoto()
   {
     m_photo = pix;
     mp_lPhoto->setPixmap( pix.scaled( mp_lPhoto->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation ) );
+    m_inlineDirty = true;
+    m_cardSave->setText( QStringLiteral( "保存" ) );
+    m_cardCancel->show();
+    refreshCardPhoto();
   }
 }
 
@@ -541,7 +733,13 @@ void GuiEditVCard::reject()
   m_photo = m_vCard.photo();
   setUserColor( m_savedUserColor );
   m_regenerateUserHash = false;
+  m_workgroups = m_savedWorkgroups;
+  m_workgroupsEdit->setText( m_savedWorkgroups.join( QStringLiteral( ", " ) ) );
+  m_workgroupsEdited = false;
+  m_inlineDirty = false;
   loadVCard();
+  updateInlineLabels();
+  refreshCardPhoto();
   QDialog::reject();
 }
 
@@ -567,6 +765,8 @@ bool GuiEditVCard::checkLineEdit( QLineEdit* ple, const QString& msg )
 
 bool GuiEditVCard::checkData()
 {
+  if( m_profilePages->currentIndex() == 0 )
+    return validateInlineData();
   if( !checkLineEdit( mp_leNickname, tr( "Please insert your nickname." ) ) )
     return false;
 

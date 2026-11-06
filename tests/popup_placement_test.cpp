@@ -560,20 +560,57 @@ int main( int argc, char** argv )
   const QImage railPixels = rail->grab().toImage();
   const qreal railRatio = railPixels.devicePixelRatio();
   CHECK( railPixels.pixelColor( qRound( 2*railRatio ), qRound( (rail->height()-3)*railRatio ) ).rgb() ==
-    QColor( "#030a0a" ).rgb() );
+    QColor( "#E8F0F4" ).rgb() );
   bool checkedNavigation = false;
   for( QToolButton* button : rail->findChildren<QToolButton*>( "ShadowNavButton" ) )
+  {
+    const QString glyph = button->text() == QStringLiteral( "消息" ) ? QStringLiteral( "chats-circle-fill" )
+      : QStringLiteral( "users-three-fill" );
+    const QImage source = QIcon( QStringLiteral( ":/images/shadowchat/icons/%1.svg" ).arg( glyph ) )
+      .pixmap( 64, 64 ).toImage();
+    CHECK( !source.isNull() );
+    for( QIcon::Mode mode : { QIcon::Normal, QIcon::Active } )
+      for( QIcon::State state : { QIcon::Off, QIcon::On } )
+      {
+        const QImage icon = button->icon().pixmap( QSize( 64, 64 ), mode, state ).toImage();
+        const QColor expected( state == QIcon::On ? "#DB6E67" : "#5F6B7A" );
+        int solidPixels = 0;
+        for( int vertical = 0; vertical < icon.height(); ++vertical )
+          for( int horizontal = 0; horizontal < icon.width(); ++horizontal )
+          {
+            const QColor pixel = icon.pixelColor( horizontal, vertical );
+            CHECK( pixel.alpha() == source.pixelColor( horizontal, vertical ).alpha() );
+            if( pixel.alpha() == 255 )
+            {
+              CHECK( pixel.rgb() == expected.rgb() );
+              ++solidPixels;
+            }
+          }
+        CHECK( solidPixels > 500 );
+      }
+    const QImage buttonPixels = button->grab().toImage();
+    const QColor textColor( button->isChecked() ? "#B83730" : "#5F6B7A" );
+    int textPixels = 0;
+    for( int vertical = buttonPixels.height()*2/3; vertical < buttonPixels.height(); ++vertical )
+      for( int horizontal = 0; horizontal < buttonPixels.width(); ++horizontal )
+        if( buttonPixels.pixelColor( horizontal, vertical ).rgb() == textColor.rgb() ) ++textPixels;
+    CHECK( textPixels > 5 );
     if( button->isChecked() )
     {
       const QImage pixels = button->grab().toImage();
       const qreal ratio = pixels.devicePixelRatio();
       CHECK( pixels.pixelColor( qRound( button->width()/2*ratio ), qRound( (button->height()-4)*ratio ) ).rgb() ==
-        QColor( "#e93d34" ).rgb() );
+        QColor( "#F8FBFC" ).rgb() );
       checkedNavigation = true;
     }
+  }
   CHECK( checkedNavigation );
+  std::puts( "PASS navigation uses fill glyphs, grey inactive icons/text and a pale white selected surface" );
   QMenu* main_menu = window.findChild<QMenu*>( "ShadowMainMenu" );
   CHECK( main_menu );
+  QAction* seatMove = window.findChild<QAction*>( "ShadowSeatMoveAction" );
+  CHECK( seatMove && main_menu->actions().contains( seatMove ) &&
+    seatMove->text() == QStringLiteral( "我要换座位…" ) && seatMove->isEnabled() );
   QWidget* main_trigger = main_menu->parentWidget();
   CHECK( verifyMenu( main_menu, main_trigger, "main-menu" ) == 0 );
   main_menu->popup( main_trigger->mapToGlobal( QPoint( 0, main_trigger->height() ) ) );
@@ -608,12 +645,15 @@ int main( int argc, char** argv )
   CHECK( self_card->geometry() == self_geometry() );
   CHECK( saveProof( self_card, "self-avatar-card.png" ) );
   self_card->findChild<QPushButton*>( "editMyProfile" )->click(); QTest::qWait( 20 );
-  QPushButton* self_save = self_card->findChild<QPushButton*>( "mp_pbOk" );
+  QPushButton* self_save = self_card->findChild<QPushButton*>( "closeMyProfile" );
   CHECK( self_save->isVisible() && self_card->rect().contains(
     QRect( self_save->mapTo( self_card, QPoint() ), self_save->size() ) ) );
+  CHECK( self_card->findChild<QStackedWidget*>( "ShadowProfilePages" )->currentIndex() == 0 &&
+    self_card->findChild<QLineEdit*>( "mp_leNickname" )->isVisible() &&
+    !self_card->findChild<QWidget*>( "profileEditor" )->isVisible() );
   const QPoint editor_before = self_card->pos();
   window.move( window.pos() + QPoint( 12, 8 ) ); QTest::qWait( 20 );
-  CHECK( self_card->pos() == editor_before );
+  CHECK( self_card->pos() - editor_before == QPoint( 12, 8 ) );
   self_card->reject(); flushEvents();
   CHECK( !self_card );
   self_avatar->click(); QTest::qWait( 20 );

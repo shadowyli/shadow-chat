@@ -98,10 +98,71 @@ QString ShadowLocalAccounts::autoLoginEmail() const
   if( !autoLoginEnabled() ) return QString();
   QSettings s(QDir(m_root).filePath("session.ini"),QSettings::IniFormat);
   const QString email=s.value("autoLoginEmail").toString();
-  return exists(email) ? normalizeEmail(email) : QString();
+  if( !exists(email) ) return QString();
+  QSettings account(metadata(email),QSettings::IniFormat);
+  if( account.value("password").toByteArray().size()!=64 || account.value("salt").toByteArray().size()!=32 )
+    return QString();
+  return normalizeEmail(email);
 }
 void ShadowLocalAccounts::rememberLogin( const QString& email ) { QSettings s(QDir(m_root).filePath("session.ini"),QSettings::IniFormat); s.setValue("autoLoginEmail",normalizeEmail(email)); s.sync(); }
 void ShadowLocalAccounts::logout() { QSettings s(QDir(m_root).filePath("session.ini"),QSettings::IniFormat); s.remove("autoLoginEmail"); s.sync(); }
+bool ShadowLocalAccounts::clearPasswordForSeatMove( const QString& email, QString* error )
+{
+  if( error ) error->clear();
+  auto fail = [&]( const QString& message ) { if( error ) *error = message; return false; };
+  const QString normalized = normalizeEmail(email);
+  if( normalized.isEmpty() || !exists(normalized) )
+    return fail(QStringLiteral("当前账号无效，未清除密码。"));
+  const QString accountPath = metadata(normalized);
+  const QString sessionPath = QDir(m_root).filePath("session.ini");
+  if( QFileInfo(accountPath).isSymLink() || !QFileInfo(accountPath).isFile() ||
+      QFileInfo(sessionPath).isSymLink() ||
+      (QFileInfo::exists(sessionPath) && !QFileInfo(sessionPath).isFile()) )
+    return fail(QStringLiteral("账号或登录配置路径异常，未清除密码。"));
+  QSettings account(accountPath,QSettings::IniFormat);
+  QSettings session(sessionPath,QSettings::IniFormat);
+  if( normalizeEmail(account.value("email").toString())!=normalized ||
+      account.status()!=QSettings::NoError || session.status()!=QSettings::NoError )
+    return fail(QStringLiteral("账号或登录配置读取失败，未清除密码。"));
+  QTemporaryDir temporary;
+  if( !temporary.isValid() )
+    return fail(QStringLiteral("无法准备账号清理，未清除密码。"));
+  const QString stagedAccount = temporary.filePath("account.ini");
+  const QString stagedSession = temporary.filePath("session.ini");
+  {
+    QSettings preparedAccount(stagedAccount,QSettings::IniFormat);
+    QSettings preparedSession(stagedSession,QSettings::IniFormat);
+    for( const QString& key : account.allKeys() ) preparedAccount.setValue(key,account.value(key));
+    for( const QString& key : session.allKeys() ) preparedSession.setValue(key,session.value(key));
+    preparedAccount.remove("password");
+    preparedAccount.remove("salt");
+    preparedSession.remove("autoLoginEmail");
+    preparedSession.setValue("autoLoginEnabled",false);
+    preparedAccount.sync();
+    preparedSession.sync();
+    if( preparedAccount.status()!=QSettings::NoError || preparedSession.status()!=QSettings::NoError )
+      return fail(QStringLiteral("无法准备账号清理，未清除密码。"));
+  }
+  auto prepareWrite = []( const QString& sourcePath, QSaveFile& target ) {
+    QFile source(sourcePath);
+    if( !source.open(QIODevice::ReadOnly) ) return false;
+    const QByteArray bytes = source.readAll();
+    target.setDirectWriteFallback(false);
+    return source.error()==QFile::NoError && target.open(QIODevice::WriteOnly) &&
+      target.write(bytes)==bytes.size();
+  };
+  QSaveFile accountOutput(accountPath);
+  QSaveFile sessionOutput(sessionPath);
+  if( !prepareWrite(stagedAccount,accountOutput) || !prepareWrite(stagedSession,sessionOutput) )
+    return fail(QStringLiteral("账号清理写入失败，备份已保留，未清除密码。"));
+  if( !sessionOutput.commit() )
+    return fail(QStringLiteral("无法清除自动登录，备份已保留，未清除密码。"));
+  if( !accountOutput.commit() )
+    return fail(QStringLiteral("自动登录已禁用，但本机密码未清除。备份已保留，请重试或联系负责人。"));
+  account.sync();
+  session.sync();
+  return true;
+}
 bool ShadowLocalAccounts::autoLoginEnabled() const { QSettings s(QDir(m_root).filePath("session.ini"),QSettings::IniFormat); return s.value("autoLoginEnabled",true).toBool(); }
 void ShadowLocalAccounts::setAutoLoginEnabled( bool enabled ) { QSettings s(QDir(m_root).filePath("session.ini"),QSettings::IniFormat); s.setValue("autoLoginEnabled",enabled); s.sync(); }
 

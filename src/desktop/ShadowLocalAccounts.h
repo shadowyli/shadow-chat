@@ -22,6 +22,7 @@ public:
   QString autoLoginEmail() const;
   void rememberLogin( const QString& email );
   void logout();
+  bool clearPasswordForSeatMove( const QString& email, QString* error );
   bool autoLoginEnabled() const;
   void setAutoLoginEnabled( bool enabled );
   static bool login( QString* email, QString* folder, const QString& root = QString() );

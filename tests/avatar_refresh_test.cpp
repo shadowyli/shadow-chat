@@ -58,7 +58,8 @@ int main(int argc,char** argv)
   const QImage onlinePhoto=Bee::avatarForUser(peer,QSize(40,40),true).toImage();
   CHECK(onlinePhoto==Bee::avatarForUser(offlinePeer,QSize(40,40),true).toImage());CHECK(onlinePhoto.pixelColor(20,0)==QColor(Qt::blue));CHECK(onlinePhoto.pixelColor(0,0).alpha()==0);
   CHECK(Bee::avatarForUser(peer,QSize(40,40),false).toImage()==Bee::avatarForUser(offlinePeer,QSize(40,40),false).toImage());
-  peer.setNetworkAddress(NetworkAddress(QHostAddress("127.0.0.2"),45001));UserManager::instance().setUser(peer);settings.setSaveUserList(true);settings.setRemoveInactiveUsers(false);CoreProbe core;
+  NetworkAddress peerAddress(QHostAddress("127.0.0.2"),45001);peerAddress.setInfo(Protocol::instance().shadowChatIdentityMarker());
+  peer.setNetworkAddress(peerAddress);UserManager::instance().setUser(peer);settings.setSaveUserList(true);settings.setRemoveInactiveUsers(false);CoreProbe core;
   Group group;group.setId(4001);group.setName("avatar-fixture");group.setChatType(Group::PrivateChat);group.addUser(ID_LOCAL_USER);group.addUser(peer.id());Chat chat;chat.setGroup(group);
   for(int i=0;i<20;++i){Message message(Message::Chat,5000+i,QString("avatar-message-%1").arg(i));chat.addMessage(ChatMessage(i%2?ID_LOCAL_USER:peer.id(),message,ChatMessage::Chat,true));}ChatManager::instance().setChat(chat);
   GuiUserList contacts;contacts.setUser(local,false);contacts.setUser(peer,false);QTreeWidget* tree=contacts.findChild<QTreeWidget*>();CHECK(tree);CHECK(peerRow(tree,peer.id()));CHECK(!peerRow(tree,ID_LOCAL_USER));

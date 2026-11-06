@@ -86,6 +86,7 @@
 #include <QScreen>
 #include <QPainterPath>
 #include "ShadowDialogStyle.h"
+#include "ShadowDialogChrome.h"
 #include "ShadowColorPanel.h"
 #include "ShadowPopup.h"
 #include "ShadowWorkspaceArchive.h"
@@ -1069,12 +1070,28 @@ void GuiMain::checkViewActions()
 
 void GuiMain::showAbout()
 {
-#ifdef Q_OS_MAC
-  QMessageBox::about( Q_NULLPTR, Settings::instance().programName(),
-#else
-  QMessageBox::about( this, Settings::instance().programName(),
-#endif
-                      QString( "<b>%1</b> · 局域网通讯工具<br><br>%2<br>%3 %4 %5<br><br>维护者：%6<br>%7" )
+  QDialog dialog( this );
+  dialog.setObjectName( QStringLiteral( "ShadowAboutDialog" ) );
+  dialog.setWindowTitle( QStringLiteral( "关于影聊" ) );
+  dialog.setWindowIcon( windowIcon() );
+  dialog.setMinimumWidth( 430 );
+  ShadowDialogStyle::apply( &dialog );
+  QVBoxLayout* layout = new QVBoxLayout( &dialog );
+  layout->setContentsMargins( 24, 20, 24, 20 );
+  layout->setSpacing( 20 );
+  QHBoxLayout* content = new QHBoxLayout;
+  content->setSpacing( 18 );
+  QLabel* logo = new QLabel( &dialog );
+  logo->setFixedSize( 64, 64 );
+  logo->setPixmap( QPixmap( QStringLiteral( ":/images/shadowchat/shadowchat-mark-source.png" ) )
+    .scaled( logo->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation ) );
+  content->addWidget( logo, 0, Qt::AlignTop );
+  QLabel* description = new QLabel( &dialog );
+  description->setObjectName( QStringLiteral( "ShadowAboutDescription" ) );
+  description->setTextFormat( Qt::RichText );
+  description->setWordWrap( true );
+  description->setTextInteractionFlags( Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard );
+  description->setText( QString( "<b>%1</b> · 局域网通讯工具<br><br>%2<br>%3 %4 %5<br><br>维护者：%6<br>%7" )
                         .arg( Settings::instance().programName() )
                         .arg( Settings::instance().isDevelopmentVersion() ? tr( "Development version") : tr( "Version" ) )
                         .arg( Settings::instance().version( true, true, true ) )
@@ -1083,6 +1100,13 @@ void GuiMain::showAbout()
                         .arg( QStringLiteral( "shadowyli" ) )
                         .arg( QStringLiteral( "个人开源项目 · 版本与更新说明以 GitHub 仓库为准。" ) )
                       );
+  content->addWidget( description, 1 );
+  layout->addLayout( content );
+  ShadowDialogChrome::decorate( &dialog );
+  dialog.adjustSize();
+  if( QToolButton* close = dialog.findChild<QToolButton*>( QStringLiteral( "shadowDialogClose" ) ) )
+    close->setFocus();
+  dialog.exec();
 }
 
 void GuiMain::showLicense()
@@ -1800,7 +1824,6 @@ void GuiMain::createMenus()
   mp_menuInfo->addAction( IconManager::instance().icon( "donate.png" ), tr( "Donate for %1" ).arg( Settings::instance().programName() ) + QString( "..." ), this, SLOT( openDonationPage() ) );
   mp_menuInfo->addSeparator();
   mp_menuInfo->addAction( mp_actAbout );
-  mp_menuInfo->addAction( IconManager::instance().icon( "license.png" ), tr( "Show %1's license..." ).arg( Settings::instance().programName() ), this, SLOT( showLicense() ) );
   act = mp_menuInfo->addAction( IconManager::instance().icon( "qt.png" ), tr( "Qt Library..." ), this, SLOT( showAboutQt() ) );
   act->setMenuRole( QAction::AboutQtRole );
   mp_menuInfo->addSeparator();
@@ -1980,10 +2003,11 @@ void GuiMain::createModernShell()
   mp_modernMessagesButton->setObjectName( "ShadowNavButton" );
   mp_modernMessagesButton->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
   mp_modernMessagesButton->setText( QStringLiteral( "消息" ) );
-  mp_modernMessagesButton->setIcon( ShadowStyle::navigationIcon( QStringLiteral( "chats-circle" ) ) );
+  mp_modernMessagesButton->setIcon( ShadowStyle::navigationIcon( QStringLiteral( "chats-circle-fill" ) ) );
   mp_modernMessagesButton->setIconSize( QSize( 24, 24 ) );
   mp_modernMessagesButton->setToolButtonStyle( Qt::ToolButtonTextUnderIcon );
   mp_modernMessagesButton->setCheckable( true );
+  mp_modernMessagesButton->setFocusPolicy( Qt::TabFocus );
   mp_modernMessagesButton->setAccessibleName( QStringLiteral( "消息" ) );
   mp_modernMessagesButton->setToolTip( QStringLiteral( "消息 (Ctrl+1)" ) );
   connect( mp_modernMessagesButton, SIGNAL( clicked() ), this, SLOT( showModernMessages() ) );
@@ -1993,10 +2017,11 @@ void GuiMain::createModernShell()
   mp_modernContactsButton->setObjectName( "ShadowNavButton" );
   mp_modernContactsButton->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
   mp_modernContactsButton->setText( QStringLiteral( "通讯录" ) );
-  mp_modernContactsButton->setIcon( ShadowStyle::navigationIcon( QStringLiteral( "users-three" ) ) );
+  mp_modernContactsButton->setIcon( ShadowStyle::navigationIcon( QStringLiteral( "users-three-fill" ) ) );
   mp_modernContactsButton->setIconSize( QSize( 24, 24 ) );
   mp_modernContactsButton->setToolButtonStyle( Qt::ToolButtonTextUnderIcon );
   mp_modernContactsButton->setCheckable( true );
+  mp_modernContactsButton->setFocusPolicy( Qt::TabFocus );
   mp_modernContactsButton->setAccessibleName( QStringLiteral( "通讯录" ) );
   mp_modernContactsButton->setToolTip( QStringLiteral( "通讯录 (Ctrl+2)" ) );
   connect( mp_modernContactsButton, SIGNAL( clicked() ), this, SLOT( showModernContacts() ) );
@@ -2011,12 +2036,13 @@ void GuiMain::createModernShell()
   more_menu->addAction( ShadowStyle::actionIcon( QStringLiteral( "users-three" ) ), QStringLiteral( "新建群聊" ), this, SLOT( createGroupChat() ) );
   more_menu->addSeparator();
   more_menu->addAction( ShadowStyle::actionIcon( QStringLiteral( "shield-check" ) ), QStringLiteral( "连接与安全状态" ), this, SLOT( showModernActivities() ) );
-  more_menu->addAction( ShadowStyle::actionIcon( QStringLiteral( "archive" ) ), QStringLiteral( "聊天存档" ), this, SLOT( showModernSavedChats() ) );
-  more_menu->addAction( ShadowStyle::actionIcon( QStringLiteral( "paperclip" ) ), QStringLiteral( "文件传输" ), this, SLOT( showModernTransfers() ) );
   more_menu->addSeparator();
   QMenu* workspace_menu = more_menu->addMenu( ShadowStyle::actionIcon( QStringLiteral( "folder-open" ) ), QStringLiteral( "工作区与换机" ) );
   workspace_menu->addAction( QStringLiteral( "导出工作区…" ), this, SLOT( exportShadowWorkspace() ) );
   workspace_menu->addAction( QStringLiteral( "导入工作区…" ), this, SLOT( importShadowWorkspace() ) );
+  QAction* seat_move_action = more_menu->addAction( ShadowStyle::actionIcon( QStringLiteral( "archive" ) ),
+    QStringLiteral( "我要换座位…" ), this, SLOT( moveShadowSeat() ) );
+  seat_move_action->setObjectName( QStringLiteral( "ShadowSeatMoveAction" ) );
   QAction* auto_login_action = more_menu->addAction( QStringLiteral( "启动时自动登录" ) );
   auto_login_action->setCheckable( true );
   auto_login_action->setChecked( ShadowLocalAccounts().autoLoginEnabled() );
@@ -2320,6 +2346,7 @@ void GuiMain::createModernShell()
   } );
   connect( mp_modernDirectoryPage, SIGNAL( userDetailsRequested( VNumber ) ), this, SLOT( showVCard( VNumber ) ) );
   connect( mp_modernDirectoryPage, SIGNAL( createGroupRequested() ), this, SLOT( createGroupChat() ) );
+  connect( mp_modernDirectoryPage, &ShadowDirectoryPage::editWorkgroupsRequested, this, &GuiMain::editOwnWorkgroups );
   connect( mp_modernDirectoryPage, &ShadowDirectoryPage::sectionChanged, this, [this]( int section ) {
     m_modernPrimaryPage = section == ShadowDirectoryPage::Groups ? 2
       : section == ShadowDirectoryPage::Organization ? 5 : 1;
@@ -2490,19 +2517,25 @@ void GuiMain::showModernListPanel()
 void GuiMain::showShadowSettings()
 {
   QDialog dialog( this );
+  dialog.setObjectName( QStringLiteral( "ShadowSettingsDialog" ) );
+  dialog.setProperty( "shadowDialogChromeSkip", true );
   dialog.setWindowTitle( QStringLiteral( "影聊设置" ) );
   dialog.setModal( true );
-  dialog.setMinimumWidth( 620 );
   const QRect settings_available = screen() ? screen()->availableGeometry() :
     QApplication::desktop()->availableGeometry();
-  dialog.setMinimumHeight( qMin( 620, qMax( 160, settings_available.height() - 120 ) ) );
-  ShadowDialogStyle::apply(&dialog);
-  dialog.setStyleSheet(ShadowStyle::applicationStyleSheet()+dialog.styleSheet());
+  dialog.setMinimumWidth( qMin( 440, qMax( 240, settings_available.width() - 64 ) ) );
+  dialog.setMinimumHeight( qMin( 260, qMax( 160, settings_available.height() - 120 ) ) );
+  ShadowDialogStyle::apply( &dialog );
+  dialog.setStyleSheet( ShadowStyle::applicationStyleSheet() + dialog.styleSheet() + QStringLiteral(
+    "QScrollArea#ShadowSettingsScroll, QWidget#ShadowSettingsViewport,"
+    " QWidget#ShadowSettingsContent, QWidget#ShadowSettingsFooter { background: transparent; border: 0; }" ) );
   Bee::removeContextHelpButton( &dialog );
 
   QWidget* settings_content = new QWidget( &dialog );
+  settings_content->setObjectName( QStringLiteral( "ShadowSettingsContent" ) );
+  settings_content->setAttribute( Qt::WA_StyledBackground );
   QVBoxLayout* root_layout = new QVBoxLayout( settings_content );
-  root_layout->setContentsMargins( 28, 24, 28, 22 );
+  root_layout->setContentsMargins( 24, 20, 24, 12 );
   root_layout->setSpacing( 14 );
   QFrame* message_card = new QFrame( &dialog );
   message_card->setObjectName( "ShadowOnboardingCard" );
@@ -2517,7 +2550,7 @@ void GuiMain::showShadowSettings()
   QCheckBox* preview_check = new QCheckBox( QStringLiteral( "系统通知中显示消息内容" ), message_card );
   preview_check->setChecked( Settings::instance().showChatMessageOnTray() );
   preview_check->setToolTip( QStringLiteral( "关闭后，锁屏或共享屏幕时不会在系统通知里显示正文。" ) );
-  QCheckBox* enter_check = new QCheckBox( QStringLiteral( "按 Enter 发送消息（关闭时使用 Ctrl+Enter 发送）" ), message_card );
+  QCheckBox* enter_check = new QCheckBox( QStringLiteral( "按 Enter 发送消息（否则 Ctrl+Enter）" ), message_card );
   enter_check->setChecked( Settings::instance().useReturnToSendMessage() );
   message_layout->addWidget( message_title );
   message_layout->addWidget( sound_check );
@@ -2540,25 +2573,36 @@ void GuiMain::showShadowSettings()
 
   QFrame* file_card = new QFrame( &dialog );
   file_card->setObjectName( "ShadowOnboardingCard" );
-  file_card->setMinimumHeight( 144 );
   QGridLayout* file_layout = new QGridLayout( file_card );
   file_layout->setContentsMargins( 18, 14, 18, 14 );
   file_layout->setHorizontalSpacing( 8 );
   file_layout->setVerticalSpacing( 8 );
+  file_layout->setColumnStretch( 0, 1 );
   QLabel* file_title = new QLabel( QStringLiteral( "接收文件" ), file_card );
   file_title->setObjectName( "ShadowOnboardingStep" );
   file_layout->addWidget( file_title, 0, 0, 1, 2 );
   QCheckBox* confirm_download_check = new QCheckBox( QStringLiteral( "接收前先询问保存位置" ), file_card );
   confirm_download_check->setChecked( Settings::instance().confirmOnDownloadFile() );
   file_layout->addWidget( confirm_download_check, 1, 0, 1, 2 );
-  QLineEdit* download_folder = new QLineEdit( Settings::instance().downloadDirectory(), file_card );
+  QLineEdit* download_folder = new QLineEdit( QDir::toNativeSeparators( Settings::instance().downloadDirectory() ), file_card );
+  download_folder->setObjectName( QStringLiteral( "ShadowSettingsDownloadFolder" ) );
   download_folder->setReadOnly( true );
+  download_folder->setMinimumWidth( 0 );
+  download_folder->setSizePolicy( QSizePolicy::Ignored, QSizePolicy::Fixed );
+  download_folder->setCursorPosition( 0 );
+  download_folder->setToolTip( download_folder->text() );
   download_folder->setAccessibleName( QStringLiteral( "默认接收文件夹" ) );
   QPushButton* choose_folder = new QPushButton( QStringLiteral( "更改…" ), file_card );
+  choose_folder->setObjectName( QStringLiteral( "ShadowSettingsChooseFolder" ) );
+  choose_folder->setSizePolicy( QSizePolicy::Fixed, QSizePolicy::Fixed );
   connect( choose_folder, &QPushButton::clicked, &dialog, [&dialog, download_folder]() {
     const QString selected = QFileDialog::getExistingDirectory( &dialog, QStringLiteral( "选择默认接收文件夹" ), download_folder->text() );
     if( !selected.isEmpty() )
+    {
       download_folder->setText( QDir::toNativeSeparators( selected ) );
+      download_folder->setCursorPosition( 0 );
+      download_folder->setToolTip( download_folder->text() );
+    }
   } );
   file_layout->addWidget( download_folder, 2, 0 );
   file_layout->addWidget( choose_folder, 2, 1 );
@@ -2566,7 +2610,6 @@ void GuiMain::showShadowSettings()
 
   QFrame* security_card = new QFrame( &dialog );
   security_card->setObjectName( "ShadowOnboardingTrust" );
-  security_card->setMinimumHeight( 180 );
   QVBoxLayout* security_layout = new QVBoxLayout( security_card );
   security_layout->setContentsMargins( 18, 14, 18, 14 );
   security_layout->setSpacing( 7 );
@@ -2652,9 +2695,11 @@ void GuiMain::showShadowSettings()
   security_layout->addWidget( update_status );
   security_layout->addWidget( update_notes );
   root_layout->addWidget( security_card );
+  root_layout->addStretch();
 
   QDialogButtonBox* buttons = new QDialogButtonBox( QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog );
-  buttons->setLayoutDirection(Qt::RightToLeft);
+  buttons->setObjectName( QStringLiteral( "ShadowSettingsButtons" ) );
+  buttons->setLayoutDirection( Qt::LeftToRight );
   buttons->button( QDialogButtonBox::Save )->setText( QStringLiteral( "保存" ) );
   buttons->button( QDialogButtonBox::Save )->setObjectName( "ShadowPrimaryButton" );
   buttons->button( QDialogButtonBox::Save )->setProperty("role","primary");
@@ -2663,15 +2708,30 @@ void GuiMain::showShadowSettings()
   buttons->button( QDialogButtonBox::Cancel )->setText( QStringLiteral( "取消" ) );
   connect( buttons, SIGNAL( accepted() ), &dialog, SLOT( accept() ) );
   connect( buttons, SIGNAL( rejected() ), &dialog, SLOT( reject() ) );
-  root_layout->addWidget( buttons, 0, Qt::AlignRight );
   QScrollArea* settings_scroll = new QScrollArea( &dialog );
+  settings_scroll->setObjectName( QStringLiteral( "ShadowSettingsScroll" ) );
+  settings_scroll->viewport()->setObjectName( QStringLiteral( "ShadowSettingsViewport" ) );
+  settings_scroll->viewport()->setAutoFillBackground( false );
   settings_scroll->setFrameShape( QFrame::NoFrame );
   settings_scroll->setWidgetResizable( true );
   settings_scroll->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
   settings_scroll->setWidget( settings_content );
+  settings_content->setAutoFillBackground( false );
   QVBoxLayout* dialog_layout = new QVBoxLayout( &dialog );
   dialog_layout->setContentsMargins( 0, 0, 0, 0 );
-  dialog_layout->addWidget( settings_scroll );
+  dialog_layout->setSpacing( 0 );
+  dialog_layout->addWidget( settings_scroll, 1 );
+  QWidget* footer = new QWidget( &dialog );
+  footer->setObjectName( QStringLiteral( "ShadowSettingsFooter" ) );
+  QHBoxLayout* footer_layout = new QHBoxLayout( footer );
+  footer_layout->setContentsMargins( 24, 12, 24, 20 );
+  footer_layout->addStretch();
+  footer_layout->addWidget( buttons );
+  dialog_layout->addWidget( footer );
+  dialog.setProperty( "shadowDialogChromeSkip", false );
+  ShadowDialogChrome::decorate( &dialog );
+  dialog.resize( qMin( 650, settings_available.width() - 32 ),
+    qMin( 670, settings_available.height() - 32 ) );
 
   if( dialog.exec() != QDialog::Accepted )
     return;
@@ -2755,6 +2815,61 @@ void GuiMain::exportShadowWorkspace()
 
   QMessageBox::information( this, QStringLiteral( "工作区已导出" ),
                             QStringLiteral( "个人资料、联系人、群聊、设置和聊天记录已保存。\n\n下载的附件、缓存、日志和插件没有包含在工作区中。" ) );
+}
+
+void GuiMain::moveShadowSeat()
+{
+  if( property("shadowSeatMoveBusy").toBool() ) return;
+  ShadowLocalAccounts accounts;
+  const QString profile = Settings::instance().dataFolder();
+  QSettings metadata(QDir(profile).filePath(".shadow-account.ini"),QSettings::IniFormat);
+  const QString email = ShadowLocalAccounts::normalizeEmail(metadata.value("email").toString());
+  const QString defaultName = ShadowWorkspaceArchive::seatMoveFileName(email,QDateTime::currentDateTime());
+  if( defaultName.isEmpty() ||
+      QFileInfo(profile).canonicalFilePath()!=QFileInfo(accounts.profileFolder(email)).canonicalFilePath() )
+  {
+    QMessageBox::warning(this,QStringLiteral("无法换座位"),QStringLiteral("当前账号目录校验失败，未导出或清除密码。"));
+    return;
+  }
+  if( !ShadowDialogStyle::confirm(this,QStringLiteral("我要换座位"),
+    QStringLiteral("先导出历史记录 ZIP，成功后清除本机此账号的密码与自动登录，再回到登录页。\n"
+      "本机历史保留，不删除账号。清理后在本机重登需负责人恢复密码，新电脑可从备份恢复并设置新密码。\n"
+      "ZIP 未加密，包含账号校验资料、聊天记录和设置，不含接收附件，请妥善保管。\n"
+      "当前收发会中断，取消或导出失败不会退出。"),
+    QStringLiteral("选择备份位置")) ) return;
+  const QString selected = QFileDialog::getSaveFileName(this,QStringLiteral("保存换座位历史记录备份"),
+    QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).filePath(defaultName),
+    QStringLiteral("历史记录压缩包 (*.zip)"));
+  if( selected.isEmpty() ) return;
+  const QString target = selected.endsWith(".zip",Qt::CaseInsensitive) ? selected : selected+QStringLiteral(".zip");
+  setProperty("shadowSeatMoveBusy",true);
+  QAction* action = findChild<QAction*>("ShadowSeatMoveAction");
+  if( action ) action->setEnabled(false);
+  QApplication::setOverrideCursor(Qt::WaitCursor);
+  QMetaObject::invokeMethod(beeCore,"saveUsersAndGroups",Qt::DirectConnection);
+  const bool saved = MessageManager::instance().saveMessages(true);
+  Settings::instance().save();
+  QString error;
+  const bool exported = saved && ShadowWorkspaceArchive::exportSeatMoveZip(profile,target,&error);
+  QApplication::restoreOverrideCursor();
+  setProperty("shadowSeatMoveBusy",false);
+  if( action ) action->setEnabled(true);
+  if( !exported )
+  {
+    QMessageBox::critical(this,QStringLiteral("换座位备份失败"),
+      saved ? error : QStringLiteral("聊天记录保存失败，未导出、未清除密码或退出。请检查磁盘空间和权限。"));
+    return;
+  }
+  if( !accounts.clearPasswordForSeatMove(email,&error) )
+  {
+    QMessageBox::critical(this,QStringLiteral("备份已导出，账号清理未完成"),error+QStringLiteral("\n\n备份位置：")+target);
+    return;
+  }
+  QMessageBox::information(this,QStringLiteral("换座位备份已完成"),
+    QStringLiteral("历史记录 ZIP 已保存，本机账号密码与自动登录已清除。\n"
+      "本机历史仍保留，关闭提示后回到登录页。\n\n备份位置：")+target);
+  qApp->setProperty("shadowRestartForLogin",true);
+  forceShutdown();
 }
 
 void GuiMain::importShadowWorkspace()
@@ -4706,6 +4821,16 @@ void GuiMain::showChat( VNumber chat_id )
 
 void GuiMain::changeVCard()
 {
+  showOwnProfileCard( false );
+}
+
+void GuiMain::editOwnWorkgroups()
+{
+  showOwnProfileCard( true );
+}
+
+void GuiMain::showOwnProfileCard( bool editWorkgroups )
+{
   GuiEditVCard* gvc = new GuiEditVCard( this );
   gvc->setAttribute( Qt::WA_DeleteOnClose );
   connect( gvc, &GuiEditVCard::userStatusSelected, this, [this, gvc]( int status ) {
@@ -4714,6 +4839,7 @@ void GuiMain::changeVCard()
   } );
   connect( gvc, &QDialog::accepted, this, [this, gvc]() {
     beeCore->setLocalUserVCard( gvc->userColor(), gvc->vCard() );
+    beeCore->setLocalUserWorkgroups( gvc->workgroups() );
     if( gvc->regenerateUserHash() )
     {
       beeCore->regenerateLocalUserHash();
@@ -4723,9 +4849,10 @@ void GuiMain::changeVCard()
   gvc->setUser( Settings::instance().localUser() );
   gvc->setSizeGripEnabled( true );
   QWidget* anchor = qobject_cast<QWidget*>( sender() );
-  if( !anchor || !anchor->isVisible() )
+  if( editWorkgroups || !anchor || !anchor->isVisible() )
     anchor = findChild<QWidget*>( QStringLiteral( "ShadowTitleProfile" ) );
   gvc->showAt( anchor ? anchor : this );
+  if( editWorkgroups ) gvc->editWorkgroupsInline();
 }
 
 void GuiMain::showLocalUserVCard()
@@ -6467,8 +6594,17 @@ void GuiMain::readAllMessagesInChat( VNumber chat_id )
   beeCore->readAllMessagesInChat( chat_id );
 }
 
-void GuiMain::saveSession( QSessionManager& )
+void GuiMain::saveSession( QSessionManager& manager )
 {
+  if( beeApp->property( "shadowInstallerExit" ).toBool() &&
+      (beeCore->hasFileTransferInProgress() ||
+       !Settings::instance().objectSettings()->isWritable() ||
+       (Settings::instance().chatAutoSave() && !MessageManager::instance().chatMessageCanBeSaved())) )
+  {
+    qWarning() << "Installer exit deferred: transfer active or local data not writable";
+    manager.cancel();
+    return;
+  }
   qDebug() << "Session manager ask to save and close session";
   forceShutdown();
 }

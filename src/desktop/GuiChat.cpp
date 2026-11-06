@@ -39,6 +39,8 @@
 #include "GuiStickerPicker.h"
 #include "ShadowStickerStore.h"
 #include "ShadowStickerMedia.h"
+#include "ShadowVideoPreview.h"
+#include "ShadowVideoCard.h"
 #include "GuiCreateTextFile.h"
 #ifdef BEEBEEP_USE_VOICE_CHAT
 #include "GuiVoicePlayer.h"
@@ -1560,6 +1562,12 @@ QString GuiChat::modernFileMessageToText( const ChatMessage& message )
   for(const QString& path:files)
   {
     const QFileInfo file(path);
+    const QUrl url = QUrl::fromLocalFile( path );
+    if( ShadowVideoPreview::canPreview( url ) )
+    {
+      body.append( shadowVideoCardHtml( url, Settings::instance().cacheFolder() ) );
+      continue;
+    }
     body.append(QStringLiteral("<a href=\"%1\">%2</a><br><font color=\"#83909F\" style=\"font-size:11px\">%3</font>")
       .arg(QUrl::fromLocalFile(path).toString().toHtmlEscaped(),file.fileName().toHtmlEscaped(),
         file.exists()?QLocale().formattedDataSize(file.size()):QStringLiteral("本地文件已移动或删除")));

@@ -62,7 +62,11 @@ bool BeeApplication::resetSessionNotificationForWindow()
 bool BeeApplication::winEventFilter( MSG* event_message, long* event_result )
 {
   Q_UNUSED( event_result )
-  if( event_message->message == WM_POWERBROADCAST )
+  if( event_message->message == WM_QUERYENDSESSION )
+  {
+    setProperty( "shadowInstallerExit", (event_message->lParam & ENDSESSION_CLOSEAPP) != 0 );
+  }
+  else if( event_message->message == WM_POWERBROADCAST )
   {
     if( event_message->wParam == PBT_APMSUSPEND )
       forceSleep();
