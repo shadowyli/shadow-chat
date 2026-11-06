@@ -90,11 +90,15 @@ int main( int argc, char** argv )
           QPoint( 15, dialog->height() - 16 ), QPoint( dialog->width() - 16, dialog->height() - 16 ) } )
           passed &= verify( image.pixelColor( qRound( corner.x() * ratio ),
             qRound( corner.y() * ratio ) ).alpha() < 160, "corner has no opaque rectangular overflow" );
-        const QImage background = scroll->viewport()->grab().toImage();
-        const QColor gutter = background.pixelColor( qRound( 8 * ratio ), qRound( 8 * ratio ) );
+        const QPoint gutterPosition = scroll->viewport()->mapTo( dialog, QPoint( 8, 8 ) );
+        const QColor gutter = image.pixelColor( qRound( gutterPosition.x() * ratio ),
+          qRound( gutterPosition.y() * ratio ) );
         passed &= verify( gutter.rgb() == QColor( "#FFFFFF" ).rgb(), "scroll gutter matches white dialog surface" );
         passed &= verify( path->text() == folder && path->toolTip() == folder &&
           path->cursorPosition() == 0, "long path preserved with full tooltip and visible beginning" );
+        auto* choose = dialog->findChild<QPushButton*>( "ShadowSettingsChooseFolder" );
+        passed &= verify( choose && choose->width() <= choose->sizeHint().width() &&
+          path->width() > choose->width(), "folder chooser keeps compact width and leaves space for path" );
         const QRect buttonsRect = boundsIn( buttons, surface );
         passed &= verify( buttonsRect.center().x() > surface->width() / 2,
           "footer actions align to the right" );

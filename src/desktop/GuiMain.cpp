@@ -2577,6 +2577,7 @@ void GuiMain::showShadowSettings()
   file_layout->setContentsMargins( 18, 14, 18, 14 );
   file_layout->setHorizontalSpacing( 8 );
   file_layout->setVerticalSpacing( 8 );
+  file_layout->setColumnStretch( 0, 1 );
   QLabel* file_title = new QLabel( QStringLiteral( "接收文件" ), file_card );
   file_title->setObjectName( "ShadowOnboardingStep" );
   file_layout->addWidget( file_title, 0, 0, 1, 2 );
@@ -2592,6 +2593,8 @@ void GuiMain::showShadowSettings()
   download_folder->setToolTip( download_folder->text() );
   download_folder->setAccessibleName( QStringLiteral( "默认接收文件夹" ) );
   QPushButton* choose_folder = new QPushButton( QStringLiteral( "更改…" ), file_card );
+  choose_folder->setObjectName( QStringLiteral( "ShadowSettingsChooseFolder" ) );
+  choose_folder->setSizePolicy( QSizePolicy::Fixed, QSizePolicy::Fixed );
   connect( choose_folder, &QPushButton::clicked, &dialog, [&dialog, download_folder]() {
     const QString selected = QFileDialog::getExistingDirectory( &dialog, QStringLiteral( "选择默认接收文件夹" ), download_folder->text() );
     if( !selected.isEmpty() )
