@@ -186,7 +186,7 @@ QString ShadowStyle::applicationStyleSheet()
     "QToolButton#ShadowBackButton:hover { background: #EEF3FA; }"
     "QToolButton#ShadowBackButton:focus { border-color: #2563EB; }"
     "QWidget#ShadowChatPlaceholder { background: #F5F7FB; }"
-    "QFrame#ShadowWelcomeCard { background: #FFFFFF; border: 1px solid #E3E8F0; border-radius: 16px; }"
+    "QFrame#ShadowWelcomeCard { background: transparent; border: 0; border-radius: 0; }"
     "QLabel#ShadowPlaceholderTitle { color: #172033; font-size: 18px; font-weight: 600; }"
     "QLabel#ShadowPlaceholderHint { color: #6B7686; font-size: 13px; padding-top: 2px; }"
     "QLabel#ShadowPrivacyPill { color: #2457B8; background: #EAF1FF; border: 1px solid #D4E2FF; border-radius: 9px; padding: 7px 11px; font-size: 12px; }"

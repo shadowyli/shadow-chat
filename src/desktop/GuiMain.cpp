@@ -1069,12 +1069,28 @@ void GuiMain::checkViewActions()
 
 void GuiMain::showAbout()
 {
-#ifdef Q_OS_MAC
-  QMessageBox::about( Q_NULLPTR, Settings::instance().programName(),
-#else
-  QMessageBox::about( this, Settings::instance().programName(),
-#endif
-                      QString( "<b>%1</b> · 局域网通讯工具<br><br>%2<br>%3 %4 %5<br><br>维护者：%6<br>%7" )
+  QDialog dialog( this );
+  dialog.setObjectName( QStringLiteral( "ShadowAboutDialog" ) );
+  dialog.setWindowTitle( QStringLiteral( "关于影聊" ) );
+  dialog.setWindowIcon( windowIcon() );
+  dialog.setMinimumWidth( 430 );
+  ShadowDialogStyle::apply( &dialog );
+  QVBoxLayout* layout = new QVBoxLayout( &dialog );
+  layout->setContentsMargins( 24, 20, 24, 20 );
+  layout->setSpacing( 20 );
+  QHBoxLayout* content = new QHBoxLayout;
+  content->setSpacing( 18 );
+  QLabel* logo = new QLabel( &dialog );
+  logo->setFixedSize( 64, 64 );
+  logo->setPixmap( QPixmap( QStringLiteral( ":/images/shadowchat/shadowchat-mark-source.png" ) )
+    .scaled( logo->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation ) );
+  content->addWidget( logo, 0, Qt::AlignTop );
+  QLabel* description = new QLabel( &dialog );
+  description->setObjectName( QStringLiteral( "ShadowAboutDescription" ) );
+  description->setTextFormat( Qt::RichText );
+  description->setWordWrap( true );
+  description->setTextInteractionFlags( Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard );
+  description->setText( QString( "<b>%1</b> · 局域网通讯工具<br><br>%2<br>%3 %4 %5<br><br>维护者：%6<br>%7" )
                         .arg( Settings::instance().programName() )
                         .arg( Settings::instance().isDevelopmentVersion() ? tr( "Development version") : tr( "Version" ) )
                         .arg( Settings::instance().version( true, true, true ) )
@@ -1083,6 +1099,25 @@ void GuiMain::showAbout()
                         .arg( QStringLiteral( "shadowyli" ) )
                         .arg( QStringLiteral( "个人开源项目 · 版本与更新说明以 GitHub 仓库为准。" ) )
                       );
+  content->addWidget( description, 1 );
+  layout->addLayout( content );
+  QHBoxLayout* buttons = new QHBoxLayout;
+  QPushButton* license = new QPushButton( QStringLiteral( "许可与致谢" ), &dialog );
+  license->setObjectName( QStringLiteral( "ShadowAboutLicense" ) );
+  license->setAutoDefault( false );
+  connect( license, &QPushButton::clicked, this, &GuiMain::showLicense );
+  buttons->addWidget( license );
+  buttons->addStretch();
+  QPushButton* close = new QPushButton( QStringLiteral( "关闭" ), &dialog );
+  close->setObjectName( QStringLiteral( "ShadowAboutClose" ) );
+  close->setProperty( "role", "primary" );
+  close->setDefault( true );
+  connect( close, &QPushButton::clicked, &dialog, &QDialog::accept );
+  buttons->addWidget( close );
+  layout->addLayout( buttons );
+  dialog.adjustSize();
+  close->setFocus();
+  dialog.exec();
 }
 
 void GuiMain::showLicense()

@@ -88,6 +88,10 @@ enum HistoryRole
   VideoRole
 };
 
+const int HistoryThumbnailSize = 56;
+const int HistoryContentLeft = 49;
+const int HistoryContentTop = 28;
+
 class HistoryResults final : public QListWidget
 {
 public:
@@ -102,7 +106,7 @@ public:
     {
       const int width=viewport()->width();
       const int cell=width/2;
-      const int cellHeight=(cell-12)*3/4+12;
+      const int cellHeight=cell;
       int top=0;
       int column=0;
       for(int row=0;row<count();++row)
@@ -234,11 +238,29 @@ public:
       const int width = list ? list->viewport()->width() : 280;
       if( index.data( DateHeaderRole ).toBool() ) return QSize( width, 32 );
       const int cell = width / 2;
-      return QSize( cell, (cell - 12) * 3 / 4 + 12 );
+      return QSize( cell, cell );
     }
     if( !index.data( SenderRole ).isValid() )
       return QStyledItemDelegate::sizeHint( option, index );
-    return QSize( 260, index.data( ThumbnailRole ).value<QPixmap>().isNull() ? 94 : 128 );
+    const QListWidget* list = qobject_cast<QListWidget*>( parent() );
+    const int width = list ? list->viewport()->width() : 280;
+    const bool thumbnail = !index.data( ThumbnailRole ).value<QPixmap>().isNull();
+    const int contentWidth = qMax( 20, width - 8 - HistoryContentLeft - 10 -
+      (thumbnail ? HistoryThumbnailSize + 10 : 0) );
+    QTextLayout text( index.data( PreviewRole ).toString(), option.font );
+    QTextOption wrapping;
+    wrapping.setWrapMode( QTextOption::WrapAtWordBoundaryOrAnywhere );
+    text.setTextOption( wrapping );
+    text.beginLayout();
+    int textHeight = 0;
+    for( QTextLine line = text.createLine(); line.isValid(); line = text.createLine() )
+    {
+      line.setLineWidth( contentWidth );
+      textHeight += qCeil( line.height() );
+    }
+    text.endLayout();
+    const int contentHeight = qMax( textHeight, thumbnail ? HistoryThumbnailSize : 0 );
+    return QSize( width, qMax( 52, HistoryContentTop + contentHeight + 12 ) );
   }
 
   void paint( QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index ) const override
@@ -310,7 +332,7 @@ public:
       painter->drawRoundedRect( area, 8, 8 );
     }
     const QString sender = index.data( SenderRole ).toString();
-    const QRect avatar( area.left() + 8, area.top() + 12, 32, 32 );
+    const QRect avatar( area.left() + 8, area.top() + 8, 32, 32 );
     const QPixmap portrait = index.data( AvatarRole ).value<QPixmap>();
     if( portrait.isNull() )
     {
@@ -322,7 +344,7 @@ public:
     }
     else
       painter->drawPixmap( avatar, portrait );
-    const int contentLeft = avatar.right() + 10;
+    const int contentLeft = area.left() + HistoryContentLeft;
     const int contentWidth = qMax( 40, area.right() - contentLeft - 10 );
     QFont smallFont = option.font;
     smallFont.setPixelSize( 11 );
@@ -330,15 +352,15 @@ public:
     const QString time = index.data( TimeRole ).toString();
     const int timeWidth = QFontMetrics( smallFont ).horizontalAdvance( time );
     painter->setPen( QColor( "#8693A5" ) );
-    painter->drawText( QRect( area.right() - timeWidth - 10, area.top() + 10, timeWidth, 20 ), Qt::AlignRight | Qt::AlignVCenter, time );
+    painter->drawText( QRect( area.right() - timeWidth - 10, area.top() + 6, timeWidth, 18 ), Qt::AlignRight | Qt::AlignVCenter, time );
     painter->setPen( QColor( "#61728A" ) );
-    painter->drawText( QRect( contentLeft, area.top() + 10, qMax( 20, contentWidth - timeWidth - 8 ), 20 ),
+    painter->drawText( QRect( contentLeft, area.top() + 6, qMax( 20, contentWidth - timeWidth - 8 ), 18 ),
       Qt::AlignVCenter, QFontMetrics( smallFont ).elidedText( sender, Qt::ElideRight, qMax( 20, contentWidth - timeWidth - 8 ) ) );
-    QRect detail( contentLeft, area.top() + 36, contentWidth, area.height() - 46 );
+    QRect detail( contentLeft, area.top() + HistoryContentTop, contentWidth, area.height() - HistoryContentTop - 8 );
     const QPixmap thumbnail = index.data( ThumbnailRole ).value<QPixmap>();
     if( !thumbnail.isNull() )
     {
-      const QRect imageRect( contentLeft, detail.top(), 64, 64 );
+      const QRect imageRect( contentLeft, detail.top(), HistoryThumbnailSize, HistoryThumbnailSize );
       painter->save();
       QPainterPath clip;
       clip.addRoundedRect( imageRect, 6, 6 );
@@ -356,7 +378,7 @@ public:
     text.setTextOption( textOption );
     text.beginLayout();
     int lineTop = detail.top();
-    while( lineTop < detail.bottom() - QFontMetrics( option.font ).height() )
+    while( lineTop <= detail.bottom() )
     {
       QTextLine line = text.createLine();
       if( !line.isValid() ) break;
@@ -718,7 +740,8 @@ bool GuiSavedChat::eventFilter( QObject* watched, QEvent* event )
         !item->data( ThumbnailRole ).value<QPixmap>().isNull() )
     {
       const QRect area = mp_results->visualItemRect( item ).adjusted( 4, 2, -4, -2 );
-      const QRect thumbnail( area.left() + 49, area.top() + 36, 64, 64 );
+      const QRect thumbnail( area.left() + HistoryContentLeft, area.top() + HistoryContentTop,
+        HistoryThumbnailSize, HistoryThumbnailSize );
       if( thumbnail.contains( mouse->pos() ) )
       {
         const QUrl target( item->data( Qt::UserRole + 1 ).toString() );

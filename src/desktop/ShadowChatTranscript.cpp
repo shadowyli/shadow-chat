@@ -311,8 +311,9 @@ namespace
     if( entry.album.isEmpty() )
       entry.album = QRegularExpression( "<!--shadow-album:([{}A-Za-z0-9-]+)-->" ).match( html ).captured( 1 );
     QTextDocument document;
-    document.setDefaultStyleSheet( ".bee-quote { background-color:#EAF0F6; color:#647A94; }" );
-    document.setHtml( historyInputHtml( html ) );
+    document.setDefaultStyleSheet( "p { margin-top:0; margin-bottom:0; } .bee-quote { background-color:#EAF0F6; color:#647A94; }" );
+    QString input = historyInputHtml( html );
+    document.setHtml( input );
     entry.alreadyBubbled = containsBubble( document.rootFrame() );
     if( entry.alreadyBubbled )
     {
@@ -329,6 +330,13 @@ namespace
       entry.timestamp = heading.timestamp;
     if( heading.length > 0 )
     {
+      const QRegularExpressionMatch separator = QRegularExpression(
+        "<br\\s*/?>\\s*$", QRegularExpression::CaseInsensitiveOption ).match( input );
+      if( separator.hasMatch() )
+      {
+        input.remove( separator.capturedStart(), separator.capturedLength() );
+        document.setHtml( input );
+      }
       QTextCursor cursor( &document );
       cursor.setPosition( 0 );
       cursor.setPosition( heading.length, QTextCursor::KeepAnchor );
