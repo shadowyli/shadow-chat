@@ -152,7 +152,7 @@ QString ShadowStyle::applicationStyleSheet()
     "QToolButton#ShadowNavButton:hover { background: #F4F8FA; }"
     "QToolButton#ShadowNavButton:checked { background: #F8FBFC; color: #B83730; font-weight: 600; }"
     "QToolButton#ShadowNavButton:checked:hover { background: #FFFFFF; }"
-    "QToolButton#ShadowNavButton:focus { border: 1px solid #E93D34; }"
+    "QToolButton#ShadowNavButton:focus { border: 1px solid #B4C1CA; }"
     "QToolButton#ShadowNavButton::menu-indicator { image: none; }"
     "QWidget#ShadowListPanel { background: #F2F7FA; border-right: 1px solid #E3E8F0; }"
     "QLabel#ShadowEyebrow { color: #2563EB; font-size: 11px; font-weight: 600; }"

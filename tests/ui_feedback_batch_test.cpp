@@ -12,6 +12,7 @@
 #include "ShadowChatTranscript.h"
 #include "ShadowDialogChrome.h"
 #include "ShadowStyle.h"
+#include "ShadowRichText.h"
 #include "UserManager.h"
 #include <QAbstractTextDocumentLayout>
 #include <QTextTable>
@@ -33,6 +34,12 @@ static QList<QRectF> bodyAreas( ShadowChatTranscript* transcript )
   }
   return areas;
 }
+
+class FeedbackChat : public GuiChat
+{
+public:
+  using GuiChat::modernBubbleHtml;
+};
 
 int main( int argc, char** argv )
 {
@@ -79,7 +86,7 @@ int main( int argc, char** argv )
   live.addMessage( ChatMessage( ID_LOCAL_USER, Protocol::instance().chatMessage( live, "lo" ), ChatMessage::Chat, true ) );
   ChatManager::instance().setChat( live );
   QToolBar tools;
-  GuiChat chat;
+  FeedbackChat chat;
   chat.setupToolBar( &tools );
   chat.setModernMode( true );
   chat.resize( 1000, 650 );
@@ -124,6 +131,58 @@ int main( int argc, char** argv )
   CHECK( compactHeight );
   std::puts( "PASS synthetic legacy Chinese short messages reload compactly; original archive retained" );
   if( app.arguments().contains( "--height-only" ) ) return 0;
+  QStringList incrementalMessages = {
+    QStringLiteral( "1111" ), QStringLiteral( "弄到我这里" ),
+    QStringLiteral( "<span class=\"bee-quote\">loliv:<br>服务器数据</span><br>我的意思是" ),
+    QStringLiteral( "1111" ), QStringLiteral( "弄到我这里" )
+  };
+  QTextDocument richMessage;
+  richMessage.setHtml( QStringLiteral( "<u>1111</u>" ) );
+  incrementalMessages.append( richMessage.toHtml() );
+  richMessage.setHtml( QStringLiteral( "<u>弄到我这里</u>" ) );
+  incrementalMessages.append( richMessage.toHtml() );
+  incrementalMessages.append( QStringLiteral( "<p>&nbsp;</p><p>&nbsp;</p><p><u>1111</u></p>" ) );
+  for( int index = 0; index < incrementalMessages.size(); ++index )
+  {
+    QString plain = incrementalMessages[index];
+    QString rich;
+    if( index >= 5 )
+    {
+      QTextDocument authored;
+      authored.setHtml( plain );
+      plain = authored.toPlainText();
+      rich = ShadowRichText::serialize( &authored );
+      if( index == 7 ) plain = QStringLiteral( "1111" );
+    }
+    const ChatMessage appended( index % 2 ? ID_LOCAL_USER : peer.id(),
+      Protocol::instance().chatMessage( live, plain, rich ), ChatMessage::Chat, true );
+    live.addMessage( appended );
+    ChatManager::instance().setChat( live );
+    CHECK( chat.appendChatMessage( live, appended ) );
+    QTest::qWait( 40 );
+    const QList<QRectF> appendedAreas = bodyAreas( transcript );
+    CHECK( !appendedAreas.isEmpty() );
+    const qreal height = appendedAreas.last().height();
+    std::printf( "Incremental message %d body height=%.2f\n", index, height );
+    if( index != 2 ) CHECK( height < 70 );
+  }
+  std::puts( "PASS sequential incoming/outgoing short messages and quoted replies remain compact" );
+  const QString intentionalLines = QStringLiteral( "\n\n1111" );
+  const ChatMessage intentional( peer.id(), Protocol::instance().chatMessage( live, intentionalLines,
+    QStringLiteral( "<p>&nbsp;</p><p>&nbsp;</p><p><u>1111</u></p>" ) ), ChatMessage::Chat, true );
+  CHECK( ShadowRichText::messageText( intentional.message() ) == intentionalLines );
+  CHECK( intentional.message().contains( "<u>" ) );
+  const QString legacyRichBody = richMessage.toHtml();
+  const QString retainedBubble = chat.modernBubbleHtml( legacyRichBody, peer, false,
+    QDateTime::currentDateTime(), 160, "retained-rich-message" );
+  transcript->moveCursor( QTextCursor::End );
+  transcript->insertHtml( retainedBubble );
+  QTest::qWait( 40 );
+  const qreal retainedHeight = transcript->bubbleFrameRects().last().height();
+  std::printf( "Retained Qt rich paragraph painted body height=%.2f\n", retainedHeight );
+  CHECK( retainedHeight < 45 );
+  CHECK( transcript->document()->toPlainText().contains( QStringLiteral( "弄到我这里" ) ) );
+  if( app.arguments().contains( "--incremental-only" ) ) return 0;
   chat.hide();
 
   const QString imagePath = temporary.filePath( "wide.png" );
@@ -215,16 +274,39 @@ int main( int argc, char** argv )
   for( QToolButton* button : main.findChildren<QToolButton*>( "ShadowNavButton" ) )
     if( button->text() == QStringLiteral( "通讯录" ) && button->isChecked() ) contactsSelected = true;
   CHECK( contactsSelected );
+  QMenu* mainMenu = main.findChild<QMenu*>( "ShadowMainMenu" );
+  CHECK( mainMenu );
+  for( QAction* action : mainMenu->actions() )
+    CHECK( action->text() != QStringLiteral( "聊天存档" ) && action->text() != QStringLiteral( "文件传输" ) );
+  for( QToolButton* button : main.findChildren<QToolButton*>( "ShadowNavButton" ) )
+  {
+    CHECK( button->focusPolicy() == Qt::TabFocus );
+    QTest::mouseClick( button, Qt::LeftButton );
+    const QImage selected = button->grab().toImage();
+    const QColor edge = selected.pixelColor( 0, selected.height() / 2 );
+    CHECK( !(edge.red() > 180 && edge.green() < 100 && edge.blue() < 100) );
+  }
   bool aboutVerified = false;
   QTimer::singleShot( 100, &main, [&]() {
     QDialog* about = main.findChild<QDialog*>( "ShadowAboutDialog" );
     if( !about ) return;
     QLabel* description = about->findChild<QLabel*>( "ShadowAboutDescription" );
-    QPushButton* close = about->findChild<QPushButton*>( "ShadowAboutClose" );
+    QToolButton* close = about->findChild<QToolButton*>( "shadowDialogClose" );
+    QLabel* attribution = about->findChild<QLabel*>( "ShadowAboutAttribution" );
     aboutVerified = about->isVisible() && about->property( "shadowDialogChrome" ).toBool() &&
       about->windowFlags().testFlag( Qt::FramelessWindowHint ) && description && close &&
       description->text().contains( "shadowyli" ) && description->text().contains( settings.version( true, true, true ) ) &&
-      about->findChild<QPushButton*>( "ShadowAboutLicense" ) && close->isDefault();
+      attribution && attribution->text().contains( "Marco Mastroddi" ) &&
+      attribution->text().contains( "GPL" ) &&
+      !about->findChild<QPushButton*>( "ShadowAboutLicense" ) &&
+      !about->findChild<QPushButton*>( "ShadowAboutClose" ) &&
+      about->findChildren<QToolButton*>( "shadowDialogClose" ).size() == 1;
+    const QImage image = about->grab().toImage();
+    const qreal ratio = about->devicePixelRatioF();
+    for( const QPoint& corner : { QPoint( 15, 15 ), QPoint( about->width() - 16, 15 ),
+        QPoint( 15, about->height() - 16 ), QPoint( about->width() - 16, about->height() - 16 ) } )
+      aboutVerified = aboutVerified &&
+        image.pixelColor( qRound( corner.x() * ratio ), qRound( corner.y() * ratio ) ).alpha() < 160;
     if( !proof.isEmpty() ) about->grab().save( proof + "/shadow-about-dialog.png" );
     close->click();
   } );
@@ -238,6 +320,6 @@ int main( int argc, char** argv )
   CHECK( QMetaObject::invokeMethod( &main, "showAbout", Qt::DirectConnection ) );
   guard.stop();
   CHECK( aboutVerified );
-  std::puts( "PASS borderless welcome keeps navigation and styled about retains version, maintainer, license entry and default close" );
+  std::puts( "PASS borderless welcome keeps navigation; about retains attribution and has one close control without license popup" );
   return 0;
 }

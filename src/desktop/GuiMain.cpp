@@ -86,6 +86,7 @@
 #include <QScreen>
 #include <QPainterPath>
 #include "ShadowDialogStyle.h"
+#include "ShadowDialogChrome.h"
 #include "ShadowColorPanel.h"
 #include "ShadowPopup.h"
 #include "ShadowWorkspaceArchive.h"
@@ -1101,22 +1102,19 @@ void GuiMain::showAbout()
                       );
   content->addWidget( description, 1 );
   layout->addLayout( content );
-  QHBoxLayout* buttons = new QHBoxLayout;
-  QPushButton* license = new QPushButton( QStringLiteral( "许可与致谢" ), &dialog );
-  license->setObjectName( QStringLiteral( "ShadowAboutLicense" ) );
-  license->setAutoDefault( false );
-  connect( license, &QPushButton::clicked, this, &GuiMain::showLicense );
-  buttons->addWidget( license );
-  buttons->addStretch();
-  QPushButton* close = new QPushButton( QStringLiteral( "关闭" ), &dialog );
-  close->setObjectName( QStringLiteral( "ShadowAboutClose" ) );
-  close->setProperty( "role", "primary" );
-  close->setDefault( true );
-  connect( close, &QPushButton::clicked, &dialog, &QDialog::accept );
-  buttons->addWidget( close );
-  layout->addLayout( buttons );
+  QLabel* attribution = new QLabel( QStringLiteral(
+    "基于 BeeBEEP · Copyright © 2010–2021 Marco Mastroddi<br>"
+    "GNU GPL v3 或更新版本：可复制、修改及分发，无任何担保。<br>"
+    "完整许可证及第三方许可保留在安装目录。" ), &dialog );
+  attribution->setObjectName( QStringLiteral( "ShadowAboutAttribution" ) );
+  attribution->setProperty( "role", "hint" );
+  attribution->setWordWrap( true );
+  attribution->setTextInteractionFlags( Qt::TextSelectableByMouse );
+  layout->addWidget( attribution );
+  ShadowDialogChrome::decorate( &dialog );
   dialog.adjustSize();
-  close->setFocus();
+  if( QToolButton* close = dialog.findChild<QToolButton*>( QStringLiteral( "shadowDialogClose" ) ) )
+    close->setFocus();
   dialog.exec();
 }
 
@@ -1835,7 +1833,6 @@ void GuiMain::createMenus()
   mp_menuInfo->addAction( IconManager::instance().icon( "donate.png" ), tr( "Donate for %1" ).arg( Settings::instance().programName() ) + QString( "..." ), this, SLOT( openDonationPage() ) );
   mp_menuInfo->addSeparator();
   mp_menuInfo->addAction( mp_actAbout );
-  mp_menuInfo->addAction( IconManager::instance().icon( "license.png" ), tr( "Show %1's license..." ).arg( Settings::instance().programName() ), this, SLOT( showLicense() ) );
   act = mp_menuInfo->addAction( IconManager::instance().icon( "qt.png" ), tr( "Qt Library..." ), this, SLOT( showAboutQt() ) );
   act->setMenuRole( QAction::AboutQtRole );
   mp_menuInfo->addSeparator();
@@ -2019,6 +2016,7 @@ void GuiMain::createModernShell()
   mp_modernMessagesButton->setIconSize( QSize( 24, 24 ) );
   mp_modernMessagesButton->setToolButtonStyle( Qt::ToolButtonTextUnderIcon );
   mp_modernMessagesButton->setCheckable( true );
+  mp_modernMessagesButton->setFocusPolicy( Qt::TabFocus );
   mp_modernMessagesButton->setAccessibleName( QStringLiteral( "消息" ) );
   mp_modernMessagesButton->setToolTip( QStringLiteral( "消息 (Ctrl+1)" ) );
   connect( mp_modernMessagesButton, SIGNAL( clicked() ), this, SLOT( showModernMessages() ) );
@@ -2032,6 +2030,7 @@ void GuiMain::createModernShell()
   mp_modernContactsButton->setIconSize( QSize( 24, 24 ) );
   mp_modernContactsButton->setToolButtonStyle( Qt::ToolButtonTextUnderIcon );
   mp_modernContactsButton->setCheckable( true );
+  mp_modernContactsButton->setFocusPolicy( Qt::TabFocus );
   mp_modernContactsButton->setAccessibleName( QStringLiteral( "通讯录" ) );
   mp_modernContactsButton->setToolTip( QStringLiteral( "通讯录 (Ctrl+2)" ) );
   connect( mp_modernContactsButton, SIGNAL( clicked() ), this, SLOT( showModernContacts() ) );
@@ -2046,8 +2045,6 @@ void GuiMain::createModernShell()
   more_menu->addAction( ShadowStyle::actionIcon( QStringLiteral( "users-three" ) ), QStringLiteral( "新建群聊" ), this, SLOT( createGroupChat() ) );
   more_menu->addSeparator();
   more_menu->addAction( ShadowStyle::actionIcon( QStringLiteral( "shield-check" ) ), QStringLiteral( "连接与安全状态" ), this, SLOT( showModernActivities() ) );
-  more_menu->addAction( ShadowStyle::actionIcon( QStringLiteral( "archive" ) ), QStringLiteral( "聊天存档" ), this, SLOT( showModernSavedChats() ) );
-  more_menu->addAction( ShadowStyle::actionIcon( QStringLiteral( "paperclip" ) ), QStringLiteral( "文件传输" ), this, SLOT( showModernTransfers() ) );
   more_menu->addSeparator();
   QMenu* workspace_menu = more_menu->addMenu( ShadowStyle::actionIcon( QStringLiteral( "folder-open" ) ), QStringLiteral( "工作区与换机" ) );
   workspace_menu->addAction( QStringLiteral( "导出工作区…" ), this, SLOT( exportShadowWorkspace() ) );
@@ -6573,8 +6570,17 @@ void GuiMain::readAllMessagesInChat( VNumber chat_id )
   beeCore->readAllMessagesInChat( chat_id );
 }
 
-void GuiMain::saveSession( QSessionManager& )
+void GuiMain::saveSession( QSessionManager& manager )
 {
+  if( beeApp->property( "shadowInstallerExit" ).toBool() &&
+      (beeCore->hasFileTransferInProgress() ||
+       !Settings::instance().objectSettings()->isWritable() ||
+       (Settings::instance().chatAutoSave() && !MessageManager::instance().chatMessageCanBeSaved())) )
+  {
+    qWarning() << "Installer exit deferred: transfer active or local data not writable";
+    manager.cancel();
+    return;
+  }
   qDebug() << "Session manager ask to save and close session";
   forceShutdown();
 }

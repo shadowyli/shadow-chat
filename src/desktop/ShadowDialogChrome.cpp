@@ -134,6 +134,7 @@ public:
     dialog->setPalette( palette );
     dialog->setAutoFillBackground( false );
     dialog->setAttribute( Qt::WA_TranslucentBackground );
+    dialog->setAttribute( Qt::WA_OpaquePaintEvent, false );
     dialog->setStyleSheet( dialog->styleSheet() + QStringLiteral(
       "QDialog[shadowDialogChrome=true] { background: transparent; border: 0; }" ) );
     QLayout* bodyLayout = dialog->layout();
@@ -151,7 +152,7 @@ public:
     body->setObjectName( QStringLiteral( "shadowDialogBody" ) );
     body->setContentsMargins( dialog->contentsMargins() );
     body->setStyleSheet( QStringLiteral(
-      "QWidget#shadowDialogBody { background: #FFFFFF; border: 0; }" ) );
+      "QWidget#shadowDialogBody { background: transparent; border: 0; }" ) );
     body->setAttribute( Qt::WA_StyledBackground );
     body->setLayout( bodyLayout );
     dialog->setContentsMargins( 0, 0, 0, 0 );
@@ -161,7 +162,7 @@ public:
     m_header->setFixedHeight( chromeHeight );
     m_header->setAttribute( Qt::WA_StyledBackground );
     m_header->setStyleSheet( QStringLiteral(
-      "QWidget#shadowDialogHeader { background: #FFFFFF; border: 0;"
+      "QWidget#shadowDialogHeader { background: transparent; border: 0;"
       " border-bottom: 1px solid #E8EDF2; }" ) );
     QHBoxLayout* headerLayout = new QHBoxLayout( m_header );
     headerLayout->setContentsMargins( 16, chromeHeight == headerHeight ? 8 : 4, 8, chromeHeight == headerHeight ? 7 : 4 );
@@ -384,9 +385,7 @@ private:
       m_surface->clearMask();
       return;
     }
-    const QRegion mask = ShadowWindowShape::roundedMask( m_surface->size() );
-    if( m_surface->mask() != mask )
-      m_surface->setMask( mask );
+    m_surface->clearMask();
   }
 
   QPointer<QDialog> m_dialog;

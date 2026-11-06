@@ -526,6 +526,19 @@ namespace
     if( format != original )
       table->setFormat( format );
     normalizeCell( table->cellAt( 0, 0 ), BubblePadding, true );
+    for( QTextBlock block = table->document()->findBlock( table->firstPosition() );
+         block.isValid() && block.position() <= table->lastPosition(); block = block.next() )
+    {
+      const QTextBlockFormat originalBlock = block.blockFormat();
+      QTextBlockFormat blockFormat = originalBlock;
+      blockFormat.setTopMargin( 0.0 );
+      blockFormat.setBottomMargin( 0.0 );
+      if( blockFormat != originalBlock )
+      {
+        QTextCursor cursor( block );
+        cursor.setBlockFormat( blockFormat );
+      }
+    }
     QList<QTextFrame*> nested = table->childFrames();
     for( int index = 0; index < nested.size(); ++index )
     {
@@ -536,6 +549,7 @@ namespace
         continue;
       QTextTableFormat child_format = child->format();
       child_format.clearProperty( QTextFormat::FrameWidth );
+      child_format.clearProperty( QTextFormat::FrameHeight );
       child_format.clearColumnWidthConstraints();
       child_format.setPosition( QTextFrameFormat::InFlow );
       if( child_format != child->format() )
