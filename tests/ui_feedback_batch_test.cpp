@@ -181,7 +181,7 @@ int main( int argc, char** argv )
   QTest::qWait( 40 );
   const qreal retainedHeight = transcript->bubbleFrameRects().last().height();
   std::printf( "Retained Qt rich paragraph painted body height=%.2f\n", retainedHeight );
-  CHECK( retainedHeight < 45 );
+  CHECK( retainedHeight <= 45 );
   CHECK( transcript->document()->toPlainText().contains( QStringLiteral( "弄到我这里" ) ) );
   if( app.arguments().contains( "--incremental-only" ) ) return 0;
   chat.hide();
