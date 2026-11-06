@@ -33,6 +33,16 @@ def main() -> None:
     require(protocol, "!isShadowChatNetworkAddress( ur.networkAddress() )", "cache identity gate")
     require(broadcaster, "isShadowChatBroadcastMessage( m )", "broadcast rejection")
     require(broadcaster, "const QHostAddress primary_broadcast", "broadcast fallback")
+    routing_start = broadcaster.index("bool Broadcaster::isNetworkAddressForBroadcast(")
+    routing_end = broadcaster.index("bool Broadcaster::sortNetworkAddresses(", routing_start)
+    routing = broadcaster[routing_start:routing_end]
+    require(
+        routing,
+        "return !na.isHostPortValid() || na.hostPort() == Settings::instance().defaultBroadcastPort();",
+        "broadcast routing by discovery port",
+    )
+    if "hostAddress()" in routing:
+        raise AssertionError("broadcast routing must not infer broadcast intent from IP text")
     require(socket, "isShadowChatHelloMessage( m )", "HELLO rejection")
     require(core_chat, "isShadowChatUser( to_user )", "message delivery gate")
     require(network, "const QList<NetworkEntry> current_network_entries = availableNetworkEntries()", "live interface check")
